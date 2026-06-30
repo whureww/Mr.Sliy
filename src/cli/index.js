@@ -395,12 +395,12 @@ async function showMenu() {
       return chunk === '\x1b' || chunk === '\x1b\x1b';
     }
 
-    function isUpArrow(chunk) {
-      return chunk === '\x1b[A' || chunk === '\x1bOA';
+    function isUpArrow(chunk, key) {
+      return (chunk === '\x1b[A' || chunk === '\x1bOA') || (key && key.name === 'up');
     }
 
-    function isDownArrow(chunk) {
-      return chunk === '\x1b[B' || chunk === '\x1bOB';
+    function isDownArrow(chunk, key) {
+      return (chunk === '\x1b[B' || chunk === '\x1bOB') || (key && key.name === 'down');
     }
 
     function isTab(chunk) {
@@ -454,7 +454,7 @@ async function showMenu() {
         return;
       }
 
-      if (isUpArrow(chunk)) {
+      if (isUpArrow(chunk, key)) {
         const filtered = getFilteredCommands(menuState.input || '');
         if (filtered.length > 0) {
           menuState.selectedIndex = Math.max(0, menuState.selectedIndex - 1);
@@ -463,7 +463,7 @@ async function showMenu() {
         return;
       }
 
-      if (isDownArrow(chunk)) {
+      if (isDownArrow(chunk, key)) {
         const filtered = getFilteredCommands(menuState.input || '');
         if (filtered.length > 0) {
           menuState.selectedIndex = Math.min(filtered.length - 1, menuState.selectedIndex + 1);
