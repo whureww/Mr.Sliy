@@ -165,26 +165,29 @@ class ClaudeProvider extends LLMProvider {
   constructor(config) {
     super('claude', config);
     this.baseURL = config.baseURL || 'https://api.anthropic.com/v1';
-    this.apiKey = config.apiKey;
     this.model = config.model || 'claude-3-sonnet-20240229';
   }
 
-  isAvailable() {
-    return !!this.apiKey && this.apiKey.length > 0;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    return !!key && !!key.api_key;
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
       throw new Error('Claude API Key未配置');
     }
+
+    const apiKey = dbKey.api_key;
+    const url = (dbKey.api_url || this.baseURL) + '/messages';
 
     // 转换消息格式
     const systemMessage = messages.find(m => m.role === 'system')?.content || '';
     const userMessages = messages.filter(m => m.role !== 'system');
 
-    const url = `${this.baseURL}/messages`;
     const body = {
-      model: options.model || this.model,
+      model: options.model || dbKey.model_name || this.model,
       max_tokens: options.maxTokens || 2000,
       temperature: options.temperature ?? 0.7,
       system: systemMessage,
@@ -199,7 +202,7 @@ class ClaudeProvider extends LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': this.apiKey,
+          'x-api-key': apiKey,
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify(body)
@@ -244,9 +247,23 @@ class OllamaProvider extends LLMProvider {
     this.model = config.model || 'codellama';
   }
 
-  isAvailable() {
+  async isAvailable() {
     // Ollama不需要API Key，但需要本地服务运行
-    return true;
+    // 尝试连接本地服务验证可用性
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(`${this.baseURL}/api/tags`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      
+      clearTimeout(timeout);
+      return response.ok;
+    } catch (e) {
+      return false;
+    }
   }
 
   async chat(messages, options = {}) {
@@ -303,20 +320,24 @@ class GeminiProvider extends LLMProvider {
   constructor(config) {
     super('gemini', config);
     this.baseURL = config.baseURL || 'https://generativelanguage.googleapis.com/v1beta';
-    this.apiKey = config.apiKey;
     this.model = config.model || 'gemini-1.5-pro';
   }
 
-  isAvailable() {
-    return !!this.apiKey && this.apiKey.length > 0;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    return !!key && !!key.api_key;
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
       throw new Error('Gemini API Key未配置');
     }
 
-    const url = `${this.baseURL}/models/${options.model || this.model}:generateContent`;
+    const apiKey = dbKey.api_key;
+    const baseUrl = dbKey.api_url || this.baseURL;
+    const model = options.model || dbKey.model_name || this.model;
+    const url = `${baseUrl}/models/${model}:generateContent`;
     
     const contents = messages.map(m => ({
       role: m.role === 'assistant' ? 'model' : m.role,
@@ -333,7 +354,7 @@ class GeminiProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(`${url}?key=${this.apiKey}`, {
+      const response = await fetch(`${url}?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -375,22 +396,25 @@ class TongyiProvider extends LLMProvider {
   constructor(config) {
     super('tongyi', config);
     this.baseURL = config.baseURL || 'https://dashscope.aliyuncs.com/api/v1';
-    this.apiKey = config.apiKey;
     this.model = config.model || 'qwen-plus';
   }
 
-  isAvailable() {
-    return !!this.apiKey && this.apiKey.length > 0;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    return !!key && !!key.api_key;
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
       throw new Error('通义千问 API Key未配置');
     }
 
-    const url = `${this.baseURL}/services/aigc/text-generation/generation`;
+    const apiKey = dbKey.api_key;
+    const baseUrl = dbKey.api_url || this.baseURL;
+    const url = `${baseUrl}/services/aigc/text-generation/generation`;
     const body = {
-      model: options.model || this.model,
+      model: options.model || dbKey.model_name || this.model,
       input: {
         messages
       },
@@ -405,7 +429,7 @@ class TongyiProvider extends LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify(body)
       });
@@ -446,22 +470,25 @@ class DoubaoProvider extends LLMProvider {
   constructor(config) {
     super('doubao', config);
     this.baseURL = config.baseURL || 'https://api.doubao.com/v1';
-    this.apiKey = config.apiKey;
     this.model = config.model || 'Doubao-7B';
   }
 
-  isAvailable() {
-    return !!this.apiKey && this.apiKey.length > 0;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    return !!key && !!key.api_key;
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
       throw new Error('豆包 API Key未配置');
     }
 
-    const url = `${this.baseURL}/chat/completions`;
+    const apiKey = dbKey.api_key;
+    const baseUrl = dbKey.api_url || this.baseURL;
+    const url = `${baseUrl}/chat/completions`;
     const body = {
-      model: options.model || this.model,
+      model: options.model || dbKey.model_name || this.model,
       messages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens || 2000
@@ -472,7 +499,7 @@ class DoubaoProvider extends LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify(body)
       });
@@ -513,23 +540,31 @@ class WenxinProvider extends LLMProvider {
   constructor(config) {
     super('wenxin', config);
     this.baseURL = config.baseURL || 'https://aip.baidubce.com/rpc/2.0/ai_custom/v1/wenxinworkshop/chat';
-    this.apiKey = config.apiKey;
-    this.secretKey = config.secretKey;
     this.accessToken = null;
     this.tokenExpireTime = 0;
     this.model = config.model || 'ernie-3.5';
   }
 
-  isAvailable() {
-    return !!this.apiKey && !!this.secretKey;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    if (!key || !key.api_key) return false;
+    // 文心一言需要apiKey和secretKey，存储格式为JSON或分隔符
+    try {
+      const keyData = JSON.parse(key.api_key);
+      return !!keyData.apiKey && !!keyData.secretKey;
+    } catch (e) {
+      // 如果不是JSON，尝试分隔符格式 "apiKey|secretKey"
+      const parts = key.api_key.split('|');
+      return parts.length === 2 && parts[0] && parts[1];
+    }
   }
 
-  async getAccessToken() {
+  async getAccessToken(apiKey, secretKey) {
     if (this.accessToken && Date.now() < this.tokenExpireTime) {
       return this.accessToken;
     }
 
-    const url = `https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${this.apiKey}&client_secret=${this.secretKey}`;
+    const url = `https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`;
     const response = await fetch(url);
     const data = await response.json();
     
@@ -540,12 +575,30 @@ class WenxinProvider extends LLMProvider {
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
+      throw new Error('文心一言 API Key未配置');
+    }
+
+    let apiKey, secretKey;
+    try {
+      const keyData = JSON.parse(dbKey.api_key);
+      apiKey = keyData.apiKey;
+      secretKey = keyData.secretKey;
+    } catch (e) {
+      const parts = dbKey.api_key.split('|');
+      apiKey = parts[0];
+      secretKey = parts[1];
+    }
+
+    if (!apiKey || !secretKey) {
       throw new Error('文心一言 API Key或Secret Key未配置');
     }
 
-    const accessToken = await this.getAccessToken();
-    const url = `${this.baseURL}/${options.model || this.model}?access_token=${accessToken}`;
+    const accessToken = await this.getAccessToken(apiKey, secretKey);
+    const baseUrl = dbKey.api_url || this.baseURL;
+    const model = options.model || dbKey.model_name || this.model;
+    const url = `${baseUrl}/${model}?access_token=${accessToken}`;
 
     const body = {
       messages,
@@ -580,7 +633,7 @@ class WenxinProvider extends LLMProvider {
         content: parsed || content,
         rawContent: content,
         tokensUsed: data.usage?.total_tokens || 0,
-        model: options.model || this.model
+        model: model
       };
     } catch (error) {
       logger.error('文心一言调用失败:', error);
@@ -595,22 +648,26 @@ class WenxinProvider extends LLMProvider {
 class AzureOpenAIProvider extends LLMProvider {
   constructor(config) {
     super('azure', config);
-    this.endpoint = config.endpoint;
-    this.apiKey = config.apiKey;
-    this.deploymentName = config.deploymentName || 'gpt-4';
     this.apiVersion = config.apiVersion || '2024-02-01';
   }
 
-  isAvailable() {
-    return !!this.apiKey && !!this.endpoint;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    if (!key || !key.api_key) return false;
+    // Azure需要endpoint和apiKey，endpoint存储在api_url
+    return !!key.api_url && !!key.api_key;
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key || !dbKey.api_url) {
       throw new Error('Azure OpenAI配置不完整');
     }
 
-    const url = `${this.endpoint}/openai/deployments/${this.deploymentName}/chat/completions?api-version=${this.apiVersion}`;
+    const apiKey = dbKey.api_key;
+    const endpoint = dbKey.api_url;
+    const deploymentName = dbKey.model_name || 'gpt-4';
+    const url = `${endpoint}/openai/deployments/${deploymentName}/chat/completions?api-version=${this.apiVersion}`;
     const body = {
       messages,
       temperature: options.temperature ?? 0.7,
@@ -622,7 +679,7 @@ class AzureOpenAIProvider extends LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'api-key': this.apiKey
+          'api-key': apiKey
         },
         body: JSON.stringify(body)
       });
@@ -789,22 +846,25 @@ class MoonshotProvider extends LLMProvider {
   constructor(config) {
     super('moonshot', config);
     this.baseURL = config.baseURL || 'https://api.moonshot.cn/v1';
-    this.apiKey = config.apiKey;
     this.model = config.model || 'moonshot-v1-8k';
   }
 
-  isAvailable() {
-    return !!this.apiKey && this.apiKey.length > 0;
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    return !!key && !!key.api_key;
   }
 
   async chat(messages, options = {}) {
-    if (!this.isAvailable()) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
       throw new Error('Moonshot API Key未配置');
     }
 
-    const url = `${this.baseURL}/chat/completions`;
+    const apiKey = dbKey.api_key;
+    const baseUrl = dbKey.api_url || this.baseURL;
+    const url = `${baseUrl}/chat/completions`;
     const body = {
-      model: options.model || this.model,
+      model: options.model || dbKey.model_name || this.model,
       messages,
       temperature: options.temperature ?? 0.7,
       max_tokens: options.maxTokens || 2000,
@@ -817,7 +877,7 @@ class MoonshotProvider extends LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.apiKey}`
+          'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify(body)
       });

@@ -3,10 +3,11 @@
  * 基于检索增强生成技术的代码智能优化
  */
 
-const { config, isOnlineMode } = require('../../config');
+const { config } = require('../../config');
 const { logger } = require('../../utils/logger');
 const { generateUUID, retry } = require('../../utils/helpers');
 const { getDatabase } = require('../../utils/database');
+const { providerManager } = require('../llm/providers');
 
 // 代码片段向量存储（简化版）
 const codeVectorStore = new Map();
@@ -15,43 +16,72 @@ const codeVectorStore = new Map();
 const optimizationHistory = [];
 
 /**
- * AI API客户端（模拟实现）
- * 实际项目中应使用真实的AI API客户端
+ * AI API客户端
+ * 使用真实的LLM提供商进行代码优化
  */
 class AIClient {
   constructor() {
-    this.apiUrl = config.ai.apiUrl;
-    this.apiKey = config.ai.apiKey;
-    this.model = config.ai.model;
-    this.timeout = config.ai.timeout;
+    this.providerManager = providerManager;
   }
-  
+
   /**
-   * 调用AI API进行代码优化
+   * 调用真实AI API进行代码优化
    */
   async optimizeCode(codeSnippet, context) {
-    if (!isOnlineMode()) {
+    const provider = this.providerManager.getActiveProvider();
+    if (!provider) {
       return {
         success: false,
-        message: '离线模式，无法使用AI优化功能'
+        message: '未配置可用的LLM提供商，无法使用AI优化功能'
       };
     }
-    
+
     try {
-      // 这里是模拟的AI调用，实际项目需要调用真实的API
-      // 例如：OpenAI, Claude, 或本地部署的LLM
-      
       const prompt = this.buildOptimizationPrompt(codeSnippet, context);
-      
-      // 模拟AI响应（实际项目中应调用真实API）
-      const mockResponse = await this.mockAIResponse(prompt);
-      
+      const messages = [
+        { role: 'system', content: '你是一个代码优化专家，擅长代码重构、性能优化和最佳实践建议。请严格按照JSON格式返回结果。' },
+        { role: 'user', content: prompt }
+      ];
+
+      const result = await provider.chat(messages, {
+        temperature: 0.3,
+        maxTokens: 2000
+      });
+
+      // 解析AI返回的结果
+      let optimizedCode = '';
+      let explanation = '';
+      let suggestions = [];
+
+      if (typeof result.content === 'object' && result.content !== null) {
+        // AI直接返回了JSON对象
+        optimizedCode = result.content.optimizedCode || '';
+        explanation = result.content.explanation || '';
+        suggestions = result.content.suggestions || [];
+      } else if (typeof result.rawContent === 'string') {
+        // 从文本中解析JSON
+        try {
+          const jsonMatch = result.rawContent.match(/```json\s*([\s\S]*?)\s*```/) || result.rawContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+            optimizedCode = parsed.optimizedCode || '';
+            explanation = parsed.explanation || '';
+            suggestions = parsed.suggestions || [];
+          } else {
+            // 无法解析JSON，使用原始文本作为说明
+            explanation = result.rawContent;
+          }
+        } catch (parseError) {
+          explanation = result.rawContent;
+        }
+      }
+
       return {
         success: true,
-        optimizedCode: mockResponse.optimizedCode,
-        explanation: mockResponse.explanation,
-        suggestions: mockResponse.suggestions,
-        tokensUsed: mockResponse.tokensUsed
+        optimizedCode,
+        explanation,
+        suggestions,
+        tokensUsed: result.tokensUsed || 0
       };
     } catch (error) {
       logger.error('AI优化调用失败:', error);
@@ -61,55 +91,33 @@ class AIClient {
       };
     }
   }
-  
+
   /**
    * 构建优化提示词
    */
   buildOptimizationPrompt(codeSnippet, context) {
-    return `
-你是一个代码优化专家。请分析以下代码片段并提供优化建议。
+    return `请分析以下代码片段并提供优化建议。
 
-代码语言: ${context.language}
-代码类型: ${context.issueType}
-问题描述: ${context.message}
+代码语言: ${context.language || '未知'}
+代码类型: ${context.issueType || 'general'}
+问题描述: ${context.message || '一般性优化'}
 
 原始代码:
-\`\`\`${context.language}
+\`\`\`${context.language || ''}
 ${codeSnippet}
 \`\`\`
 
 请提供以下内容：
-1. 优化后的代码
-2. 优化说明（为什么这样优化）
-3. 最佳实践建议
+1. 优化后的代码（完整可运行的代码）
+2. 优化说明（为什么这样优化，解决了什么问题）
+3. 最佳实践建议（通用的编码建议）
 
 请以JSON格式返回：
 {
-  "optimizedCode": "...",
-  "explanation": "...",
-  "suggestions": ["...", "..."]
-}
-`;
-  }
-  
-  /**
-   * 模拟AI响应（用于演示）
-   */
-  async mockAIResponse(prompt) {
-    // 模拟API延迟
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    // 返回模拟的优化结果
-    return {
-      optimizedCode: '// 优化后的代码\nconst optimized = true;',
-      explanation: '这是一个模拟的优化建议，实际项目中应调用真实的AI API',
-      suggestions: [
-        '建议使用更清晰的变量名',
-        '考虑添加适当的注释',
-        '遵循代码规范和最佳实践'
-      ],
-      tokensUsed: 100
-    };
+  "optimizedCode": "优化后的完整代码",
+  "explanation": "优化说明",
+  "suggestions": ["建议1", "建议2"]
+}`;
   }
 }
 

@@ -10,6 +10,9 @@ const { logger } = require('../utils/logger');
 const { getDatabase } = require('../utils/database');
 const { generateUUID, getFileLanguage } = require('../utils/helpers');
 const { skillManager } = require('../skills');
+const { selfUpdateManager } = require('../services/bootstrap/selfUpdateManager');
+const { selfRepairManager } = require('../services/bootstrap/selfRepairManager');
+const { rollbackManager } = require('../services/bootstrap/rollback');
 
 /**
  * Agent状态
@@ -196,6 +199,202 @@ class CodeOptimizerAgent {
             }
           },
           required: ['filePath', 'optimizedCode']
+        }
+      },
+      self_update: {
+        name: 'self_update',
+        description: '执行智能体自更新，支持代码、配置、知识库等更新类型',
+        parameters: {
+          type: 'object',
+          properties: {
+            updateType: {
+              type: 'string',
+              description: '更新类型: code, config, knowledge, dependency'
+            },
+            content: {
+              type: 'object',
+              description: '更新内容'
+            },
+            description: {
+              type: 'string',
+              description: '更新描述'
+            },
+            autoConfirm: {
+              type: 'boolean',
+              description: '是否自动确认，默认false'
+            }
+          },
+          required: ['updateType', 'content']
+        }
+      },
+      update_from_ai: {
+        name: 'update_from_ai',
+        description: '通过AI建议执行智能体自更新，将自然语言想法转换为具体更新',
+        parameters: {
+          type: 'object',
+          properties: {
+            suggestion: {
+              type: 'string',
+              description: '用户的更新建议或想法'
+            },
+            autoConfirm: {
+              type: 'boolean',
+              description: '是否自动确认，默认false'
+            }
+          },
+          required: ['suggestion']
+        }
+      },
+      list_updates: {
+        name: 'list_updates',
+        description: '获取更新历史记录',
+        parameters: {
+          type: 'object',
+          properties: {
+            status: {
+              type: 'string',
+              description: '按状态过滤: pending, applied, failed, rolled_back'
+            },
+            limit: {
+              type: 'number',
+              description: '返回数量限制，默认20'
+            }
+          }
+        }
+      },
+      list_bootstrap_history: {
+        name: 'list_bootstrap_history',
+        description: '获取更新和修复的合并历史记录',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: {
+              type: 'string',
+              description: '类型过滤: update, repair, 为空则显示全部'
+            },
+            status: {
+              type: 'string',
+              description: '按状态过滤: pending, applied, failed, rolled_back, success'
+            },
+            limit: {
+              type: 'number',
+              description: '返回数量限制，默认20'
+            }
+          }
+        }
+      },
+      rollback_update: {
+        name: 'rollback_update',
+        description: '回滚指定的更新',
+        parameters: {
+          type: 'object',
+          properties: {
+            updateId: {
+              type: 'string',
+              description: '要回滚的更新ID'
+            }
+          },
+          required: ['updateId']
+        }
+      },
+      self_repair: {
+        name: 'self_repair',
+        description: '执行智能体自修复，自动检测并修复运行时错误',
+        parameters: {
+          type: 'object',
+          properties: {
+            errorType: {
+              type: 'string',
+              description: '错误类型: database, network, file_system, dependency, configuration, runtime'
+            },
+            errorMessage: {
+              type: 'string',
+              description: '错误信息'
+            },
+            autoConfirm: {
+              type: 'boolean',
+              description: '是否自动确认，默认false'
+            }
+          },
+          required: ['errorType', 'errorMessage']
+        }
+      },
+      repair_from_ai: {
+        name: 'repair_from_ai',
+        description: '通过AI分析并修复错误',
+        parameters: {
+          type: 'object',
+          properties: {
+            errorMessage: {
+              type: 'string',
+              description: '错误信息'
+            },
+            errorStack: {
+              type: 'string',
+              description: '错误堆栈'
+            },
+            autoConfirm: {
+              type: 'boolean',
+              description: '是否自动确认，默认false'
+            }
+          },
+          required: ['errorMessage']
+        }
+      },
+      list_repairs: {
+        name: 'list_repairs',
+        description: '获取修复历史记录',
+        parameters: {
+          type: 'object',
+          properties: {
+            errorType: {
+              type: 'string',
+              description: '按错误类型过滤'
+            },
+            status: {
+              type: 'string',
+              description: '按状态过滤: pending, success, failed, rolled_back'
+            },
+            limit: {
+              type: 'number',
+              description: '返回数量限制，默认20'
+            }
+          }
+        }
+      },
+      create_backup: {
+        name: 'create_backup',
+        description: '创建系统备份',
+        parameters: {
+          type: 'object',
+          properties: {
+            backupType: {
+              type: 'string',
+              description: '备份类型: update, repair, database, code, config, system'
+            },
+            description: {
+              type: 'string',
+              description: '备份描述'
+            }
+          },
+          required: ['backupType']
+        }
+      },
+      list_backups: {
+        name: 'list_backups',
+        description: '获取备份列表',
+        parameters: {
+          type: 'object',
+          properties: {
+            backupType: {
+              type: 'string',
+              description: '按备份类型过滤'
+            },
+            limit: {
+              type: 'number',
+              description: '返回数量限制，默认20'
+            }
+          }
         }
       }
     };
@@ -404,6 +603,131 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
             backupCreated: createBackup,
             backupPath: createBackup ? resolvedPath + '.bak' : null
           };
+        }
+        
+        case 'self_update': {
+          const updateType = p.updateType;
+          const content = p.content;
+          const autoConfirm = p.autoConfirm || false;
+          
+          if (!updateType) {
+            return { success: false, message: '更新类型不能为空' };
+          }
+          if (!content) {
+            return { success: false, message: '更新内容不能为空' };
+          }
+          
+          const createResult = await selfUpdateManager.createUpdate(updateType, content, {
+            description: p.description
+          });
+          
+          if (!createResult.success) {
+            return createResult;
+          }
+          
+          return await selfUpdateManager.executeUpdate(createResult.updateId, { autoConfirm });
+        }
+        
+        case 'update_from_ai': {
+          const suggestion = p.suggestion;
+          const autoConfirm = p.autoConfirm || false;
+          
+          if (!suggestion) {
+            return { success: false, message: '更新建议不能为空' };
+          }
+          
+          return await selfUpdateManager.updateFromAISuggestion(suggestion, { autoConfirm });
+        }
+        
+        case 'list_updates': {
+          const updates = await selfUpdateManager.listUpdates(p.status, p.limit || 20);
+          return { success: true, updates };
+        }
+        
+        case 'list_bootstrap_history': {
+          const [updates, repairs] = await Promise.all([
+            selfUpdateManager.listUpdates(p.status, p.limit || 20),
+            selfRepairManager.listRepairs(null, p.status, p.limit || 20)
+          ]);
+          
+          let allRecords = [...updates, ...repairs];
+          
+          if (p.type) {
+            allRecords = allRecords.filter(r => r.type === p.type);
+          }
+          
+          allRecords.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+          
+          return { success: true, records: allRecords.slice(0, p.limit || 20) };
+        }
+        
+        case 'rollback_update': {
+          const updateId = p.updateId;
+          
+          if (!updateId) {
+            return { success: false, message: '更新ID不能为空' };
+          }
+          
+          return await rollbackManager.rollbackUpdate(updateId);
+        }
+        
+        case 'self_repair': {
+          const errorType = p.errorType;
+          const errorMessage = p.errorMessage;
+          const autoConfirm = p.autoConfirm || false;
+          
+          if (!errorType) {
+            return { success: false, message: '错误类型不能为空' };
+          }
+          if (!errorMessage) {
+            return { success: false, message: '错误信息不能为空' };
+          }
+          
+          const error = new Error(errorMessage);
+          error.code = errorType.toUpperCase();
+          
+          return await selfRepairManager.detectAndRepair(error, { autoConfirm });
+        }
+        
+        case 'repair_from_ai': {
+          const errorMessage = p.errorMessage;
+          const errorStack = p.errorStack || '';
+          const autoConfirm = p.autoConfirm || false;
+          
+          if (!errorMessage) {
+            return { success: false, message: '错误信息不能为空' };
+          }
+          
+          const error = new Error(errorMessage);
+          error.stack = errorStack;
+          
+          return await selfRepairManager.repairFromAI(error, { autoConfirm });
+        }
+        
+        case 'list_repairs': {
+          const repairs = await selfRepairManager.listRepairs(p.errorType, p.status, p.limit || 20);
+          return { success: true, repairs };
+        }
+        
+        case 'create_backup': {
+          const backupType = p.backupType;
+          
+          if (!backupType) {
+            return { success: false, message: '备份类型不能为空' };
+          }
+          
+          if (backupType === 'system') {
+            return await rollbackManager.createFullSystemBackup();
+          }
+          
+          return await rollbackManager.createBackup(backupType, process.cwd(), {
+            description: p.description
+          });
+        }
+        
+        case 'list_backups': {
+          const backups = await rollbackManager.listBackups(p.backupType, p.limit || 20);
+          return { success: true, backups };
         }
         
         default:
@@ -1102,8 +1426,55 @@ ${toolsList}
 // 单例实例
 const agent = new CodeOptimizerAgent();
 
+async function autoRepairHandler(error) {
+  const errorType = selfRepairManager.classifyError(error);
+  
+  if (errorType === 'runtime') {
+    const isCodeIssue = error.message.includes('未使用') || 
+                       error.message.includes('缺少注释') || 
+                       error.message.includes('魔法数字') || 
+                       error.message.includes('深度嵌套') ||
+                       error.message.includes('函数过长') ||
+                       error.message.includes('重复代码');
+    if (isCodeIssue) {
+      logger.debug('代码分析问题，不触发自动修复:', error.message);
+      return;
+    }
+  }
+
+  logger.warn(`检测到系统错误 [${errorType}]: ${error.message}`);
+  
+  try {
+    const repairResult = await selfRepairManager.detectAndRepair(error, { 
+      autoConfirm: true,
+      skipSandbox: true
+    });
+    
+    if (repairResult.success) {
+      logger.info(`自动修复成功: ${repairResult.message}`);
+    } else {
+      logger.error(`自动修复失败: ${repairResult.error}`);
+    }
+  } catch (repairError) {
+    logger.error(`自动修复过程出错: ${repairError.message}`);
+  }
+}
+
+process.on('uncaughtException', async (error) => {
+  logger.error('未捕获异常:', error);
+  await autoRepairHandler(error);
+});
+
+process.on('unhandledRejection', async (reason, promise) => {
+  logger.error('未处理的Promise拒绝:', reason);
+  if (reason instanceof Error) {
+    await autoRepairHandler(reason);
+  }
+});
+
 module.exports = {
   CodeOptimizerAgent,
   agent,
-  AgentState
+  AgentState,
+  autoRepairHandler
 };

@@ -48,6 +48,8 @@ const MENU_ITEMS = [
   { key: 'optimize', command: '/optimize', label: '/optimize', desc: '交互式代码优化', shortcut: 'o', keywords: 'optimize code improvement optimization 优化' },
   { key: 'provider', command: '/provider', label: '/provider', desc: '大模型提供商管理', shortcut: 'p', keywords: 'provider llm model api 提供商 模型' },
   { key: 'knowledge', command: '/knowledge', label: '/knowledge', desc: '知识库管理', shortcut: 'k', keywords: 'knowledge kb database rag 知识库' },
+  { key: 'update', command: '/update', label: '/update', desc: '自更新管理', shortcut: 'u', keywords: 'update self-update upgrade 更新 升级' },
+  { key: 'repair', command: '/repair', label: '/repair', desc: '自修复管理', shortcut: 'r', keywords: 'repair self-repair fix 修复' },
   { key: 'mode', command: '/mode', label: '/mode', desc: '切换工作模式', shortcut: 'm', keywords: 'mode online offline auto 模式 离线 在线' },
   { key: 'status', command: '/status', label: '/status', desc: '查看系统状态', shortcut: 'i', keywords: 'status info state stat 状态 信息' },
   { key: 'help', command: '/help', label: '/help', desc: '帮助文档', shortcut: 'h', keywords: 'help manual usage guide 帮助 说明' },
@@ -1858,6 +1860,593 @@ async function showHelp() {
   await waitEnter();
 }
 
+async function updateMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' 🔄 自更新管理', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) AI智能更新      (ai)', 'white'));
+    console.log(c('    2) 创建更新        (create)', 'white'));
+    console.log(c('    3) 执行更新        (execute)', 'white'));
+    console.log(c('    4) 查看更新记录    (history)', 'white'));
+    console.log(c('    5) 回滚更新        (rollback)', 'white'));
+    console.log(c('    6) 创建备份        (backup)', 'white'));
+    console.log(c('    7) 查看备份        (backups)', 'white'));
+    console.log(c('    8) 合并历史记录    (all)', 'white'));
+    console.log(c('    0) 返回主菜单      (back)', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit' || choice === '0' || choice.toLowerCase() === 'back') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+      case 'ai':
+        await aiUpdate();
+        break;
+      case '2':
+      case 'create':
+        await createUpdate();
+        break;
+      case '3':
+      case 'execute':
+        await executeUpdate();
+        break;
+      case '4':
+      case 'history':
+        await listUpdates();
+        break;
+      case '5':
+      case 'rollback':
+        await rollbackUpdate();
+        break;
+      case '6':
+      case 'backup':
+        await createBackup();
+        break;
+      case '7':
+      case 'backups':
+        await listBackups();
+        break;
+      case '8':
+      case 'all':
+        await listBootstrapHistory();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
+  }
+}
+
+async function aiUpdate() {
+  const suggestion = await ask('  请输入您的更新想法或需求: ');
+  
+  if (suggestion === '__CANCEL__') return;
+  if (suggestion.toLowerCase() === 'q' || suggestion.toLowerCase() === 'quit') return;
+  if (!suggestion) {
+    console.log(c('  请输入更新想法', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  console.log();
+  console.log(c('  🤖 AI正在分析您的需求...', 'cyan'));
+  
+  try {
+    const result = await agent.executeTool('update_from_ai', {
+      suggestion,
+      autoConfirm: false
+    });
+    
+    if (result.success) {
+      console.log(c('  ✓ 更新成功！', 'green'));
+      console.log(c('    更新ID: ' + result.updateId, 'white'));
+      console.log(c('    更新类型: ' + result.updateType, 'white'));
+    } else {
+      console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 更新失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function createUpdate() {
+  const type = await ask('  更新类型 (code/config/knowledge/dependency): ');
+  
+  if (type === '__CANCEL__') return;
+  if (type.toLowerCase() === 'q' || type.toLowerCase() === 'quit') return;
+  if (!type) {
+    console.log(c('  请输入更新类型', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const content = await ask('  更新内容 (JSON格式): ');
+  
+  if (content === '__CANCEL__') return;
+  if (content.toLowerCase() === 'q' || content.toLowerCase() === 'quit') return;
+  if (!content) {
+    console.log(c('  请输入更新内容', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  let contentObj;
+  try {
+    contentObj = JSON.parse(content);
+  } catch {
+    console.log(c('  ✗ JSON格式错误', 'red'));
+    await waitEnter();
+    return;
+  }
+  
+  try {
+    const result = await agent.executeTool('self_update', {
+      updateType: type,
+      content: contentObj,
+      autoConfirm: false
+    });
+    
+    if (result.success) {
+      console.log(c('  ✓ 更新已创建并执行！', 'green'));
+      console.log(c('    更新ID: ' + result.updateId, 'white'));
+    } else {
+      console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 更新失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function executeUpdate() {
+  const updateId = await ask('  请输入更新ID: ');
+  
+  if (updateId === '__CANCEL__') return;
+  if (updateId.toLowerCase() === 'q' || updateId.toLowerCase() === 'quit') return;
+  if (!updateId) {
+    console.log(c('  请输入更新ID', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  try {
+    const result = await agent.executeTool('self_update', {
+      updateId,
+      autoConfirm: false
+    });
+    
+    if (result.success) {
+      console.log(c('  ✓ 更新执行成功！', 'green'));
+    } else {
+      console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 执行失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function listUpdates() {
+  const status = await ask('  状态过滤 (可选，直接回车显示全部): ');
+  
+  if (status === '__CANCEL__') return;
+  if (status.toLowerCase() === 'q' || status.toLowerCase() === 'quit') return;
+  
+  try {
+    const result = await agent.executeTool('list_updates', {
+      status: status || null,
+      limit: 20
+    });
+    
+    if (result.success && result.updates) {
+      console.log();
+      console.log(c('  📋 更新记录', 'cyan'));
+      console.log(c('─'.repeat(70), 'dim'));
+      
+      if (result.updates.length === 0) {
+        console.log(c('  暂无更新记录', 'yellow'));
+      } else {
+        result.updates.forEach((update, i) => {
+          const statusColor = update.status === 'applied' ? 'green' : 
+                             update.status === 'failed' ? 'red' : 
+                             update.status === 'rolled_back' ? 'yellow' : 'blue';
+          console.log(c('  ' + (i + 1) + '. [' + update.status + '] ' + update.updateType, statusColor));
+          console.log(c('     ID: ' + update.id.substring(0, 8) + '...', 'dim'));
+          console.log(c('     版本: ' + update.currentVersion + ' -> ' + update.targetVersion, 'white'));
+          console.log(c('     来源: ' + update.updateSource, 'dim'));
+          console.log(c('     创建时间: ' + new Date(update.createdAt).toLocaleString(), 'dim'));
+          if (update.errorMessage) {
+            console.log(c('     错误: ' + update.errorMessage, 'red'));
+          }
+          console.log();
+        });
+      }
+    }
+  } catch (error) {
+    console.log(c('  ✗ 查询失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function rollbackUpdate() {
+  const updateId = await ask('  请输入要回滚的更新ID: ');
+  
+  if (updateId === '__CANCEL__') return;
+  if (updateId.toLowerCase() === 'q' || updateId.toLowerCase() === 'quit') return;
+  if (!updateId) {
+    console.log(c('  请输入更新ID', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  try {
+    const result = await agent.executeTool('rollback_update', { updateId });
+    
+    if (result.success) {
+      console.log(c('  ✓ 回滚成功！', 'green'));
+    } else {
+      console.log(c('  ✗ 回滚失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 回滚失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function createBackup() {
+  const type = await ask('  备份类型 (system/update/repair/database): ');
+  
+  if (type === '__CANCEL__') return;
+  if (type.toLowerCase() === 'q' || type.toLowerCase() === 'quit') return;
+  if (!type) {
+    console.log(c('  请输入备份类型', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  console.log(c('  正在创建备份...', 'cyan'));
+  
+  try {
+    const result = await agent.executeTool('create_backup', { backupType: type });
+    
+    if (result.success) {
+      console.log(c('  ✓ 备份成功！', 'green'));
+      console.log(c('    备份ID: ' + result.backupId, 'white'));
+      console.log(c('    备份类型: ' + result.backupType, 'white'));
+      if (result.size) {
+        console.log(c('    大小: ' + (result.size / 1024 / 1024).toFixed(2) + ' MB', 'dim'));
+      }
+    } else {
+      console.log(c('  ✗ 备份失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 备份失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function listBackups() {
+  const type = await ask('  备份类型过滤 (可选，直接回车显示全部): ');
+  
+  if (type === '__CANCEL__') return;
+  if (type.toLowerCase() === 'q' || type.toLowerCase() === 'quit') return;
+  
+  try {
+    const result = await agent.executeTool('list_backups', {
+      backupType: type || null,
+      limit: 20
+    });
+    
+    if (result.success && result.backups) {
+      console.log();
+      console.log(c('  💾 备份列表', 'cyan'));
+      console.log(c('─'.repeat(70), 'dim'));
+      
+      if (result.backups.length === 0) {
+        console.log(c('  暂无备份记录', 'yellow'));
+      } else {
+        result.backups.forEach((backup, i) => {
+          console.log(c('  ' + (i + 1) + '. [' + backup.backupType + ']', 'white'));
+          console.log(c('     ID: ' + backup.id.substring(0, 8) + '...', 'dim'));
+          console.log(c('     状态: ' + backup.status, backup.status === 'applied' ? 'green' : 'yellow'));
+          console.log(c('     时间: ' + new Date(backup.timestamp).toLocaleString(), 'dim'));
+          console.log();
+        });
+      }
+    }
+  } catch (error) {
+    console.log(c('  ✗ 查询失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function listBootstrapHistory() {
+  const typeFilter = await ask('  类型过滤 (update/repair，直接回车显示全部): ');
+  const statusFilter = await ask('  状态过滤 (可选，直接回车显示全部): ');
+  
+  if (typeFilter === '__CANCEL__') return;
+  if (typeFilter.toLowerCase() === 'q' || typeFilter.toLowerCase() === 'quit') return;
+  
+  try {
+    const result = await agent.executeTool('list_bootstrap_history', {
+      type: typeFilter || null,
+      status: statusFilter || null,
+      limit: 20
+    });
+    
+    if (result.success && result.records) {
+      console.log();
+      console.log(c('  📋 更新与修复合并历史记录', 'cyan'));
+      console.log(c('─'.repeat(70), 'dim'));
+      
+      if (result.records.length === 0) {
+        console.log(c('  暂无记录', 'yellow'));
+      } else {
+        result.records.forEach((record, i) => {
+          const typeLabel = record.type === 'update' ? '🔄 更新' : '🔧 修复';
+          const typeColor = record.type === 'update' ? 'blue' : 'magenta';
+          
+          let statusColor;
+          switch (record.status) {
+            case 'success':
+            case 'applied':
+              statusColor = 'green';
+              break;
+            case 'failed':
+            case 'error':
+              statusColor = 'red';
+              break;
+            case 'rolled_back':
+              statusColor = 'yellow';
+              break;
+            default:
+              statusColor = 'gray';
+          }
+          
+          console.log(c('  ' + (i + 1) + '. ' + typeLabel + ' [' + record.status + ']', typeColor));
+          console.log(c('     ID: ' + record.id.substring(0, 8) + '...', 'dim'));
+          
+          if (record.type === 'update') {
+            console.log(c('     类型: ' + record.updateType, 'white'));
+            console.log(c('     版本: ' + record.currentVersion + ' -> ' + record.targetVersion, 'white'));
+            console.log(c('     来源: ' + record.updateSource, 'dim'));
+          } else {
+            console.log(c('     错误类型: ' + record.errorType, 'white'));
+            console.log(c('     组件: ' + record.affectedComponent, 'dim'));
+          }
+          
+          console.log(c('     时间: ' + new Date(record.createdAt).toLocaleString(), 'dim'));
+          
+          if (record.errorMessage) {
+            console.log(c('     错误: ' + record.errorMessage, 'red'));
+          }
+          
+          if (record.rollbackAt) {
+            console.log(c('     回滚时间: ' + new Date(record.rollbackAt).toLocaleString(), 'yellow'));
+          }
+          
+          console.log();
+        });
+      }
+    }
+  } catch (error) {
+    console.log(c('  ✗ 查询失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function repairMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' 🔧 自修复管理', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) AI智能修复      (ai)', 'white'));
+    console.log(c('    2) 执行自修复      (repair)', 'white'));
+    console.log(c('    3) 查看修复记录    (history)', 'white'));
+    console.log(c('    4) 回滚修复        (rollback)', 'white'));
+    console.log(c('    0) 返回主菜单      (back)', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit' || choice === '0' || choice.toLowerCase() === 'back') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+      case 'ai':
+        await aiRepair();
+        break;
+      case '2':
+      case 'repair':
+        await executeSelfRepair();
+        break;
+      case '3':
+      case 'history':
+        await listRepairs();
+        break;
+      case '4':
+      case 'rollback':
+        await rollbackRepair();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
+  }
+}
+
+async function aiRepair() {
+  const errorMessage = await ask('  请输入错误信息: ');
+  
+  if (errorMessage === '__CANCEL__') return;
+  if (errorMessage.toLowerCase() === 'q' || errorMessage.toLowerCase() === 'quit') return;
+  if (!errorMessage) {
+    console.log(c('  请输入错误信息', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  console.log();
+  console.log(c('  🤖 AI正在分析错误并尝试修复...', 'cyan'));
+  
+  try {
+    const result = await agent.executeTool('repair_from_ai', {
+      errorMessage,
+      autoConfirm: false
+    });
+    
+    if (result.success) {
+      console.log(c('  ✓ 修复成功！', 'green'));
+      console.log(c('    策略: ' + result.strategy, 'white'));
+      console.log(c('    操作数: ' + result.actions, 'white'));
+    } else {
+      console.log(c('  ✗ 修复失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 修复失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function executeSelfRepair() {
+  const errorType = await ask('  错误类型 (database/network/file_system/dependency/configuration/runtime): ');
+  
+  if (errorType === '__CANCEL__') return;
+  if (errorType.toLowerCase() === 'q' || errorType.toLowerCase() === 'quit') return;
+  if (!errorType) {
+    console.log(c('  请输入错误类型', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const errorMessage = await ask('  错误信息: ');
+  
+  if (errorMessage === '__CANCEL__') return;
+  if (errorMessage.toLowerCase() === 'q' || errorMessage.toLowerCase() === 'quit') return;
+  if (!errorMessage) {
+    console.log(c('  请输入错误信息', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  console.log(c('  正在尝试自修复...', 'cyan'));
+  
+  try {
+    const result = await agent.executeTool('self_repair', {
+      errorType,
+      errorMessage,
+      autoConfirm: false
+    });
+    
+    if (result.success) {
+      console.log(c('  ✓ 修复成功！', 'green'));
+      console.log(c('    策略: ' + result.strategy, 'white'));
+      console.log(c('    消息: ' + result.message, 'white'));
+    } else {
+      console.log(c('  ✗ 修复失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 修复失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function listRepairs() {
+  const status = await ask('  状态过滤 (可选，直接回车显示全部): ');
+  
+  if (status === '__CANCEL__') return;
+  if (status.toLowerCase() === 'q' || status.toLowerCase() === 'quit') return;
+  
+  try {
+    const result = await agent.executeTool('list_repairs', {
+      status: status || null,
+      limit: 20
+    });
+    
+    if (result.success && result.repairs) {
+      console.log();
+      console.log(c('  🔧 修复记录', 'cyan'));
+      console.log(c('─'.repeat(70), 'dim'));
+      
+      if (result.repairs.length === 0) {
+        console.log(c('  暂无修复记录', 'yellow'));
+      } else {
+        result.repairs.forEach((repair, i) => {
+          const statusColor = repair.status === 'success' ? 'green' : 
+                             repair.status === 'failed' ? 'red' : 
+                             repair.status === 'rolled_back' ? 'yellow' : 'blue';
+          console.log(c('  ' + (i + 1) + '. [' + repair.status + '] ' + repair.errorType, statusColor));
+          console.log(c('     错误: ' + repair.errorMessage.substring(0, 60), 'white'));
+          if (repair.repairStrategy) {
+            console.log(c('     策略: ' + repair.repairStrategy, 'dim'));
+          }
+          console.log(c('     创建时间: ' + new Date(repair.createdAt).toLocaleString(), 'dim'));
+          console.log();
+        });
+      }
+    }
+  } catch (error) {
+    console.log(c('  ✗ 查询失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function rollbackRepair() {
+  const repairId = await ask('  请输入要回滚的修复ID: ');
+  
+  if (repairId === '__CANCEL__') return;
+  if (repairId.toLowerCase() === 'q' || repairId.toLowerCase() === 'quit') return;
+  if (!repairId) {
+    console.log(c('  请输入修复ID', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  try {
+    const { selfRepairManager } = require('../services/bootstrap/selfRepairManager');
+    const result = await selfRepairManager.rollbackRepair(repairId);
+    
+    if (result.success) {
+      console.log(c('  ✓ 回滚成功！', 'green'));
+    } else {
+      console.log(c('  ✗ 回滚失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 回滚失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
 function waitEnter() {
   return ask(c('  按 Enter 或 q 返回...', 'dim'));
 }
@@ -1915,6 +2504,12 @@ async function startCLI() {
         break;
       case 'knowledge':
         await knowledgeMenu();
+        break;
+      case 'update':
+        await updateMenu();
+        break;
+      case 'repair':
+        await repairMenu();
         break;
       case 'mode':
         await modeMenu();

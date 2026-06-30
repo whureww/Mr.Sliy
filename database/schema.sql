@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿-- ============================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿-- ============================================
 -- 代码优化智能体数据库架构设计
 -- 版本: 1.0.0
 -- 描述: 包含8张核心数据表
@@ -218,3 +218,54 @@ CREATE TABLE IF NOT EXISTS api_access_keys (
 
 CREATE INDEX IF NOT EXISTS idx_access_key ON api_access_keys(access_key);
 CREATE INDEX IF NOT EXISTS idx_access_active ON api_access_keys(is_active);
+
+-- 11. 自更新记录表 (self_update_history)
+CREATE TABLE IF NOT EXISTS self_update_history (
+    id TEXT PRIMARY KEY,
+    update_type VARCHAR(50) NOT NULL,
+    target_version VARCHAR(20),
+    current_version VARCHAR(20),
+    update_source VARCHAR(100),
+    update_content TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    user_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    sandbox_result TEXT,
+    applied_at DATETIME,
+    rollback_version VARCHAR(20),
+    rollback_at DATETIME,
+    error_message TEXT,
+    duration_ms INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_update_type ON self_update_history(update_type);
+CREATE INDEX IF NOT EXISTS idx_update_status ON self_update_history(status);
+CREATE INDEX IF NOT EXISTS idx_update_created_at ON self_update_history(created_at);
+
+-- 12. 自修复记录表 (self_repair_history)
+CREATE TABLE IF NOT EXISTS self_repair_history (
+    id TEXT PRIMARY KEY,
+    error_type VARCHAR(100) NOT NULL,
+    error_message TEXT,
+    error_stack TEXT,
+    affected_component VARCHAR(100),
+    repair_strategy VARCHAR(100),
+    repair_content TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    user_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    sandbox_result TEXT,
+    applied_at DATETIME,
+    rollback_at DATETIME,
+    error_count INTEGER DEFAULT 1,
+    last_error_at DATETIME,
+    duration_ms INTEGER,
+    error_message_detail TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_repair_error_type ON self_repair_history(error_type);
+CREATE INDEX IF NOT EXISTS idx_repair_status ON self_repair_history(status);
+CREATE INDEX IF NOT EXISTS idx_repair_created_at ON self_repair_history(created_at);
+CREATE INDEX IF NOT EXISTS idx_repair_component ON self_repair_history(affected_component);
