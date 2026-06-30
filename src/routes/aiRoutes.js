@@ -9,7 +9,7 @@ const { optimizeWithRAG } = require('../services/rag/agent');
 const { success, error } = require('../utils/response');
 const { logger } = require('../utils/logger');
 const { getFileLanguage } = require('../utils/helpers');
-const { isOnlineMode } = require('../config');
+const { providerManager } = require('../services/llm/providers');
 
 /**
  * AI优化代码片段
@@ -23,10 +23,12 @@ router.post('/optimize', async (req, res) => {
     if (!code) {
       return res.status(400).json(error('缺少代码片段', 400));
     }
-    
-    // 检查是否为在线模式
-    if (!isOnlineMode()) {
-      return res.json(error('当前为离线模式，无法使用AI优化功能'));
+
+    // 检查是否有可用的云端LLM提供商
+    const availableProviders = providerManager.getAvailableProviders();
+    const hasOnlineProvider = availableProviders.some(p => p.available && p.name !== 'ollama');
+    if (!hasOnlineProvider) {
+      return res.json(error('当前无可用的云端LLM提供商，无法使用AI优化功能。请在数据库中配置API密钥。'));
     }
     
     // 构建issue对象

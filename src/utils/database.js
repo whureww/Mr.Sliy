@@ -407,6 +407,46 @@ const allTablesSqlite = [
     config_key VARCHAR(100) UNIQUE NOT NULL,
     config_value TEXT,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS self_update_history (
+    id TEXT PRIMARY KEY,
+    update_type VARCHAR(50) NOT NULL,
+    target_version VARCHAR(20),
+    current_version VARCHAR(20),
+    update_source VARCHAR(100),
+    update_content TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    user_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    sandbox_result TEXT,
+    applied_at DATETIME,
+    rollback_version VARCHAR(20),
+    rollback_at DATETIME,
+    error_message TEXT,
+    duration_ms INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS self_repair_history (
+    id TEXT PRIMARY KEY,
+    error_type VARCHAR(100) NOT NULL,
+    error_message TEXT,
+    error_stack TEXT,
+    affected_component VARCHAR(100),
+    repair_strategy VARCHAR(100),
+    repair_content TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    user_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    sandbox_result TEXT,
+    applied_at DATETIME,
+    rollback_at DATETIME,
+    error_count INTEGER DEFAULT 1,
+    last_error_at DATETIME,
+    duration_ms INTEGER,
+    error_message_detail TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`
 ];
 
@@ -445,7 +485,14 @@ const allIndexesSqlite = [
   'CREATE INDEX IF NOT EXISTS idx_kb_cases_category ON kb_cases(category)',
   'CREATE INDEX IF NOT EXISTS idx_kb_cases_effectiveness ON kb_cases(effectiveness_score DESC)',
   'CREATE INDEX IF NOT EXISTS idx_standards_language ON code_standards(language)',
-  'CREATE INDEX IF NOT EXISTS idx_standards_severity ON code_standards(severity)'
+  'CREATE INDEX IF NOT EXISTS idx_standards_severity ON code_standards(severity)',
+  'CREATE INDEX IF NOT EXISTS idx_update_type ON self_update_history(update_type)',
+  'CREATE INDEX IF NOT EXISTS idx_update_status ON self_update_history(status)',
+  'CREATE INDEX IF NOT EXISTS idx_update_created_at ON self_update_history(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_repair_error_type ON self_repair_history(error_type)',
+  'CREATE INDEX IF NOT EXISTS idx_repair_status ON self_repair_history(status)',
+  'CREATE INDEX IF NOT EXISTS idx_repair_created_at ON self_repair_history(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_repair_component ON self_repair_history(affected_component)'
 ];
 
 let sqliteInitialized = false;
@@ -455,6 +502,14 @@ function ensureSqliteTables() {
   sqliteInitialized = true;
 
   const db = getDatabase();
+  
+  try {
+    db.exec('DROP TABLE IF EXISTS self_update_history');
+    db.exec('DROP TABLE IF EXISTS self_repair_history');
+    logger.debug('已删除旧的自更新/自修复表');
+  } catch (e) {
+    logger.debug('删除旧表失败:', e.message);
+  }
   
   for (const sql of allTablesSqlite) {
     try {
@@ -482,45 +537,36 @@ async function initMySqlTables() {
   const pool = await getMySqlPool();
 
   const tables = [
-    // 知识条目表
+    // 知识条目表（字段名与SQLite统一）
     `CREATE TABLE IF NOT EXISTS kb_entries (
       id VARCHAR(36) PRIMARY KEY,
       content TEXT NOT NULL,
       content_type VARCHAR(50) NOT NULL,
-      title VARCHAR(255),
-      description TEXT,
       language VARCHAR(20),
       tags TEXT,
-      embedding TEXT,
-      quality_score DECIMAL(3,2) DEFAULT 1.00,
-      usage_count INT DEFAULT 0,
-      success_count INT DEFAULT 0,
-      failure_count INT DEFAULT 0,
       source TEXT,
+      vector_json TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_content_type (content_type),
-      INDEX idx_language (language),
-      INDEX idx_usage (usage_count DESC)
+      INDEX idx_language (language)
     )`,
 
-    // 优化案例表
+    // 优化案例表（字段名与SQLite统一）
     `CREATE TABLE IF NOT EXISTS kb_cases (
       id VARCHAR(36) PRIMARY KEY,
-      before_code TEXT NOT NULL,
-      after_code TEXT NOT NULL,
-      before_issues TEXT,
-      optimization_reason TEXT,
+      original_code TEXT NOT NULL,
+      optimized_code TEXT NOT NULL,
+      explanation TEXT,
       language VARCHAR(20),
-      category VARCHAR(50),
-      effectiveness_score DECIMAL(3,2) DEFAULT 0.00,
-      times_applied INT DEFAULT 0,
-      success_rate DECIMAL(5,2) DEFAULT 0.00,
+      issue_type VARCHAR(50),
+      vector_json TEXT,
+      usage_count INT DEFAULT 0,
+      rating DECIMAL(3,2) DEFAULT 0.00,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_language (language),
-      INDEX idx_category (category),
-      INDEX idx_effectiveness (effectiveness_score DESC)
+      INDEX idx_issue_type (issue_type),
+      INDEX idx_usage (usage_count DESC)
     )`,
 
     // 代码规范表

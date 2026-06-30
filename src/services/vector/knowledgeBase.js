@@ -231,16 +231,23 @@ class LocalKnowledgeBase {
 
     let sql = 'SELECT id, content, content_type, language, tags, source, vector_json FROM kb_entries';
     const conditions = [];
+    const params = [];
 
-    if (type) conditions.push(`content_type = '${type}'`);
-    if (language) conditions.push(`language = '${language}'`);
+    if (type) {
+      conditions.push('content_type = ?');
+      params.push(type);
+    }
+    if (language) {
+      conditions.push('language = ?');
+      params.push(language);
+    }
 
     if (conditions.length > 0) {
       sql += ' WHERE ' + conditions.join(' AND ');
     }
 
     const stmt = db.prepare(sql);
-    const entries = stmt.all();
+    const entries = stmt.all(...params);
 
     // 计算相似度并排序
     const results = entries.map(entry => {
@@ -274,16 +281,23 @@ class LocalKnowledgeBase {
 
     let sql = 'SELECT id, original_code, optimized_code, explanation, language, issue_type, vector_json, usage_count, rating FROM kb_cases';
     const conditions = [];
+    const params = [];
 
-    if (language) conditions.push(`language = '${language}'`);
-    if (issueType) conditions.push(`issue_type = '${issueType}'`);
+    if (language) {
+      conditions.push('language = ?');
+      params.push(language);
+    }
+    if (issueType) {
+      conditions.push('issue_type = ?');
+      params.push(issueType);
+    }
 
     if (conditions.length > 0) {
       sql += ' WHERE ' + conditions.join(' AND ');
     }
 
     const stmt = db.prepare(sql);
-    const cases = stmt.all();
+    const cases = stmt.all(...params);
 
     const results = cases.map(c => {
       const caseVector = JSON.parse(c.vector_json || '{}');
@@ -530,33 +544,31 @@ class LocalKnowledgeBase {
       
       for (const entry of data.entries) {
         const existing = await mysql.query(
-          'SELECT id FROM knowledge_entries WHERE id = ?',
+          'SELECT id FROM kb_entries WHERE id = ?',
           [entry.id]
         );
         
         if (existing.length > 0) {
           await mysql.execute(
-            `UPDATE knowledge_entries SET title = ?, category = ?, content = ?, tags = ?, language = ?, source = ? WHERE id = ?`,
+            `UPDATE kb_entries SET content = ?, content_type = ?, language = ?, tags = ?, source = ? WHERE id = ?`,
             [
-              entry.content.substring(0, 100),
-              entry.content_type,
               entry.content,
-              entry.tags ? JSON.stringify(entry.tags) : null,
+              entry.content_type,
               entry.language,
+              entry.tags ? JSON.stringify(entry.tags) : null,
               entry.source,
               entry.id
             ]
           );
         } else {
           await mysql.execute(
-            `INSERT INTO knowledge_entries (id, title, category, content, tags, language, source) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO kb_entries (id, content, content_type, language, tags, source) VALUES (?, ?, ?, ?, ?, ?)`,
             [
               entry.id,
-              entry.content.substring(0, 100),
-              entry.content_type,
               entry.content,
-              entry.tags ? JSON.stringify(entry.tags) : null,
+              entry.content_type,
               entry.language,
+              entry.tags ? JSON.stringify(entry.tags) : null,
               entry.source
             ]
           );
@@ -566,37 +578,36 @@ class LocalKnowledgeBase {
       
       for (const caseItem of data.cases) {
         const existing = await mysql.query(
-          'SELECT id FROM optimization_cases WHERE id = ?',
+          'SELECT id FROM kb_cases WHERE id = ?',
           [caseItem.id]
         );
         
         if (existing.length > 0) {
           await mysql.execute(
-            `UPDATE optimization_cases SET title = ?, category = ?, before_code = ?, after_code = ?, description = ?, language = ?, tags = ? WHERE id = ?`,
+            `UPDATE kb_cases SET original_code = ?, optimized_code = ?, explanation = ?, language = ?, issue_type = ?, usage_count = ?, rating = ? WHERE id = ?`,
             [
-              caseItem.explanation ? caseItem.explanation.substring(0, 100) : caseItem.id,
-              caseItem.issue_type || 'general',
               caseItem.original_code,
               caseItem.optimized_code,
               caseItem.explanation,
               caseItem.language,
-              caseItem.usage_count,
+              caseItem.issue_type || 'general',
+              caseItem.usage_count || 0,
+              caseItem.rating || 0,
               caseItem.id
             ]
           );
         } else {
           await mysql.execute(
-            `INSERT INTO optimization_cases (id, title, category, before_code, after_code, description, language, complexity, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, usage_count, rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
             [
               caseItem.id,
-              caseItem.explanation ? caseItem.explanation.substring(0, 100) : caseItem.id,
-              caseItem.issue_type || 'general',
               caseItem.original_code,
               caseItem.optimized_code,
               caseItem.explanation,
               caseItem.language,
-              'medium',
-              null
+              caseItem.issue_type || 'general',
+              caseItem.usage_count || 0,
+              caseItem.rating || 0
             ]
           );
         }
@@ -649,8 +660,8 @@ class LocalKnowledgeBase {
     try {
       await mysql.initDatabase();
       
-      const entries = await mysql.query('SELECT * FROM knowledge_entries');
-      const cases = await mysql.query('SELECT * FROM optimization_cases');
+      const entries = await mysql.query('SELECT * FROM kb_entries');
+      const cases = await mysql.query('SELECT * FROM kb_cases');
       
       const importData = {
         version: '1.0',
@@ -658,20 +669,20 @@ class LocalKnowledgeBase {
         entries: entries.map(e => ({
           id: e.id,
           content: e.content,
-          content_type: e.category,
+          content_type: e.content_type,
           language: e.language,
           tags: e.tags ? JSON.parse(e.tags) : [],
           source: e.source || 'cloud'
         })),
         cases: cases.map(c => ({
           id: c.id,
-          original_code: c.before_code,
-          optimized_code: c.after_code,
-          explanation: c.description,
+          original_code: c.original_code,
+          optimized_code: c.optimized_code,
+          explanation: c.explanation,
           language: c.language,
-          issue_type: c.category,
-          usage_count: 0,
-          rating: 0
+          issue_type: c.issue_type,
+          usage_count: c.usage_count || 0,
+          rating: c.rating || 0
         }))
       };
       

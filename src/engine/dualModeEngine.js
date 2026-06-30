@@ -73,7 +73,7 @@ class DualModeEngine {
    * 检测并优化单个文件（双模入口）
    */
   async analyzeFile(filePath, options = {}) {
-    this.init();
+    await this.init();
     const startTime = Date.now();
     const actualMode = this.getActualMode();
     const onProgress = options.onProgress;
@@ -169,7 +169,7 @@ class DualModeEngine {
    * 分析代码片段（用于交互式使用）
    */
   async analyzeSnippet(codeSnippet, language = 'javascript', options = {}) {
-    this.init();
+    await this.init();
     const startTime = Date.now();
     const actualMode = this.getActualMode();
     const onProgress = options.onProgress;
@@ -249,7 +249,7 @@ class DualModeEngine {
    * 批量分析项目
    */
   async analyzeProject(projectPath, options = {}) {
-    this.init();
+    await this.init();
     const startTime = Date.now();
     const actualMode = this.getActualMode();
     const onProgress = options.onProgress;

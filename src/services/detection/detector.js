@@ -884,43 +884,87 @@ async function batchDetect(filePaths, options = {}) {
  */
 async function saveDetectionResults(taskId, projectId, results) {
   try {
-    const db = getDatabase();
-    
-    const stmt = db.prepare(`
+    const { isUsingMySql, execute, getMySqlPool } = require('../../utils/database');
+    const allIssues = results.flatMap(r => r.issues || []);
+
+    if (allIssues.length === 0) {
+      logger.info('无检测结果需要存储');
+      return;
+    }
+
+    const insertSql = `
       INSERT INTO code_issue
       (id, task_id, project_id, file_path, file_name, language, issue_type,
        severity, message, suggestion, line_start, line_end, column_start,
        column_end, code_snippet, ast_node_type)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    
-    const insertMany = db.transaction((issues) => {
-      for (const issue of issues) {
-        stmt.run(
-          issue.id,
-          taskId,
-          projectId,
-          issue.filePath,
-          issue.fileName,
-          issue.language,
-          issue.issueType,
-          issue.severity,
-          issue.message,
-          issue.suggestion,
-          issue.lineStart,
-          issue.lineEnd,
-          issue.columnStart,
-          issue.columnEnd,
-          issue.codeSnippet,
-          issue.astNodeType
-        );
+    `;
+
+    // MySQL模式：使用连接池事务
+    if (isUsingMySql()) {
+      const pool = await getMySqlPool();
+      const connection = await pool.getConnection();
+      try {
+        await connection.beginTransaction();
+
+        for (const issue of allIssues) {
+          await connection.execute(insertSql, [
+            issue.id,
+            taskId,
+            projectId,
+            issue.filePath,
+            issue.fileName,
+            issue.language,
+            issue.issueType,
+            issue.severity,
+            issue.message,
+            issue.suggestion,
+            issue.lineStart,
+            issue.lineEnd,
+            issue.columnStart,
+            issue.columnEnd,
+            issue.codeSnippet,
+            issue.astNodeType
+          ]);
+        }
+
+        await connection.commit();
+        logger.info(`存储检测结果: ${allIssues.length} 个问题`);
+      } catch (err) {
+        await connection.rollback();
+        throw err;
+      } finally {
+        connection.release();
       }
-    });
-    
-    const allIssues = results.flatMap(r => r.issues || []);
-    insertMany(allIssues);
-    
-    logger.info(`存储检测结果: ${allIssues.length} 个问题`);
+    } else {
+      // SQLite模式：使用better-sqlite3事务
+      const db = getDatabase();
+      const stmt = db.prepare(insertSql);
+      const insertMany = db.transaction((issues) => {
+        for (const issue of issues) {
+          stmt.run(
+            issue.id,
+            taskId,
+            projectId,
+            issue.filePath,
+            issue.fileName,
+            issue.language,
+            issue.issueType,
+            issue.severity,
+            issue.message,
+            issue.suggestion,
+            issue.lineStart,
+            issue.lineEnd,
+            issue.columnStart,
+            issue.columnEnd,
+            issue.codeSnippet,
+            issue.astNodeType
+          );
+        }
+      });
+      insertMany(allIssues);
+      logger.info(`存储检测结果: ${allIssues.length} 个问题`);
+    }
   } catch (error) {
     logger.error('存储检测结果失败:', error);
   }
