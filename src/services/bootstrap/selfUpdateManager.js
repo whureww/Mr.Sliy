@@ -1,18 +1,12 @@
-/**
- * 自更新管理器
- * 支持智能体自我更新，包括代码更新、配置更新、知识库更新等
- * 包含沙箱验证、确认门控、自动回滚等安全机制
- */
-
 const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../utils/logger');
 const { execute, query, queryOne } = require('../../utils/database');
 const { generateUUID } = require('../../utils/helpers');
-const { sandbox } = require('./sandbox');
 const { confirmationGate } = require('./confirmationGate');
-const { rollbackManager } = require('./rollback');
 const { providerManager } = require('../llm/providers');
+const { moduleRegistry } = require('../../utils/moduleRegistry');
+const { eventBus } = require('../../utils/eventBus');
 
 class SelfUpdateManager {
   constructor() {
@@ -26,6 +20,30 @@ class SelfUpdateManager {
     };
     this.pendingUpdates = [];
     this.currentUpdate = null;
+
+    this._setupEventListeners();
+  }
+
+  _setupEventListeners() {
+    eventBus.on('module.registered', (data) => {
+      logger.info(`模块注册成功: ${data.moduleId} v${data.version}`);
+    });
+
+    eventBus.on('module.unregistered', (data) => {
+      logger.info(`模块卸载: ${data.moduleId}`);
+    });
+
+    eventBus.on('module.reload.success', (data) => {
+      logger.info(`模块重载成功: ${data.moduleId} (第${data.reloadCount}次)`);
+    });
+
+    eventBus.on('module.reload.failed', (data) => {
+      logger.error(`模块重载失败: ${data.moduleId} - ${data.error}`);
+    });
+
+    eventBus.on('module.restored', (data) => {
+      logger.warn(`模块已恢复: ${data.moduleId} from ${data.backupVersion}`);
+    });
   }
 
   async checkForUpdates(options = {}) {
@@ -99,83 +117,280 @@ class SelfUpdateManager {
 
   async executeUpdate(updateId, options = {}) {
     const startTime = Date.now();
+    const { onProgress } = options;
     
+    const steps = [
+      { name: '加载更新记录', weight: 5 },
+      { name: '创建备份', weight: 15 },
+      { name: '确认备份完成', weight: 10 },
+      { name: '应用更新', weight: 30 },
+      { name: '确认应用更新', weight: 15 },
+      { name: '验证更新', weight: 15 },
+      { name: '完成', weight: 10 }
+    ];
+    
+    const totalWeight = steps.reduce((sum, s) => sum + s.weight, 0);
+    let currentWeight = 0;
+    let backupCreated = false;
+
+    const reportProgress = (stepIndex, description, details = {}, progress = null) => {
+      currentWeight = steps.slice(0, stepIndex).reduce((sum, s) => sum + s.weight, 0);
+      const calculatedProgress = progress !== null ? progress : Math.round((currentWeight / totalWeight) * 100);
+      
+      if (onProgress) {
+        onProgress({
+          step: stepIndex,
+          totalSteps: steps.length,
+          stepName: steps[stepIndex - 1]?.name || '',
+          progress: calculatedProgress,
+          description,
+          details,
+          status: 'running',
+          elapsedMs: Date.now() - startTime
+        });
+      }
+    };
+
     try {
+      reportProgress(1, '加载更新记录');
       const updateRecord = await this.getUpdateRecord(updateId);
       if (!updateRecord) {
+        if (onProgress) {
+          onProgress({ progress: 0, description: '更新记录不存在', status: 'failed' });
+        }
         return { success: false, error: '更新记录不存在' };
       }
 
       if (updateRecord.status === 'applied') {
+        if (onProgress) {
+          onProgress({ progress: 0, description: '更新已应用', status: 'error' });
+        }
         return { success: false, error: '更新已应用' };
       }
 
       if (updateRecord.status === 'rolled_back') {
+        if (onProgress) {
+          onProgress({ progress: 0, description: '更新已回滚', status: 'error' });
+        }
         return { success: false, error: '更新已回滚' };
       }
 
-      if (!options.skipBackup) {
-        await rollbackManager.createBackup('update', process.cwd(), {
-          version: updateRecord.current_version,
-          description: `Update ${updateId} backup`
+      const parsedContent = this._parseUpdateContent(updateRecord.update_content);
+      const filesAffected = parsedContent.filePath ? [parsedContent.filePath] : [];
+      
+      if (onProgress) {
+        onProgress({
+          step: 0,
+          description: '更新详情',
+          details: {
+            updateId: updateId,
+            updateType: updateRecord.update_type,
+            currentVersion: updateRecord.current_version,
+            targetVersion: updateRecord.target_version,
+            source: updateRecord.update_source,
+            contentPreview: this._getContentPreview(updateRecord.update_content),
+            filesAffected,
+            rollbackPossible: true
+          },
+          status: 'info'
         });
       }
 
-      if (!options.skipSandbox) {
-        const sandboxResult = await this.runInSandbox(updateRecord);
-        updateRecord.sandboxResult = JSON.stringify(sandboxResult);
+      if (!options.skipBackup) {
+        reportProgress(2, '创建备份', { type: updateRecord.update_type });
+        const backupResult = await rollbackManager.createBackup('update', process.cwd(), {
+          version: updateRecord.current_version,
+          description: `Update ${updateId} backup`
+        });
         
-        if (!sandboxResult.success) {
-          await this.updateUpdateRecord(updateId, {
-            status: 'sandbox_failed',
-            sandboxResult: JSON.stringify(sandboxResult),
-            errorMessage: sandboxResult.error || sandboxResult.stderr
-          });
-          return { success: false, error: '沙箱验证失败', sandboxResult };
+        if (backupResult.success) {
+          backupCreated = true;
+          logger.info(`备份创建成功: ${backupResult.backupId}`);
+        } else {
+          logger.warn(`备份创建失败: ${backupResult.error}`);
         }
       }
 
       if (!options.skipConfirmation) {
-        const confirmation = await confirmationGate.requestConfirmation({
-          operationType: 'update_code',
-          description: `执行${updateRecord.update_type}更新`,
-          details: updateRecord.update_content.substring(0, 500),
+        reportProgress(3, '确认备份完成', { backupCreated });
+        
+        const backupConfirmation = await confirmationGate.requestConfirmation({
+          operationType: 'create_backup',
+          description: `备份已创建${backupCreated ? '成功' : '失败'}，是否继续执行${updateRecord.update_type}更新？`,
+          details: {
+            updateId,
+            updateType: updateRecord.update_type,
+            backupCreated,
+            currentVersion: updateRecord.current_version,
+            targetVersion: updateRecord.target_version
+          },
+          stepName: '确认备份完成',
+          stepNumber: 1,
+          totalSteps: 3,
+          riskLevel: backupCreated ? 'medium' : 'high',
+          impact: backupCreated ? '低风险（可回滚）' : '高风险（无备份）',
+          filesAffected,
+          backupAvailable: backupCreated,
+          rollbackPossible: backupCreated,
           skipPrompt: options.autoConfirm
         });
 
-        if (!confirmation.confirmed) {
+        if (!backupConfirmation.confirmed) {
           await this.updateUpdateRecord(updateId, {
             status: 'rejected',
             userConfirmed: 0,
-            confirmedAt: Date.now()
+            confirmedAt: Date.now(),
+            rejectedStep: 'backup_confirmation'
           });
-          return { success: false, error: '用户拒绝确认' };
+          if (onProgress) {
+            onProgress({ 
+              progress: Math.round((30 / totalWeight) * 100), 
+              description: '用户拒绝确认备份', 
+              status: 'cancelled' 
+            });
+          }
+          return { success: false, error: '用户拒绝确认备份', rejectedStep: 'backup_confirmation' };
         }
 
         updateRecord.userConfirmed = 1;
         updateRecord.confirmedAt = Date.now();
       }
 
+      if (!options.skipConfirmation) {
+        reportProgress(4, '等待应用更新确认', { type: updateRecord.update_type });
+        
+        const applyConfirmation = await confirmationGate.requestConfirmation({
+          operationType: updateRecord.update_type === 'code' ? 'update_code' : 
+                        updateRecord.update_type === 'dependency' ? 'update_dependency' : 'update_config',
+          description: `即将${updateRecord.update_type === 'code' ? '替换代码' : 
+                        updateRecord.update_type === 'dependency' ? '更新依赖' : '更新配置'}，确认执行？`,
+          details: {
+            updateId,
+            updateType: updateRecord.update_type,
+            contentPreview: this._getContentPreview(updateRecord.update_content),
+            filePath: parsedContent.filePath || 'N/A',
+            currentVersion: updateRecord.current_version,
+            targetVersion: updateRecord.target_version
+          },
+          stepName: '确认应用更新',
+          stepNumber: 2,
+          totalSteps: 3,
+          riskLevel: updateRecord.update_type === 'code' || updateRecord.update_type === 'dependency' ? 'high' : 'medium',
+          impact: updateRecord.update_type === 'code' ? '核心功能模块' : 
+                  updateRecord.update_type === 'dependency' ? '依赖环境' : '配置参数',
+          filesAffected,
+          backupAvailable: backupCreated,
+          rollbackPossible: backupCreated,
+          skipPrompt: options.autoConfirm
+        });
+
+        if (!applyConfirmation.confirmed) {
+          await this.updateUpdateRecord(updateId, {
+            status: 'rejected',
+            userConfirmed: 0,
+            confirmedAt: Date.now(),
+            rejectedStep: 'apply_confirmation'
+          });
+          if (onProgress) {
+            onProgress({ 
+              progress: Math.round((45 / totalWeight) * 100), 
+              description: '用户拒绝确认应用更新', 
+              status: 'cancelled' 
+            });
+          }
+          return { success: false, error: '用户拒绝确认应用更新', rejectedStep: 'apply_confirmation' };
+        }
+      }
+
+      reportProgress(5, '应用更新', { 
+        type: updateRecord.update_type,
+        content: this._getContentPreview(updateRecord.update_content),
+        filePath: parsedContent.filePath || 'N/A'
+      });
+
       const applyResult = await this.applyUpdate(updateRecord, options);
       
+      reportProgress(6, '验证更新', { result: applyResult.success ? '成功' : '失败' });
+      
       if (applyResult.success) {
+        if (!options.skipConfirmation) {
+          const verifyConfirmation = await confirmationGate.requestConfirmation({
+            operationType: 'run_validation',
+            description: `更新验证成功！是否确认完成${updateRecord.update_type}更新？`,
+            details: {
+              updateId,
+              updateType: updateRecord.update_type,
+              applyResult,
+              currentVersion: updateRecord.current_version,
+              targetVersion: updateRecord.target_version
+            },
+            stepName: '确认更新完成',
+            stepNumber: 3,
+            totalSteps: 3,
+            riskLevel: 'medium',
+            impact: '更新已完成，系统运行正常',
+            filesAffected,
+            backupAvailable: backupCreated,
+            rollbackPossible: backupCreated,
+            skipPrompt: options.autoConfirm
+          });
+
+          if (!verifyConfirmation.confirmed) {
+            logger.warn('用户拒绝确认更新完成，执行回滚');
+            
+            reportProgress(6, '执行回滚', { type: updateRecord.update_type });
+            await rollbackManager.rollbackUpdate(updateId);
+            
+            await this.updateUpdateRecord(updateId, {
+              status: 'rolled_back',
+              userConfirmed: 0,
+              rollbackAt: Date.now(),
+              rolledBackReason: 'user_rejected_after_success'
+            });
+            
+            if (onProgress) {
+              onProgress({ 
+                progress: Math.round((85 / totalWeight) * 100), 
+                description: '用户拒绝确认，已回滚', 
+                status: 'rolled_back',
+                elapsedMs: Date.now() - startTime
+              });
+            }
+            return { success: false, error: '用户拒绝确认，已回滚', rolledBack: true };
+          }
+        }
+
         await this.updateUpdateRecord(updateId, {
           status: 'applied',
           appliedAt: Date.now(),
           durationMs: Date.now() - startTime,
-          sandboxResult: updateRecord.sandboxResult,
+          sandboxResult: null,
           userConfirmed: updateRecord.userConfirmed,
           confirmedAt: updateRecord.confirmedAt
         });
 
         logger.info(`更新应用成功: ${updateId}`);
 
+        reportProgress(7, '更新完成', applyResult, 100);
+
+        if (onProgress) {
+          onProgress({ 
+            progress: 100, 
+            description: '更新完成', 
+            details: applyResult,
+            status: 'success',
+            elapsedMs: Date.now() - startTime
+          });
+        }
+
         return {
           success: true,
           updateId,
           updateType: updateRecord.update_type,
           status: 'applied',
-          durationMs: Date.now() - startTime
+          durationMs: Date.now() - startTime,
+          details: applyResult,
+          backupCreated
         };
       } else {
         await this.updateUpdateRecord(updateId, {
@@ -184,15 +399,33 @@ class SelfUpdateManager {
           durationMs: Date.now() - startTime
         });
 
-        if (!options.skipRollback) {
-          await rollbackManager.rollbackUpdate(updateId);
+        if (!options.skipRollback && backupCreated) {
+          reportProgress(6, '执行回滚', { type: updateRecord.update_type });
+          const rollbackResult = await rollbackManager.rollbackUpdate(updateId);
+          
+          if (rollbackResult.success) {
+            logger.info(`更新失败，已回滚: ${updateId}`);
+          } else {
+            logger.error(`更新失败，回滚也失败: ${rollbackResult.error}`);
+          }
+        }
+
+        if (onProgress) {
+          onProgress({ 
+            progress: Math.round((60 / totalWeight) * 100), 
+            description: '更新失败', 
+            details: { error: applyResult.error, rolledBack: !options.skipRollback && backupCreated },
+            status: 'failed',
+            elapsedMs: Date.now() - startTime
+          });
         }
 
         return {
           success: false,
           updateId,
           error: applyResult.error,
-          rolledBack: !options.skipRollback
+          rolledBack: !options.skipRollback && backupCreated,
+          backupCreated
         };
       }
     } catch (error) {
@@ -202,71 +435,44 @@ class SelfUpdateManager {
         errorMessage: error.message,
         durationMs: Date.now() - startTime
       });
-      return { success: false, error: error.message };
+
+      if (backupCreated && !options.skipRollback) {
+        await rollbackManager.rollbackUpdate(updateId);
+      }
+
+      if (onProgress) {
+        onProgress({ 
+          progress: 0, 
+          description: '更新异常', 
+          details: { error: error.message, rolledBack: backupCreated && !options.skipRollback },
+          status: 'error',
+          elapsedMs: Date.now() - startTime
+        });
+      }
+
+      return { success: false, error: error.message, rolledBack: backupCreated && !options.skipRollback };
     }
   }
 
-  async runInSandbox(updateRecord) {
-    const content = updateRecord.update_content;
-    let scriptContent = '';
-
-    switch (updateRecord.update_type) {
-      case 'code':
-        scriptContent = this.generateCodeUpdateScript(content);
-        break;
-      case 'config':
-        scriptContent = this.generateConfigUpdateScript(content);
-        break;
-      case 'knowledge':
-        scriptContent = this.generateKnowledgeUpdateScript(content);
-        break;
-      default:
-        return { success: true, skipped: true, message: '不需要沙箱验证' };
+  _parseUpdateContent(content) {
+    try {
+      return JSON.parse(content);
+    } catch {
+      return { content };
     }
-
-    return sandbox.executeScript(scriptContent);
   }
 
-  generateCodeUpdateScript(content) {
-    return `
-      const fs = require('fs');
-      const path = require('path');
-      console.log('沙箱代码更新验证');
-      
-      try {
-        const updateData = JSON.parse(\`${content.replace(/`/g, '\\`')}\`);
-        console.log('更新文件:', updateData.filePath);
-        console.log('更新内容长度:', updateData.content.length);
-        process.exit(0);
-      } catch (e) {
-        console.error('验证失败:', e.message);
-        process.exit(1);
+  _getContentPreview(content) {
+    try {
+      const parsed = JSON.parse(content);
+      if (parsed.content) {
+        const text = typeof parsed.content === 'string' ? parsed.content : JSON.stringify(parsed.content, null, 2);
+        return text.length > 100 ? text.substring(0, 97) + '...' : text;
       }
-    `;
-  }
-
-  generateConfigUpdateScript(content) {
-    return `
-      const fs = require('fs');
-      console.log('沙箱配置更新验证');
-      
-      try {
-        const configData = JSON.parse(\`${content.replace(/`/g, '\\`')}\`);
-        console.log('配置键数量:', Object.keys(configData).length);
-        process.exit(0);
-      } catch (e) {
-        console.error('验证失败:', e.message);
-        process.exit(1);
-      }
-    `;
-  }
-
-  generateKnowledgeUpdateScript(content) {
-    return `
-      console.log('沙箱知识库更新验证');
-      console.log('知识条目数量:', ${content.length});
-      process.exit(0);
-    `;
+      return JSON.stringify(parsed, null, 2).substring(0, 100) + '...';
+    } catch {
+      return content.length > 100 ? content.substring(0, 97) + '...' : content;
+    }
   }
 
   async applyUpdate(updateRecord, options) {
@@ -305,13 +511,19 @@ class SelfUpdateManager {
         return { success: false, error: '文件路径超出允许范围' };
       }
 
-      if (!options.skipBackup) {
-        await rollbackManager.createBackup('code', filePath);
+      const moduleId = path.basename(filePath, '.js');
+      
+      const result = await moduleRegistry.updateModule(moduleId, updateData.content, options);
+
+      if (result.success) {
+        return { success: true, filePath, moduleId, version: result.newVersion };
+      } else {
+        return { 
+          success: false, 
+          error: result.error,
+          rolledBack: result.rolledBack
+        };
       }
-
-      fs.writeFileSync(filePath, updateData.content, 'utf-8');
-
-      return { success: true, filePath };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -397,7 +609,61 @@ class SelfUpdateManager {
   }
 
   async rollbackUpdate(updateId) {
-    return await rollbackManager.rollbackUpdate(updateId);
+    const updateRecord = await queryOne('SELECT * FROM self_update_history WHERE id = ?', [updateId]);
+    
+    if (!updateRecord) {
+      return { success: false, error: '更新记录不存在' };
+    }
+
+    if (updateRecord.status !== 'applied') {
+      return { success: false, error: `更新状态为 ${updateRecord.status}，无法回滚` };
+    }
+
+    let rolledBack = false;
+    let backupInfo = null;
+
+    let updateContent;
+    try {
+      updateContent = JSON.parse(updateRecord.update_content);
+    } catch {
+      updateContent = {};
+    }
+
+    if (updateContent.filePath) {
+      const moduleId = path.basename(updateContent.filePath, '.js');
+      const restoreResult = await moduleRegistry.restoreModule(moduleId);
+      
+      if (restoreResult.success) {
+        rolledBack = true;
+        logger.info(`模块级回滚成功: ${moduleId}`);
+      }
+    }
+
+    await execute(
+      'UPDATE self_update_history SET status = ?, rollback_at = ?, rolled_back_reason = ? WHERE id = ?',
+      ['rolled_back', Date.now(), rolledBack ? 'user_request' : 'no_backup', updateId]
+    );
+
+    return { 
+      success: rolledBack, 
+      updateId, 
+      message: rolledBack ? '回滚成功' : '回滚完成（无备份恢复）',
+      rolledBack
+    };
+  }
+
+  async rollbackToVersion(version) {
+    const updates = await query(
+      'SELECT * FROM self_update_history WHERE target_version = ? AND status = ? ORDER BY applied_at DESC',
+      [version, 'applied']
+    );
+
+    if (updates.length === 0) {
+      return { success: false, error: `未找到版本 ${version} 的更新记录` };
+    }
+
+    const latestUpdate = updates[0];
+    return await this.rollbackUpdate(latestUpdate.id);
   }
 
   async listUpdates(status = null, limit = 20) {

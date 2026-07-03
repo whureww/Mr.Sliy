@@ -14,6 +14,7 @@ const scanRoutes = require('./scanRoutes');
 const issueRoutes = require('./issueRoutes');
 const aiRoutes = require('./aiRoutes');
 const reportRoutes = require('./reportRoutes');
+const updateRoutes = require('./updateRoutes');
 
 // 注册路由
 router.use('/users', userRoutes);
@@ -23,6 +24,7 @@ router.use('/scan', scanRoutes);
 router.use('/issues', issueRoutes);
 router.use('/ai', aiRoutes);
 router.use('/reports', reportRoutes);
+router.use('/', updateRoutes);
 
 // API文档路由
 router.get('/docs', (req, res) => {

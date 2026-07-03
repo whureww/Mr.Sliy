@@ -1,4 +1,4 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿-- ============================================
+﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿-- ============================================
 -- 代码优化智能体数据库架构设计
 -- 版本: 1.0.0
 -- 描述: 包含8张核心数据表
@@ -230,10 +230,12 @@ CREATE TABLE IF NOT EXISTS self_update_history (
     status VARCHAR(20) DEFAULT 'pending',
     user_confirmed BOOLEAN DEFAULT 0,
     confirmed_at DATETIME,
+    rejected_step VARCHAR(100),
     sandbox_result TEXT,
     applied_at DATETIME,
     rollback_version VARCHAR(20),
     rollback_at DATETIME,
+    rolled_back_reason VARCHAR(200),
     error_message TEXT,
     duration_ms INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -258,6 +260,7 @@ CREATE TABLE IF NOT EXISTS self_repair_history (
     sandbox_result TEXT,
     applied_at DATETIME,
     rollback_at DATETIME,
+    rolled_back_reason VARCHAR(200),
     error_count INTEGER DEFAULT 1,
     last_error_at DATETIME,
     duration_ms INTEGER,
@@ -269,3 +272,26 @@ CREATE INDEX IF NOT EXISTS idx_repair_error_type ON self_repair_history(error_ty
 CREATE INDEX IF NOT EXISTS idx_repair_status ON self_repair_history(status);
 CREATE INDEX IF NOT EXISTS idx_repair_created_at ON self_repair_history(created_at);
 CREATE INDEX IF NOT EXISTS idx_repair_component ON self_repair_history(affected_component);
+
+-- 13. 确认记录表 (confirmation_history)
+CREATE TABLE IF NOT EXISTS confirmation_history (
+    id TEXT PRIMARY KEY,
+    operation_type VARCHAR(100) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    step_name VARCHAR(100),
+    step_number INTEGER DEFAULT 0,
+    total_steps INTEGER DEFAULT 0,
+    description TEXT NOT NULL,
+    impact VARCHAR(500),
+    files_affected TEXT,
+    backup_available BOOLEAN DEFAULT 0,
+    rollback_possible BOOLEAN DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'pending',
+    reason VARCHAR(200),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_confirmation_operation ON confirmation_history(operation_type);
+CREATE INDEX IF NOT EXISTS idx_confirmation_risk_level ON confirmation_history(risk_level);
+CREATE INDEX IF NOT EXISTS idx_confirmation_status ON confirmation_history(status);
+CREATE INDEX IF NOT EXISTS idx_confirmation_created_at ON confirmation_history(created_at);

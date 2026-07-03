@@ -1,18 +1,12 @@
-/**
- * 自修复管理器
- * 支持智能体在运行时自我修复，包括数据库修复、配置修复、依赖修复等
- * 包含错误分类、修复策略匹配、沙箱验证、确认门控、自动回滚等安全机制
- */
-
 const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../utils/logger');
 const { execute, query, queryOne } = require('../../utils/database');
 const { generateUUID } = require('../../utils/helpers');
-const { sandbox } = require('./sandbox');
 const { confirmationGate } = require('./confirmationGate');
-const { rollbackManager } = require('./rollback');
 const { providerManager } = require('../llm/providers');
+const { moduleRegistry } = require('../../utils/moduleRegistry');
+const { eventBus } = require('../../utils/eventBus');
 
 class SelfRepairManager {
   constructor() {
@@ -63,6 +57,14 @@ class SelfRepairManager {
     this.minRepairInterval = 60000;
     this.unrepairableErrors = ['ENOSPC', 'EPERM'];
     this.repairHistory = [];
+
+    this._setupEventListeners();
+  }
+
+  _setupEventListeners() {
+    eventBus.on('module.restored', (data) => {
+      logger.warn(`修复模块已恢复: ${data.moduleId}`);
+    });
   }
 
   classifyError(error) {
@@ -170,16 +172,9 @@ class SelfRepairManager {
     const startTime = Date.now();
 
     try {
-      if (!options.skipSandbox) {
-        const sandboxResult = await this.runInSandbox(error, strategyName);
-        if (!sandboxResult.success) {
-          return { success: false, error: '沙箱验证失败' };
-        }
-      }
-
       if (!options.skipConfirmation) {
         const confirmation = await confirmationGate.requestConfirmation({
-          operationType: 'repair_database',
+          operationType: `repair_${errorType}`,
           description: `修复${errorType}错误，策略: ${strategyName}`,
           details: error.message.substring(0, 200),
           skipPrompt: options.autoConfirm
@@ -205,17 +200,6 @@ class SelfRepairManager {
     } catch (error) {
       return { success: false, error: error.message };
     }
-  }
-
-  async runInSandbox(error, strategyName) {
-    const scriptContent = `
-      console.log('沙箱修复验证');
-      console.log('策略:', '${strategyName}');
-      console.log('错误类型:', '${this.classifyError(error)}');
-      process.exit(0);
-    `;
-
-    return sandbox.executeScript(scriptContent);
   }
 
   async executeRepairStrategy(error, errorType, strategyName, options) {
@@ -408,7 +392,46 @@ class SelfRepairManager {
   }
 
   async rollbackRepair(repairId) {
-    return await rollbackManager.rollbackRepair(repairId);
+    const repairRecord = await queryOne('SELECT * FROM self_repair_history WHERE id = ?', [repairId]);
+    
+    if (!repairRecord) {
+      return { success: false, error: '修复记录不存在' };
+    }
+
+    if (repairRecord.status !== 'success') {
+      return { success: false, error: `修复状态为 ${repairRecord.status}，无法回滚` };
+    }
+
+    let rolledBack = false;
+
+    let repairContent;
+    try {
+      repairContent = JSON.parse(repairRecord.repair_content);
+    } catch {
+      repairContent = {};
+    }
+
+    if (repairContent.filePath) {
+      const moduleId = path.basename(repairContent.filePath, '.js');
+      const restoreResult = await moduleRegistry.restoreModule(moduleId);
+      
+      if (restoreResult.success) {
+        rolledBack = true;
+        logger.info(`修复回滚成功: ${moduleId}`);
+      }
+    }
+
+    await execute(
+      'UPDATE self_repair_history SET status = ?, rollback_at = ?, rolled_back_reason = ? WHERE id = ?',
+      ['rolled_back', Date.now(), rolledBack ? 'user_request' : 'no_backup', repairId]
+    );
+
+    return { 
+      success: rolledBack, 
+      repairId, 
+      message: rolledBack ? '回滚成功' : '回滚完成（无备份恢复）',
+      rolledBack
+    };
   }
 
   async listRepairs(errorType = null, status = null, limit = 20) {
@@ -546,7 +569,16 @@ ${this.classifyError(error)}
           if (!filePath.startsWith(process.cwd())) {
             return { success: false, error: '文件路径超出允许范围' };
           }
-          fs.writeFileSync(filePath, action.content, 'utf-8');
+          
+          const moduleId = path.basename(filePath, '.js');
+          if (moduleRegistry.has(moduleId)) {
+            const result = await moduleRegistry.updateModule(moduleId, action.content, options);
+            if (!result.success) {
+              return result;
+            }
+          } else {
+            fs.writeFileSync(filePath, action.content, 'utf-8');
+          }
           break;
         }
         case 'config_update': {

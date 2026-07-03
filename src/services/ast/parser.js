@@ -1,14 +1,14 @@
 /**
  * Tree-sitter AST解析服务
  * 支持多语言源代码解析为AST语法树
- * 使用 tree-sitter-wasms 包提供 WASM 文件
- * 增强版：多路径探测、自动诊断、跨环境兼容
+ * 使用 Worker Threads 线程池隔离CPU密集操作，防止主线程阻塞
  */
 
 const path = require('path');
 const fs = require('fs');
 const { logger } = require('../../utils/logger');
 const { getFileLanguage } = require('../../utils/helpers');
+const { parserPool } = require('../../workers/pool');
 
 const languageParsers = new Map();
 let Parser = null;
@@ -318,23 +318,19 @@ class FallbackParser {
 
 async function parseCode(sourceCode, languageName) {
   try {
-    const initSuccess = await initParser();
-
-    if (initSuccess) {
-      const langParser = await loadLanguage(languageName);
-
-      if (langParser) {
-        const tree = langParser.parser.parse(sourceCode);
-        return {
-          success: true,
-          tree: tree,
-          language: languageName,
-          rootNode: tree.rootNode
-        };
-      }
+    const result = await parserPool.parse(sourceCode, languageName);
+    
+    if (result.success) {
+      return {
+        success: true,
+        tree: { rootNode: result.rootNode },
+        language: languageName,
+        rootNode: result.rootNode,
+        fallback: result.fallback || false
+      };
     }
 
-    logger.warn('Tree-sitter不可用，使用基础解析器: ' + languageName);
+    logger.warn('Worker解析失败，使用基础解析器: ' + languageName);
     const fallback = new FallbackParser();
     const tree = fallback.parse(sourceCode);
     return {
@@ -345,7 +341,6 @@ async function parseCode(sourceCode, languageName) {
       fallback: true
     };
   } catch (error) {
-    addDiagnostic('parse', '解析代码失败', error.message);
     logger.error('解析代码失败:', error);
 
     const fallback = new FallbackParser();
