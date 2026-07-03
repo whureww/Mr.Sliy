@@ -1874,9 +1874,10 @@ async function updateMenu() {
     console.log(c('    3) 执行更新        (execute)', 'white'));
     console.log(c('    4) 查看更新记录    (history)', 'white'));
     console.log(c('    5) 回滚更新        (rollback)', 'white'));
-    console.log(c('    6) 创建备份        (backup)', 'white'));
-    console.log(c('    7) 查看备份        (backups)', 'white'));
-    console.log(c('    8) 合并历史记录    (all)', 'white'));
+    console.log(c('    6) 按版本回滚      (version)', 'white'));
+    console.log(c('    7) 创建备份        (backup)', 'white'));
+    console.log(c('    8) 查看备份        (backups)', 'white'));
+    console.log(c('    9) 合并历史记录    (all)', 'white'));
     console.log(c('    0) 返回主菜单      (back)', 'dim'));
     console.log();
     
@@ -1909,14 +1910,18 @@ async function updateMenu() {
         await rollbackUpdate();
         break;
       case '6':
+      case 'version':
+        await rollbackToVersion();
+        break;
+      case '7':
       case 'backup':
         await createBackup();
         break;
-      case '7':
+      case '8':
       case 'backups':
         await listBackups();
         break;
-      case '8':
+      case '9':
       case 'all':
         await listBootstrapHistory();
         break;
@@ -1939,12 +1944,50 @@ async function aiUpdate() {
   }
   
   console.log();
-  console.log(c('  🤖 AI正在分析您的需求...', 'cyan'));
   
+  const progressBar = new ProgressBar({
+    total: 100,
+    description: 'AI智能更新',
+    showPercent: true,
+    showETA: true,
+    width: 40
+  });
+
+  progressBar.startAnimation();
+
   try {
     const result = await agent.executeTool('update_from_ai', {
       suggestion,
-      autoConfirm: false
+      autoConfirm: false,
+      onProgress: (p) => {
+        if (p.status === 'info') {
+          console.log();
+          console.log(c('  ┌─ 更新详情 ──────────────────────────────────────────────', 'bright'));
+          console.log(c('  更新ID: ' + p.details.updateId.substring(0, 8) + '...', 'white'));
+          console.log(c('  更新类型: ' + p.details.updateType, 'cyan'));
+          console.log(c('  当前版本: ' + p.details.currentVersion, 'white'));
+          console.log(c('  目标版本: ' + p.details.targetVersion, 'green'));
+          console.log(c('  来源: ' + p.details.source, 'dim'));
+          console.log(c('  更新内容预览:', 'yellow'));
+          console.log(c('    ' + p.details.contentPreview.replace(/\n/g, '\n    '), 'white'));
+          console.log(c('  └────────────────────────────────────────────────────────', 'bright'));
+          console.log();
+          progressBar.startTime = Date.now();
+        } else if (p.status === 'success') {
+          progressBar.complete('更新完成', `${p.elapsedMs}ms`);
+        } else if (p.status === 'failed') {
+          progressBar.fail('更新失败', p.details.error);
+        } else if (p.status === 'cancelled') {
+          progressBar.fail('已取消', p.description);
+        } else if (p.status === 'error') {
+          progressBar.fail('更新异常', p.details.error);
+        } else {
+          progressBar.update(p.progress, { 
+            description: p.stepName || p.description,
+            status: p.details.filePath || p.details.type || ''
+          });
+        }
+      }
     });
     
     if (result.success) {
@@ -1955,6 +1998,7 @@ async function aiUpdate() {
       console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
     }
   } catch (error) {
+    progressBar.fail('更新失败', error.message);
     console.log(c('  ✗ 更新失败: ' + error.message, 'red'));
   }
   
@@ -1991,11 +2035,52 @@ async function createUpdate() {
     return;
   }
   
+  console.log();
+  
+  const progressBar = new ProgressBar({
+    total: 100,
+    description: '创建并执行更新',
+    showPercent: true,
+    showETA: true,
+    width: 40
+  });
+
+  progressBar.startAnimation();
+
   try {
     const result = await agent.executeTool('self_update', {
       updateType: type,
       content: contentObj,
-      autoConfirm: false
+      autoConfirm: false,
+      onProgress: (p) => {
+        if (p.status === 'info') {
+          console.log();
+          console.log(c('  ┌─ 更新详情 ──────────────────────────────────────────────', 'bright'));
+          console.log(c('  更新ID: ' + p.details.updateId.substring(0, 8) + '...', 'white'));
+          console.log(c('  更新类型: ' + p.details.updateType, 'cyan'));
+          console.log(c('  当前版本: ' + p.details.currentVersion, 'white'));
+          console.log(c('  目标版本: ' + p.details.targetVersion, 'green'));
+          console.log(c('  来源: ' + p.details.source, 'dim'));
+          console.log(c('  更新内容预览:', 'yellow'));
+          console.log(c('    ' + p.details.contentPreview.replace(/\n/g, '\n    '), 'white'));
+          console.log(c('  └────────────────────────────────────────────────────────', 'bright'));
+          console.log();
+          progressBar.startTime = Date.now();
+        } else if (p.status === 'success') {
+          progressBar.complete('更新完成', `${p.elapsedMs}ms`);
+        } else if (p.status === 'failed') {
+          progressBar.fail('更新失败', p.details.error);
+        } else if (p.status === 'cancelled') {
+          progressBar.fail('已取消', p.description);
+        } else if (p.status === 'error') {
+          progressBar.fail('更新异常', p.details.error);
+        } else {
+          progressBar.update(p.progress, { 
+            description: p.stepName || p.description,
+            status: p.details.filePath || p.details.type || ''
+          });
+        }
+      }
     });
     
     if (result.success) {
@@ -2005,6 +2090,7 @@ async function createUpdate() {
       console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
     }
   } catch (error) {
+    progressBar.fail('更新失败', error.message);
     console.log(c('  ✗ 更新失败: ' + error.message, 'red'));
   }
   
@@ -2022,10 +2108,51 @@ async function executeUpdate() {
     return;
   }
   
+  console.log();
+  
+  const progressBar = new ProgressBar({
+    total: 100,
+    description: '执行更新',
+    showPercent: true,
+    showETA: true,
+    width: 40
+  });
+
+  progressBar.startAnimation();
+
   try {
     const result = await agent.executeTool('self_update', {
       updateId,
-      autoConfirm: false
+      autoConfirm: false,
+      onProgress: (p) => {
+        if (p.status === 'info') {
+          console.log();
+          console.log(c('  ┌─ 更新详情 ──────────────────────────────────────────────', 'bright'));
+          console.log(c('  更新ID: ' + p.details.updateId.substring(0, 8) + '...', 'white'));
+          console.log(c('  更新类型: ' + p.details.updateType, 'cyan'));
+          console.log(c('  当前版本: ' + p.details.currentVersion, 'white'));
+          console.log(c('  目标版本: ' + p.details.targetVersion, 'green'));
+          console.log(c('  来源: ' + p.details.source, 'dim'));
+          console.log(c('  更新内容预览:', 'yellow'));
+          console.log(c('    ' + p.details.contentPreview.replace(/\n/g, '\n    '), 'white'));
+          console.log(c('  └────────────────────────────────────────────────────────', 'bright'));
+          console.log();
+          progressBar.startTime = Date.now();
+        } else if (p.status === 'success') {
+          progressBar.complete('更新完成', `${p.elapsedMs}ms`);
+        } else if (p.status === 'failed') {
+          progressBar.fail('更新失败', p.details.error);
+        } else if (p.status === 'cancelled') {
+          progressBar.fail('已取消', p.description);
+        } else if (p.status === 'error') {
+          progressBar.fail('更新异常', p.details.error);
+        } else {
+          progressBar.update(p.progress, { 
+            description: p.stepName || p.description,
+            status: p.details.filePath || p.details.type || ''
+          });
+        }
+      }
     });
     
     if (result.success) {
@@ -2034,6 +2161,7 @@ async function executeUpdate() {
       console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
     }
   } catch (error) {
+    progressBar.fail('执行失败', error.message);
     console.log(c('  ✗ 执行失败: ' + error.message, 'red'));
   }
   
@@ -2095,10 +2223,40 @@ async function rollbackUpdate() {
   }
   
   try {
-    const result = await agent.executeTool('rollback_update', { updateId });
+    const { rollbackManager } = require('../services/bootstrap/rollback');
+    const result = await rollbackManager.rollbackUpdate(updateId);
     
     if (result.success) {
       console.log(c('  ✓ 回滚成功！', 'green'));
+      console.log(c('    备份ID: ' + (result.backupUsed || 'N/A'), 'white'));
+    } else {
+      console.log(c('  ✗ 回滚失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 回滚失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function rollbackToVersion() {
+  const version = await ask('  请输入要回滚到的版本号: ');
+  
+  if (version === '__CANCEL__') return;
+  if (version.toLowerCase() === 'q' || version.toLowerCase() === 'quit') return;
+  if (!version) {
+    console.log(c('  请输入版本号', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  try {
+    const { rollbackManager } = require('../services/bootstrap/rollback');
+    const result = await rollbackManager.rollbackToVersion(version);
+    
+    if (result.success) {
+      console.log(c('  ✓ 按版本回滚成功！', 'green'));
+      console.log(c('    更新ID: ' + result.updateId, 'white'));
     } else {
       console.log(c('  ✗ 回滚失败: ' + result.error, 'red'));
     }

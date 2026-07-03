@@ -214,6 +214,27 @@ function validate() {
   if (!config.database.path) {
     errors.push('数据库路径未配置');
   }
+
+  if (isOnlineMode()) {
+    const hasApiKey = config.llm.providers && 
+      Object.values(config.llm.providers).some(p => p.apiKey && p.apiKey.length > 0);
+    
+    if (!hasApiKey) {
+      errors.push('在线模式下需要配置至少一个AI API密钥');
+    }
+  }
+
+  if (config.server.port && (typeof config.server.port !== 'number' || config.server.port < 1 || config.server.port > 65535)) {
+    errors.push('服务端口必须是1-65535之间的数字');
+  }
+
+  if (config.llm && config.llm.timeout && (typeof config.llm.timeout !== 'number' || config.llm.timeout < 1000)) {
+    errors.push('LLM超时时间必须大于1000ms');
+  }
+
+  if (config.llm && config.llm.maxRetries && (typeof config.llm.maxRetries !== 'number' || config.llm.maxRetries < 0)) {
+    errors.push('LLM最大重试次数必须大于等于0');
+  }
   
   if (errors.length > 0) {
     console.error('配置验证失败:', errors);

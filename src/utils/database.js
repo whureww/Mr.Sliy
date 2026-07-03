@@ -419,10 +419,12 @@ const allTablesSqlite = [
     status VARCHAR(20) DEFAULT 'pending',
     user_confirmed BOOLEAN DEFAULT 0,
     confirmed_at DATETIME,
+    rejected_step VARCHAR(100),
     sandbox_result TEXT,
     applied_at DATETIME,
     rollback_version VARCHAR(20),
     rollback_at DATETIME,
+    rolled_back_reason VARCHAR(200),
     error_message TEXT,
     duration_ms INTEGER,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -442,10 +444,28 @@ const allTablesSqlite = [
     sandbox_result TEXT,
     applied_at DATETIME,
     rollback_at DATETIME,
+    rolled_back_reason VARCHAR(200),
     error_count INTEGER DEFAULT 1,
     last_error_at DATETIME,
     duration_ms INTEGER,
     error_message_detail TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS confirmation_history (
+    id TEXT PRIMARY KEY,
+    operation_type VARCHAR(100) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    step_name VARCHAR(100),
+    step_number INTEGER DEFAULT 0,
+    total_steps INTEGER DEFAULT 0,
+    description TEXT NOT NULL,
+    impact VARCHAR(500),
+    files_affected TEXT,
+    backup_available BOOLEAN DEFAULT 0,
+    rollback_possible BOOLEAN DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'pending',
+    reason VARCHAR(200),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`
 ];
@@ -492,7 +512,11 @@ const allIndexesSqlite = [
   'CREATE INDEX IF NOT EXISTS idx_repair_error_type ON self_repair_history(error_type)',
   'CREATE INDEX IF NOT EXISTS idx_repair_status ON self_repair_history(status)',
   'CREATE INDEX IF NOT EXISTS idx_repair_created_at ON self_repair_history(created_at)',
-  'CREATE INDEX IF NOT EXISTS idx_repair_component ON self_repair_history(affected_component)'
+  'CREATE INDEX IF NOT EXISTS idx_repair_component ON self_repair_history(affected_component)',
+  'CREATE INDEX IF NOT EXISTS idx_confirmation_operation ON confirmation_history(operation_type)',
+  'CREATE INDEX IF NOT EXISTS idx_confirmation_risk_level ON confirmation_history(risk_level)',
+  'CREATE INDEX IF NOT EXISTS idx_confirmation_status ON confirmation_history(status)',
+  'CREATE INDEX IF NOT EXISTS idx_confirmation_created_at ON confirmation_history(created_at)'
 ];
 
 let sqliteInitialized = false;
@@ -502,14 +526,6 @@ function ensureSqliteTables() {
   sqliteInitialized = true;
 
   const db = getDatabase();
-  
-  try {
-    db.exec('DROP TABLE IF EXISTS self_update_history');
-    db.exec('DROP TABLE IF EXISTS self_repair_history');
-    logger.debug('已删除旧的自更新/自修复表');
-  } catch (e) {
-    logger.debug('删除旧表失败:', e.message);
-  }
   
   for (const sql of allTablesSqlite) {
     try {
@@ -523,8 +539,19 @@ function ensureSqliteTables() {
     try {
       db.exec(sql);
     } catch (e) {
-      // ignore index errors
+      logger.debug(`创建索引失败: ${e.message}`);
     }
+  }
+
+  try {
+    db.exec(`
+      ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS rejected_step VARCHAR(100);
+      ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS rolled_back_reason VARCHAR(200);
+      ALTER TABLE IF EXISTS self_repair_history ADD COLUMN IF NOT EXISTS rolled_back_reason VARCHAR(200);
+    `);
+    logger.debug('已检查并添加缺失字段');
+  } catch (e) {
+    logger.debug('检查缺失字段失败:', e.message);
   }
   
   logger.debug('SQLite 表结构检查完成');
