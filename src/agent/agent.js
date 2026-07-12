@@ -631,12 +631,13 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
         case 'update_from_ai': {
           const suggestion = p.suggestion;
           const autoConfirm = p.autoConfirm || false;
+          const onProgress = p.onProgress;
           
           if (!suggestion) {
             return { success: false, message: '更新建议不能为空' };
           }
           
-          return await selfUpdateManager.updateFromAISuggestion(suggestion, { autoConfirm });
+          return await selfUpdateManager.updateFromAISuggestion(suggestion, { autoConfirm, onProgress });
         }
         
         case 'list_updates': {

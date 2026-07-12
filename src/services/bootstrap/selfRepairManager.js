@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../utils/logger');
 const { execute, query, queryOne } = require('../../utils/database');
-const { generateUUID } = require('../../utils/helpers');
+const { generateUUID, bumpVersion } = require('../../utils/helpers');
 const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
@@ -132,12 +132,16 @@ class SelfRepairManager {
           errorCount: 1
         });
 
+        const versionResult = await this.bumpProjectVersion();
+        logger.info(`修复成功，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
+
         return {
           success: true,
           errorType,
           strategy: strategyName,
           message: `使用策略 "${strategyInfo.description}" 修复成功`,
-          durationMs: Date.now() - startTime
+          durationMs: Date.now() - startTime,
+          versionBump: versionResult
         };
       }
 
@@ -513,6 +517,24 @@ class SelfRepairManager {
     } catch (error) {
       logger.error('保存修复记录失败:', error);
     }
+  }
+
+  /**
+   * 版本迭代：每次修复成功后自动递增版本号
+   * 规则：每个版本最多10个小版本（0-9），达到9时进位
+   */
+  async bumpProjectVersion() {
+    const pkgPath = path.join(__dirname, '../../../package.json');
+    const pkg = require(pkgPath);
+    const oldVersion = pkg.version;
+    const newVersion = bumpVersion(oldVersion);
+
+    pkg.version = newVersion;
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
+
+    return { oldVersion, newVersion };
   }
 
   async repairFromAI(error, options = {}) {

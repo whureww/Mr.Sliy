@@ -565,7 +565,7 @@ class DualModeEngine {
   getStatus() {
     const actualMode = this.getActualMode();
     const providers = providerManager.getAvailableProviders();
-    const kbStats = knowledgeBase.getStats();
+    const kbStats = knowledgeBase.getCachedStats();
     
     return {
       mode: this.mode,

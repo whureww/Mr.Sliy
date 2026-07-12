@@ -194,6 +194,25 @@ backend/
 
 ## 📝 更新日志
 
+### v2.4.7
+- **🐛 标题对齐修复**：修复智能体大标题文字无法对齐的问题，新增 `stripAnsi()`、`getDisplayWidth()`、`padEndDisplay()` 工具函数正确计算中文字符和emoji的终端显示宽度
+- **🐛 知识库统计修复**：修复知识库统计显示 `undefined` 的问题，新增缓存统计信息机制（`cachedStats`），`getStatus()` 改为同步获取
+- **🐛 MySQL回退修复**：修复 MySQL 连接失败时未正确回退到 SQLite 的问题，`testConnection()` 和 `initDatabase()` 失败时自动设置 `config.mysql.enabled = false`
+- **🐛 自更新卡死修复**：修复自更新因缺少 `rollbackManager` 导入导致卡死的问题，添加 LLM API 调用超时机制（120秒）
+- **🐛 确认门控不显示修复**：修复进度条动画覆盖确认门控输出的问题，备份时排除 `node_modules`、`.git` 等大目录，备份时间从数分钟降至1秒
+- **✨ 版本自动迭代**：每次更新或修复成功后自动递增版本号，每个版本最多10个小版本（0-9），达到9时自动进位
+- **✨ 进度反馈增强**：AI智能更新全流程添加进度回调（分析需求→调用AI→解析响应→创建记录→执行更新）
+- **✨ 数据库回退增强**：`query()`、`queryOne()`、`execute()` 函数在 MySQL 失败时自动回退到 SQLite
+- **🔧 备份性能优化**：`createBackup()` 排除 `node_modules`、`.git`、`backups`、`logs` 等大目录，新增 `getDirectoryFilesExclude()` 方法
+- **🔧 确认门控体验**：收到 `status: 'confirming'` 事件时停止进度条动画并清除行内容，确保确认门控正常显示
+- **🔧 CLI显示增强**：更新成功后显示版本迭代信息（如 `2.4.6 -> 2.4.7`）
+
+### v2.4.6
+- **☁️ 知识库默认云端存储**：知识库默认优先从云端MySQL读取，MySQL不可用时自动回退到本地SQLite
+- **🔄 智能双模式切换**：所有知识库操作（增删改查、导入导出、同步）自动适配MySQL和SQLite
+- **🔒 敏感信息保护**：数据库连接信息通过 `.env` 文件配置，已在 `.gitignore` 中排除，不会泄露到GitHub
+- **📊 存储状态显示**：知识库统计接口返回 `storage` 字段，标识当前使用的是 mysql 还是 sqlite
+
 ### v2.4.5
 - **🔧 重构回滚机制**：回滚作为更新和修复的子模块，不再是独立模块
 - **📊 代码结构优化**：删除独立的 rollback.js，回滚逻辑整合到 selfUpdateManager 和 selfRepairManager
