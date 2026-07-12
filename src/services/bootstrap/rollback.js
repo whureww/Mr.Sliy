@@ -42,8 +42,9 @@ class RollbackManager {
       const filesToBackup = [];
       
       if (stats.isDirectory()) {
-        await this.copyDirectory(targetPath, backupDir);
-        filesToBackup.push(...this.getDirectoryFiles(targetPath));
+        const excludeDirs = ['node_modules', '.git', 'backups', 'logs', 'module_backups', '.trae-cn', 'dist', 'build'];
+        await this.copyDirectoryExclude(targetPath, backupDir, excludeDirs);
+        filesToBackup.push(...this.getDirectoryFilesExclude(targetPath, excludeDirs));
       } else {
         fs.copyFileSync(targetPath, path.join(backupDir, path.basename(targetPath)));
         filesToBackup.push(targetPath);
@@ -80,6 +81,29 @@ class RollbackManager {
       try { fs.rmSync(backupDir, { recursive: true, force: true }); } catch {}
       return { success: false, error: error.message };
     }
+  }
+
+  getDirectoryFilesExclude(dir, excludeDirs = []) {
+    const files = [];
+    
+    const items = fs.readdirSync(dir);
+    
+    for (const item of items) {
+      if (excludeDirs.includes(item)) {
+        continue;
+      }
+      
+      const fullPath = path.join(dir, item);
+      const stats = fs.statSync(fullPath);
+      
+      if (stats.isDirectory()) {
+        files.push(...this.getDirectoryFilesExclude(fullPath, excludeDirs));
+      } else {
+        files.push(fullPath);
+      }
+    }
+    
+    return files;
   }
 
   async restoreBackup(backupId) {

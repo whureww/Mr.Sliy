@@ -50,3 +50,7 @@ coverage/
 
 # Package files
 *.tgz
+
+# Backup files
+backups/
+module_backups/

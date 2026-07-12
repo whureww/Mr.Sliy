@@ -106,9 +106,14 @@ async function closeDatabase() {
  */
 async function query(sql, params = []) {
   if (isUsingMySql()) {
-    const pool = await getMySqlPool();
-    const [rows] = await pool.execute(sql, params);
-    return rows;
+    try {
+      const pool = await getMySqlPool();
+      const [rows] = await pool.execute(sql, params);
+      return rows;
+    } catch (error) {
+      logger.warn('MySQL查询失败，回退到SQLite:', error.message);
+      config.mysql.enabled = false;
+    }
   }
 
   const db = getDatabase();
@@ -125,9 +130,14 @@ async function query(sql, params = []) {
  */
 async function queryOne(sql, params = []) {
   if (isUsingMySql()) {
-    const pool = await getMySqlPool();
-    const [rows] = await pool.execute(sql, params);
-    return rows[0] || null;
+    try {
+      const pool = await getMySqlPool();
+      const [rows] = await pool.execute(sql, params);
+      return rows[0] || null;
+    } catch (error) {
+      logger.warn('MySQL查询失败，回退到SQLite:', error.message);
+      config.mysql.enabled = false;
+    }
   }
 
   const db = getDatabase();
@@ -144,13 +154,18 @@ async function queryOne(sql, params = []) {
  */
 async function execute(sql, params = []) {
   if (isUsingMySql()) {
-    const pool = await getMySqlPool();
-    const [result] = await pool.execute(sql, params);
-    return {
-      success: true,
-      changes: result.affectedRows,
-      lastInsertRowid: result.insertId
-    };
+    try {
+      const pool = await getMySqlPool();
+      const [result] = await pool.execute(sql, params);
+      return {
+        success: true,
+        changes: result.affectedRows,
+        lastInsertRowid: result.insertId
+      };
+    } catch (error) {
+      logger.warn('MySQL执行失败，回退到SQLite:', error.message);
+      config.mysql.enabled = false;
+    }
   }
 
   const db = getDatabase();

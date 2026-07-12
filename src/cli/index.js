@@ -10,6 +10,7 @@ const path = require('path');
 const { agent } = require('../agent/agent');
 const { logger } = require('../utils/logger');
 const { ProgressBar, MultiStepProgress } = require('../utils/progress');
+const { padEndDisplay } = require('../utils/helpers');
 
 const colors = {
   reset: '\x1b[0m',
@@ -308,16 +309,46 @@ async function showMenu() {
       const version = pkg.version || '1.0.0';
 
       process.stdout.write('\n');
-      process.stdout.write(c('╔══════════════════════════════════════════════════════════════════════╗', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  ╭──────────────────────────────────────────────────────────────╮  ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  │  ', 'cyan') + c('Mr.Sliy', 'bright cyan') + c('  -  多语言代码优化智能体                   ', 'white') + c('│  ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  │  ', 'cyan') + c('v' + version, 'dim') + c('  │  基于 Tree-sitter + RAG 的智能检测优化  ', 'gray') + c('│  ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  ╰──────────────────────────────────────────────────────────────╯  ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('╠══════════════════════════════════════════════════════════════════════╣', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  🟢 离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white') + c('                    ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  🔵 在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white') + c('                 ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('║', 'cyan') + c('  ⚡ 自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white') + c('                   ', 'cyan') + c('║', 'cyan') + '\n');
-      process.stdout.write(c('╚══════════════════════════════════════════════════════════════════════╝', 'cyan') + '\n');
+      const outerWidth = 68;
+      const innerFrameWidth = outerWidth - 6;
+      const innerContentWidth = innerFrameWidth - 6;
+
+      const topBorder = c('╔', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╗', 'cyan');
+      const innerTop = c('║', 'cyan') + c('  ╭', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╮  ', 'cyan') + c('║', 'cyan');
+      const innerBottom = c('║', 'cyan') + c('  ╰', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╯  ', 'cyan') + c('║', 'cyan');
+      const middleBorder = c('╠', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╣', 'cyan');
+      const bottomBorder = c('╚', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╝', 'cyan');
+
+      const titleLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
+        padEndDisplay(c('Mr.Sliy', 'bright cyan') + c('  -  多语言代码优化智能体', 'white'), innerContentWidth) + 
+        c('  │  ', 'cyan') + c('║', 'cyan');
+
+      const versionLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
+        padEndDisplay(c('v' + version, 'dim') + c('  │  基于 Tree-sitter + RAG 的智能检测优化', 'gray'), innerContentWidth) + 
+        c('  │  ', 'cyan') + c('║', 'cyan');
+
+      const modeLine1 = c('║', 'cyan') + c('  ', 'cyan') + 
+        padEndDisplay(c('🟢 离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white'), outerWidth - 6) + 
+        c('  ', 'cyan') + c('║', 'cyan');
+
+      const modeLine2 = c('║', 'cyan') + c('  ', 'cyan') + 
+        padEndDisplay(c('🔵 在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white'), outerWidth - 6) + 
+        c('  ', 'cyan') + c('║', 'cyan');
+
+      const modeLine3 = c('║', 'cyan') + c('  ', 'cyan') + 
+        padEndDisplay(c('⚡ 自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'), outerWidth - 6) + 
+        c('  ', 'cyan') + c('║', 'cyan');
+
+      process.stdout.write(topBorder + '\n');
+      process.stdout.write(innerTop + '\n');
+      process.stdout.write(titleLine + '\n');
+      process.stdout.write(versionLine + '\n');
+      process.stdout.write(innerBottom + '\n');
+      process.stdout.write(middleBorder + '\n');
+      process.stdout.write(modeLine1 + '\n');
+      process.stdout.write(modeLine2 + '\n');
+      process.stdout.write(modeLine3 + '\n');
+      process.stdout.write(bottomBorder + '\n');
       process.stdout.write('\n');
 
       const status = agent.getStatus();
@@ -566,18 +597,48 @@ function printBanner() {
   const pkg = require('../../package.json');
   const version = pkg.version || '1.0.0';
 
+  const outerWidth = 68;
+  const innerFrameWidth = outerWidth - 6;
+  const innerContentWidth = innerFrameWidth - 6;
+
+  const topBorder = c('╔', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╗', 'cyan');
+  const innerTop = c('║', 'cyan') + c('  ╭', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╮  ', 'cyan') + c('║', 'cyan');
+  const innerBottom = c('║', 'cyan') + c('  ╰', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╯  ', 'cyan') + c('║', 'cyan');
+  const middleBorder = c('╠', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╣', 'cyan');
+  const bottomBorder = c('╚', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╝', 'cyan');
+
+  const titleLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
+    padEndDisplay(c('Mr.Sliy', 'bright cyan') + c('  -  多语言代码优化智能体', 'white'), innerContentWidth) + 
+    c('  │  ', 'cyan') + c('║', 'cyan');
+
+  const versionLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
+    padEndDisplay(c('v' + version, 'dim') + c('  │  基于 Tree-sitter + RAG 的智能检测优化', 'gray'), innerContentWidth) + 
+    c('  │  ', 'cyan') + c('║', 'cyan');
+
+  const modeLine1 = c('║', 'cyan') + c('  ', 'cyan') + 
+    padEndDisplay(c('🟢 离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white'), outerWidth - 6) + 
+    c('  ', 'cyan') + c('║', 'cyan');
+
+  const modeLine2 = c('║', 'cyan') + c('  ', 'cyan') + 
+    padEndDisplay(c('🔵 在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white'), outerWidth - 6) + 
+    c('  ', 'cyan') + c('║', 'cyan');
+
+  const modeLine3 = c('║', 'cyan') + c('  ', 'cyan') + 
+    padEndDisplay(c('⚡ 自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'), outerWidth - 6) + 
+    c('  ', 'cyan') + c('║', 'cyan');
+
   const lines = [
     '',
-    c('╔══════════════════════════════════════════════════════════════════════╗', 'cyan'),
-    c('║', 'cyan') + c('  ╭──────────────────────────────────────────────────────────────╮  ', 'cyan') + c('║', 'cyan'),
-    c('║', 'cyan') + c('  │  ', 'cyan') + c('Mr.Sliy', 'bright cyan') + c('  -  多语言代码优化智能体                   ', 'white') + c('│  ', 'cyan') + c('║', 'cyan'),
-    c('║', 'cyan') + c('  │  ', 'cyan') + c('v' + version, 'dim') + c('  │  基于 Tree-sitter + RAG 的智能检测优化  ', 'gray') + c('│  ', 'cyan') + c('║', 'cyan'),
-    c('║', 'cyan') + c('  ╰──────────────────────────────────────────────────────────────╯  ', 'cyan') + c('║', 'cyan'),
-    c('╠══════════════════════════════════════════════════════════════════════╣', 'cyan'),
-    c('║', 'cyan') + c('  🟢 离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white') + c('                    ', 'cyan') + c('║', 'cyan'),
-    c('║', 'cyan') + c('  🔵 在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white') + c('                 ', 'cyan') + c('║', 'cyan'),
-    c('║', 'cyan') + c('  ⚡ 自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white') + c('                   ', 'cyan') + c('║', 'cyan'),
-    c('╚══════════════════════════════════════════════════════════════════════╝', 'cyan'),
+    topBorder,
+    innerTop,
+    titleLine,
+    versionLine,
+    innerBottom,
+    middleBorder,
+    modeLine1,
+    modeLine2,
+    modeLine3,
+    bottomBorder,
     ''
   ];
   lines.forEach(l => console.log(l));
@@ -1981,10 +2042,13 @@ async function aiUpdate() {
           progressBar.fail('已取消', p.description);
         } else if (p.status === 'error') {
           progressBar.fail('更新异常', p.details.error);
+        } else if (p.status === 'confirming') {
+          progressBar.stopAnimation();
+          process.stdout.write('\r' + ' '.repeat(100) + '\r\n');
         } else {
           progressBar.update(p.progress, { 
             description: p.stepName || p.description,
-            status: p.details.filePath || p.details.type || ''
+            status: p.details ? (p.details.filePath || p.details.type || '') : ''
           });
         }
       }
@@ -1994,6 +2058,9 @@ async function aiUpdate() {
       console.log(c('  ✓ 更新成功！', 'green'));
       console.log(c('    更新ID: ' + result.updateId, 'white'));
       console.log(c('    更新类型: ' + result.updateType, 'white'));
+      if (result.versionBump) {
+        console.log(c('    版本迭代: ' + result.versionBump.oldVersion + ' -> ' + result.versionBump.newVersion, 'cyan'));
+      }
     } else {
       console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
     }
@@ -2074,10 +2141,13 @@ async function createUpdate() {
           progressBar.fail('已取消', p.description);
         } else if (p.status === 'error') {
           progressBar.fail('更新异常', p.details.error);
+        } else if (p.status === 'confirming') {
+          progressBar.stopAnimation();
+          process.stdout.write('\r' + ' '.repeat(100) + '\r\n');
         } else {
           progressBar.update(p.progress, { 
             description: p.stepName || p.description,
-            status: p.details.filePath || p.details.type || ''
+            status: p.details ? (p.details.filePath || p.details.type || '') : ''
           });
         }
       }
@@ -2086,6 +2156,9 @@ async function createUpdate() {
     if (result.success) {
       console.log(c('  ✓ 更新已创建并执行！', 'green'));
       console.log(c('    更新ID: ' + result.updateId, 'white'));
+      if (result.versionBump) {
+        console.log(c('    版本迭代: ' + result.versionBump.oldVersion + ' -> ' + result.versionBump.newVersion, 'cyan'));
+      }
     } else {
       console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
     }
@@ -2146,10 +2219,13 @@ async function executeUpdate() {
           progressBar.fail('已取消', p.description);
         } else if (p.status === 'error') {
           progressBar.fail('更新异常', p.details.error);
+        } else if (p.status === 'confirming') {
+          progressBar.stopAnimation();
+          process.stdout.write('\r' + ' '.repeat(100) + '\r\n');
         } else {
           progressBar.update(p.progress, { 
             description: p.stepName || p.description,
-            status: p.details.filePath || p.details.type || ''
+            status: p.details ? (p.details.filePath || p.details.type || '') : ''
           });
         }
       }
@@ -2157,6 +2233,9 @@ async function executeUpdate() {
     
     if (result.success) {
       console.log(c('  ✓ 更新执行成功！', 'green'));
+      if (result.versionBump) {
+        console.log(c('    版本迭代: ' + result.versionBump.oldVersion + ' -> ' + result.versionBump.newVersion, 'cyan'));
+      }
     } else {
       console.log(c('  ✗ 更新失败: ' + result.error, 'red'));
     }

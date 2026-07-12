@@ -206,6 +206,78 @@ function simpleHash(str) {
   return hash;
 }
 
+function stripAnsi(str) {
+  if (!str) return '';
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
+function getDisplayWidth(str) {
+  if (!str) return 0;
+  const cleanStr = stripAnsi(str);
+  let width = 0;
+  for (let i = 0; i < cleanStr.length; i++) {
+    const char = cleanStr.charCodeAt(i);
+    if (char >= 0xD800 && char <= 0xDBFF) {
+      width += 2;
+      i++;
+    } else if (
+      (char >= 0x4e00 && char <= 0x9fff) ||
+      (char >= 0x3000 && char <= 0x303f) ||
+      (char >= 0xff00 && char <= 0xffef) ||
+      (char >= 0x2000 && char <= 0x206f) ||
+      (char >= 0x2e80 && char <= 0x2eff) ||
+      (char >= 0x3400 && char <= 0x4dbf) ||
+      (char >= 0xf900 && char <= 0xfaff) ||
+      (char >= 0x2600 && char <= 0x27bf) ||
+      (char >= 0x1f300 && char <= 0x1f5ff) ||
+      (char >= 0x1f600 && char <= 0x1f64f) ||
+      (char >= 0x1f680 && char <= 0x1f6ff) ||
+      (char >= 0x1f700 && char <= 0x1f77f)
+    ) {
+      width += 2;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
+function padEndDisplay(str, targetWidth, padChar = ' ') {
+  const currentWidth = getDisplayWidth(str);
+  const padding = Math.max(0, targetWidth - currentWidth);
+  return str + padChar.repeat(padding);
+}
+
+/**
+ * 版本迭代：每个版本最多10个小版本（0-9）
+ * 小版本达到9时进位次版本，次版本达到9时进位大版本
+ * @param {string} currentVersion - 当前版本号（如 "2.4.6"）
+ * @returns {string} 新版本号（如 "2.4.7"）
+ */
+function bumpVersion(currentVersion) {
+  const parts = currentVersion.split('.').map(n => parseInt(n, 10));
+  
+  if (parts.length !== 3 || parts.some(isNaN)) {
+    throw new Error(`无效的版本号格式: ${currentVersion}`);
+  }
+  
+  let [major, minor, patch] = parts;
+  
+  patch++;
+  
+  if (patch > 9) {
+    patch = 0;
+    minor++;
+  }
+  
+  if (minor > 9) {
+    minor = 0;
+    major++;
+  }
+  
+  return `${major}.${minor}.${patch}`;
+}
+
 module.exports = {
   generateUUID,
   sleep,
@@ -222,5 +294,9 @@ module.exports = {
   safeJsonStringify,
   chunk,
   retry,
-  simpleHash
+  simpleHash,
+  stripAnsi,
+  getDisplayWidth,
+  padEndDisplay,
+  bumpVersion
 };

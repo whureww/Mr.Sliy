@@ -2,11 +2,12 @@ const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../utils/logger');
 const { execute, query, queryOne } = require('../../utils/database');
-const { generateUUID } = require('../../utils/helpers');
+const { generateUUID, bumpVersion } = require('../../utils/helpers');
 const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
 const { eventBus } = require('../../utils/eventBus');
+const { rollbackManager } = require('./rollback');
 
 class SelfUpdateManager {
   constructor() {
@@ -214,6 +215,14 @@ class SelfUpdateManager {
       if (!options.skipConfirmation) {
         reportProgress(3, '确认备份完成', { backupCreated });
         
+        if (onProgress) {
+          onProgress({
+            progress: null,
+            description: '等待用户确认',
+            status: 'confirming'
+          });
+        }
+        
         const backupConfirmation = await confirmationGate.requestConfirmation({
           operationType: 'create_backup',
           description: `备份已创建${backupCreated ? '成功' : '失败'}，是否继续执行${updateRecord.update_type}更新？`,
@@ -258,6 +267,14 @@ class SelfUpdateManager {
 
       if (!options.skipConfirmation) {
         reportProgress(4, '等待应用更新确认', { type: updateRecord.update_type });
+        
+        if (onProgress) {
+          onProgress({
+            progress: null,
+            description: '等待用户确认',
+            status: 'confirming'
+          });
+        }
         
         const applyConfirmation = await confirmationGate.requestConfirmation({
           operationType: updateRecord.update_type === 'code' ? 'update_code' : 
@@ -314,6 +331,14 @@ class SelfUpdateManager {
       
       if (applyResult.success) {
         if (!options.skipConfirmation) {
+          if (onProgress) {
+            onProgress({
+              progress: null,
+              description: '等待用户确认',
+              status: 'confirming'
+            });
+          }
+          
           const verifyConfirmation = await confirmationGate.requestConfirmation({
             operationType: 'run_validation',
             description: `更新验证成功！是否确认完成${updateRecord.update_type}更新？`,
@@ -369,7 +394,8 @@ class SelfUpdateManager {
           confirmedAt: updateRecord.confirmedAt
         });
 
-        logger.info(`更新应用成功: ${updateId}`);
+        const versionResult = await this.bumpProjectVersion();
+        logger.info(`更新应用成功: ${updateId}，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
 
         reportProgress(7, '更新完成', applyResult, 100);
 
@@ -377,7 +403,7 @@ class SelfUpdateManager {
           onProgress({ 
             progress: 100, 
             description: '更新完成', 
-            details: applyResult,
+            details: { ...applyResult, versionBump: versionResult },
             status: 'success',
             elapsedMs: Date.now() - startTime
           });
@@ -390,7 +416,8 @@ class SelfUpdateManager {
           status: 'applied',
           durationMs: Date.now() - startTime,
           details: applyResult,
-          backupCreated
+          backupCreated,
+          versionBump: versionResult
         };
       } else {
         await this.updateUpdateRecord(updateId, {
@@ -739,10 +766,33 @@ class SelfUpdateManager {
     }
   }
 
+  /**
+   * 版本迭代：每次更新成功后自动递增版本号
+   * 规则：每个版本最多10个小版本（0-9），达到9时进位
+   */
+  async bumpProjectVersion() {
+    const pkgPath = path.join(__dirname, '../../../package.json');
+    const pkg = require(pkgPath);
+    const oldVersion = pkg.version;
+    const newVersion = bumpVersion(oldVersion);
+
+    pkg.version = newVersion;
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
+
+    return { oldVersion, newVersion };
+  }
+
   async updateFromAISuggestion(suggestion, options = {}) {
+    const { onProgress, skipConfirmation, autoConfirm } = options;
     const provider = providerManager.getActiveProvider();
     if (!provider) {
       return { success: false, error: '未配置LLM提供商' };
+    }
+
+    if (onProgress) {
+      onProgress({ progress: 5, description: '分析更新需求', status: 'running' });
     }
 
     const prompt = `你是一个代码优化专家。用户请求更新智能体，请分析以下建议并生成具体的更新内容。
@@ -766,7 +816,26 @@ ${suggestion}
 2. code类型的filePath必须是相对于项目根目录的路径
 3. 确保代码内容完整且正确`;
 
-    const result = await provider.chat([{ role: 'user', content: prompt }], { temperature: 0.3 });
+    if (onProgress) {
+      onProgress({ progress: 10, description: '调用AI生成更新方案', status: 'running' });
+    }
+
+    const chatTimeout = setTimeout(() => {
+      const err = new Error('AI响应超时，请检查网络连接和API配置');
+      err.code = 'TIMEOUT';
+      throw err;
+    }, 120000);
+
+    let result;
+    try {
+      result = await provider.chat([{ role: 'user', content: prompt }], { temperature: 0.3 });
+    } finally {
+      clearTimeout(chatTimeout);
+    }
+
+    if (onProgress) {
+      onProgress({ progress: 40, description: '解析AI响应', status: 'running' });
+    }
 
     let updateData;
     try {
@@ -780,6 +849,10 @@ ${suggestion}
       return { success: false, error: '解析AI响应失败' };
     }
 
+    if (onProgress) {
+      onProgress({ progress: 50, description: '创建更新记录', status: 'running' });
+    }
+
     const createResult = await this.createUpdate(updateData.updateType, updateData.content, {
       source: 'ai_suggestion',
       description: updateData.description
@@ -787,6 +860,10 @@ ${suggestion}
 
     if (!createResult.success) {
       return createResult;
+    }
+
+    if (onProgress) {
+      onProgress({ progress: 55, description: '执行更新', status: 'running' });
     }
 
     return await this.executeUpdate(createResult.updateId, options);
