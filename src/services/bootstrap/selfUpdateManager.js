@@ -394,26 +394,9 @@ class SelfUpdateManager {
           confirmedAt: updateRecord.confirmedAt
         });
 
-        const changelogItems = [
-          `**${updateRecord.update_type === 'code' ? '代码更新' : updateRecord.update_type === 'config' ? '配置更新' : updateRecord.update_type === 'knowledge' ? '知识库更新' : '依赖更新'}**: ${updateRecord.update_source === 'ai_suggestion' ? 'AI生成的更新' : '手动更新'}`,
-          `更新内容: ${this._getContentPreview(updateRecord.update_content)}`
-        ];
-        const versionResult = await this.bumpProjectVersion(changelogItems);
-        logger.info(`更新应用成功: ${updateId}，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
-
         reportProgress(7, '更新完成', applyResult, 100);
 
-        if (onProgress) {
-          onProgress({ 
-            progress: 100, 
-            description: '更新完成', 
-            details: { ...applyResult, versionBump: versionResult },
-            status: 'success',
-            elapsedMs: Date.now() - startTime
-          });
-        }
-
-        return {
+        const successResult = {
           success: true,
           updateId,
           updateType: updateRecord.update_type,
@@ -421,8 +404,24 @@ class SelfUpdateManager {
           durationMs: Date.now() - startTime,
           details: applyResult,
           backupCreated,
-          versionBump: versionResult
+          versionBump: null
         };
+
+        if (onProgress) {
+          onProgress({ 
+            progress: 100, 
+            description: '更新完成', 
+            details: { ...applyResult },
+            status: 'success',
+            elapsedMs: Date.now() - startTime
+          });
+        }
+
+        this.performVersionBump(updateId, updateRecord, applyResult).catch(error => {
+          logger.error(`版本迭代失败: ${error.message}`);
+        });
+
+        return successResult;
       } else {
         await this.updateUpdateRecord(updateId, {
           status: 'failed',
@@ -961,6 +960,26 @@ class SelfUpdateManager {
     logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
 
     return { oldVersion, newVersion };
+  }
+
+  async performVersionBump(updateId, updateRecord, applyResult) {
+    try {
+      const changelogItems = [
+        `**${updateRecord.update_type === 'code' ? '代码更新' : updateRecord.update_type === 'config' ? '配置更新' : updateRecord.update_type === 'knowledge' ? '知识库更新' : '依赖更新'}**: ${updateRecord.update_source === 'ai_suggestion' ? 'AI生成的更新' : '手动更新'}`,
+        `更新内容: ${this._getContentPreview(updateRecord.update_content)}`
+      ];
+      const versionResult = await this.bumpProjectVersion(changelogItems);
+      logger.info(`更新应用成功: ${updateId}，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
+
+      await this.updateUpdateRecord(updateId, {
+        versionAfter: versionResult.newVersion
+      });
+
+      return versionResult;
+    } catch (error) {
+      logger.error(`版本迭代失败: ${error.message}`);
+      throw error;
+    }
   }
 
   async updateFromAISuggestion(suggestion, options = {}) {

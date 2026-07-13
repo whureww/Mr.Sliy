@@ -132,22 +132,20 @@ class SelfRepairManager {
           errorCount: 1
         });
 
-        const changelogItems = [
-          `**修复**: ${strategyInfo.description}`,
-          `错误类型: ${errorType}`,
-          `修复策略: ${strategyName}`
-        ];
-        const versionResult = await this.bumpProjectVersion(changelogItems);
-        logger.info(`修复成功，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
-
-        return {
+        const successResult = {
           success: true,
           errorType,
           strategy: strategyName,
           message: `使用策略 "${strategyInfo.description}" 修复成功`,
           durationMs: Date.now() - startTime,
-          versionBump: versionResult
+          versionBump: null
         };
+
+        this.performVersionBump(errorType, strategyName, strategyInfo, attemptResult).catch(error => {
+          logger.error(`版本迭代失败: ${error.message}`);
+        });
+
+        return successResult;
       }
 
       logger.warn(`修复策略 ${strategyName} 失败: ${attemptResult.error}`);
@@ -549,6 +547,23 @@ class SelfRepairManager {
     logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
 
     return { oldVersion, newVersion };
+  }
+
+  async performVersionBump(errorType, strategyName, strategyInfo, attemptResult) {
+    try {
+      const changelogItems = [
+        `**修复**: ${strategyInfo.description}`,
+        `错误类型: ${errorType}`,
+        `修复策略: ${strategyName}`
+      ];
+      const versionResult = await this.bumpProjectVersion(changelogItems);
+      logger.info(`修复成功，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
+
+      return versionResult;
+    } catch (error) {
+      logger.error(`版本迭代失败: ${error.message}`);
+      throw error;
+    }
   }
 
   async repairFromAI(error, options = {}) {
