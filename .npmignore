@@ -1,0 +1,17 @@
+node_modules/
+.git/
+.vscode/
+logs/
+temp/
+*.log
+.env
+.env.local
+dist/
+coverage/
+database/*.db
+data/*.db
+wasm/
+backups/
+publish_temp/
+test_modules/
+*.test.js

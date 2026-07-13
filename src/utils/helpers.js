@@ -278,6 +278,46 @@ function bumpVersion(currentVersion) {
   return `${major}.${minor}.${patch}`;
 }
 
+function updateReadme(readmePath, newVersion, changelogItems = []) {
+  const fs = require('fs');
+  
+  if (!fs.existsSync(readmePath)) {
+    return { success: false, error: 'README文件不存在' };
+  }
+  
+  let content = fs.readFileSync(readmePath, 'utf8');
+  
+  content = content.replace(/### v[\d.]+/, `### v${newVersion}`);
+  
+  if (changelogItems.length > 0) {
+    const changelogSection = content.match(/## 📝 更新日志[\s\S]*/);
+    if (changelogSection) {
+      const existingContent = changelogSection[0];
+      const firstVersionMatch = existingContent.match(/### v[\d.]+/);
+      
+      if (firstVersionMatch) {
+        const firstVersionIndex = existingContent.indexOf(firstVersionMatch[0]);
+        let newEntry = `### v${newVersion}\n`;
+        
+        const today = new Date();
+        const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        newEntry += `> 更新日期: ${dateStr}\n\n`;
+        
+        for (const item of changelogItems) {
+          newEntry += `- ${item}\n`;
+        }
+        newEntry += '\n';
+        
+        const updatedChangelog = newEntry + existingContent.substring(firstVersionIndex);
+        content = content.replace(existingContent, updatedChangelog);
+      }
+    }
+  }
+  
+  fs.writeFileSync(readmePath, content, 'utf8');
+  return { success: true };
+}
+
 module.exports = {
   generateUUID,
   sleep,
@@ -298,5 +338,6 @@ module.exports = {
   stripAnsi,
   getDisplayWidth,
   padEndDisplay,
-  bumpVersion
+  bumpVersion,
+  updateReadme
 };
