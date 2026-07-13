@@ -1,0 +1,383 @@
+/**
+ * RAG代码优化Agent服务
+ * 基于检索增强生成技术的代码智能优化
+ */
+
+const { config } = require('../../config');
+const { logger } = require('../../utils/logger');
+const { generateUUID, retry } = require('../../utils/helpers');
+const { getDatabase } = require('../../utils/database');
+const { providerManager } = require('../llm/providers');
+
+// 代码片段向量存储（简化版）
+const codeVectorStore = new Map();
+
+// 优化历史记录缓存
+const optimizationHistory = [];
+
+/**
+ * AI API客户端
+ * 使用真实的LLM提供商进行代码优化
+ */
+class AIClient {
+  constructor() {
+    this.providerManager = providerManager;
+  }
+
+  /**
+   * 调用真实AI API进行代码优化
+   */
+  async optimizeCode(codeSnippet, context) {
+    const provider = this.providerManager.getActiveProvider();
+    if (!provider) {
+      return {
+        success: false,
+        message: '未配置可用的LLM提供商，无法使用AI优化功能'
+      };
+    }
+
+    try {
+      const prompt = this.buildOptimizationPrompt(codeSnippet, context);
+      const messages = [
+        { role: 'system', content: '你是一个代码优化专家，擅长代码重构、性能优化和最佳实践建议。请严格按照JSON格式返回结果。' },
+        { role: 'user', content: prompt }
+      ];
+
+      const result = await provider.chat(messages, {
+        temperature: 0.3,
+        maxTokens: 2000
+      });
+
+      // 解析AI返回的结果
+      let optimizedCode = '';
+      let explanation = '';
+      let suggestions = [];
+
+      if (typeof result.content === 'object' && result.content !== null) {
+        // AI直接返回了JSON对象
+        optimizedCode = result.content.optimizedCode || '';
+        explanation = result.content.explanation || '';
+        suggestions = result.content.suggestions || [];
+      } else if (typeof result.rawContent === 'string') {
+        // 从文本中解析JSON
+        try {
+          const jsonMatch = result.rawContent.match(/```json\s*([\s\S]*?)\s*```/) || result.rawContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+            optimizedCode = parsed.optimizedCode || '';
+            explanation = parsed.explanation || '';
+            suggestions = parsed.suggestions || [];
+          } else {
+            // 无法解析JSON，使用原始文本作为说明
+            explanation = result.rawContent;
+          }
+        } catch (parseError) {
+          explanation = result.rawContent;
+        }
+      }
+
+      return {
+        success: true,
+        optimizedCode,
+        explanation,
+        suggestions,
+        tokensUsed: result.tokensUsed || 0
+      };
+    } catch (error) {
+      logger.error('AI优化调用失败:', error);
+      return {
+        success: false,
+        message: error.message
+      };
+    }
+  }
+
+  /**
+   * 构建优化提示词
+   */
+  buildOptimizationPrompt(codeSnippet, context) {
+    return `请分析以下代码片段并提供优化建议。
+
+代码语言: ${context.language || '未知'}
+代码类型: ${context.issueType || 'general'}
+问题描述: ${context.message || '一般性优化'}
+
+原始代码:
+\`\`\`${context.language || ''}
+${codeSnippet}
+\`\`\`
+
+请提供以下内容：
+1. 优化后的代码（完整可运行的代码）
+2. 优化说明（为什么这样优化，解决了什么问题）
+3. 最佳实践建议（通用的编码建议）
+
+请以JSON格式返回：
+{
+  "optimizedCode": "优化后的完整代码",
+  "explanation": "优化说明",
+  "suggestions": ["建议1", "建议2"]
+}`;
+  }
+}
+
+const aiClient = new AIClient();
+
+/**
+ * 代码片段索引（简化版向量存储）
+ */
+function indexCodeSnippet(snippet, metadata) {
+  const id = generateUUID();
+  
+  // 简化的特征提取（实际应使用embedding模型）
+  const features = extractFeatures(snippet);
+  
+  codeVectorStore.set(id, {
+    id,
+    snippet,
+    features,
+    metadata,
+    indexedAt: new Date()
+  });
+  
+  logger.info(`索引代码片段: ${id}`);
+  return id;
+}
+
+/**
+ * 提取代码特征（简化版）
+ */
+function extractFeatures(code) {
+  const features = {
+    length: code.length,
+    lines: code.split('\n').length,
+    keywords: extractKeywords(code),
+    complexity: calculateComplexity(code)
+  };
+  
+  return features;
+}
+
+/**
+ * 提取关键词
+ */
+function extractKeywords(code) {
+  const keywords = [];
+  const patterns = [
+    /\b(function|const|let|var|if|else|for|while|return|class|import|export)\b/g,
+    /\b(async|await|try|catch|throw|new|this)\b/g
+  ];
+  
+  patterns.forEach(pattern => {
+    const matches = code.match(pattern);
+    if (matches) {
+      keywords.push(...matches);
+    }
+  });
+  
+  return keywords;
+}
+
+/**
+ * 计算代码复杂度（简化版）
+ */
+function calculateComplexity(code) {
+  let complexity = 1;
+  
+  // 计算控制流语句
+  const controlPatterns = [
+    /\bif\b/g,
+    /\belse\b/g,
+    /\bfor\b/g,
+    /\bwhile\b/g,
+    /\bswitch\b/g,
+    /\bcatch\b/g
+  ];
+  
+  controlPatterns.forEach(pattern => {
+    const matches = code.match(pattern);
+    if (matches) {
+      complexity += matches.length;
+    }
+  });
+  
+  return complexity;
+}
+
+/**
+ * 检索相似代码片段
+ */
+function retrieveSimilarSnippets(querySnippet, topK = 5) {
+  const queryFeatures = extractFeatures(querySnippet);
+  const results = [];
+  
+  codeVectorStore.forEach((value, id) => {
+    const similarity = calculateSimilarity(queryFeatures, value.features);
+    results.push({
+      id,
+      snippet: value.snippet,
+      similarity,
+      metadata: value.metadata
+    });
+  });
+  
+  // 按相似度排序
+  results.sort((a, b) => b.similarity - a.similarity);
+  
+  return results.slice(0, topK);
+}
+
+/**
+ * 计算相似度（简化版）
+ */
+function calculateSimilarity(features1, features2) {
+  let similarity = 0;
+  
+  // 长度相似度
+  const lengthSim = 1 - Math.abs(features1.length - features2.length) / Math.max(features1.length, features2.length);
+  similarity += lengthSim * 0.3;
+  
+  // 关键词相似度
+  const keywordIntersection = features1.keywords.filter(k => features2.keywords.includes(k));
+  const keywordSim = keywordIntersection.length / Math.max(features1.keywords.length, features2.keywords.length);
+  similarity += keywordSim * 0.4;
+  
+  // 复杂度相似度
+  const complexitySim = 1 - Math.abs(features1.complexity - features2.complexity) / Math.max(features1.complexity, features2.complexity);
+  similarity += complexitySim * 0.3;
+  
+  return similarity;
+}
+
+/**
+ * RAG优化流程
+ */
+async function optimizeWithRAG(issue, context) {
+  const startTime = Date.now();
+  
+  try {
+    // 1. 检索相似代码片段
+    const similarSnippets = retrieveSimilarSnippets(issue.codeSnippet, 3);
+    
+    // 2. 构建增强上下文
+    const enhancedContext = {
+      ...context,
+      similarExamples: similarSnippets.map(s => ({
+        snippet: s.snippet,
+        similarity: s.similarity
+      }))
+    };
+    
+    // 3. 调用AI进行优化
+    const aiResult = await retry(
+      () => aiClient.optimizeCode(issue.codeSnippet, enhancedContext),
+      3,
+      1000
+    );
+    
+    if (!aiResult.success) {
+      return aiResult;
+    }
+    
+    // 4. 记录优化历史
+    const optimizationRecord = {
+      id: generateUUID(),
+      issueId: issue.id,
+      taskId: context.taskId,
+      originalCode: issue.codeSnippet,
+      optimizedCode: aiResult.optimizedCode,
+      explanation: aiResult.explanation,
+      suggestions: aiResult.suggestions,
+      similarSnippetsCount: similarSnippets.length,
+      tokensUsed: aiResult.tokensUsed,
+      durationMs: Date.now() - startTime,
+      createdAt: new Date()
+    };
+    
+    // 存储到数据库
+    saveOptimizationRecord(optimizationRecord);
+    
+    // 索引优化后的代码
+    indexCodeSnippet(aiResult.optimizedCode, {
+      type: 'optimized',
+      issueType: context.issueType,
+      language: context.language
+    });
+    
+    logger.info(`RAG优化完成: ${optimizationRecord.id}`);
+    
+    return {
+      success: true,
+      optimizationId: optimizationRecord.id,
+      optimizedCode: aiResult.optimizedCode,
+      explanation: aiResult.explanation,
+      suggestions: aiResult.suggestions,
+      similarSnippets: similarSnippets,
+      tokensUsed: aiResult.tokensUsed,
+      durationMs: Date.now() - startTime
+    };
+  } catch (error) {
+    logger.error('RAG优化失败:', error);
+    return {
+      success: false,
+      message: error.message,
+      durationMs: Date.now() - startTime
+    };
+  }
+}
+
+/**
+ * 存储优化记录到数据库
+ */
+function saveOptimizationRecord(record) {
+  try {
+    const db = getDatabase();
+    const stmt = db.prepare(`
+      INSERT INTO ai_optimize_record
+      (id, issue_id, task_id, original_code, optimized_code, explanation,
+       optimization_type, ai_model, tokens_used, api_latency_ms)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    stmt.run(
+      record.id,
+      record.issueId,
+      record.taskId,
+      record.originalCode,
+      record.optimizedCode,
+      record.explanation,
+      'refactor',
+      config.ai.model,
+      record.tokensUsed,
+      record.durationMs
+    );
+    
+    optimizationHistory.push(record);
+  } catch (error) {
+    logger.error('存储优化记录失败:', error);
+  }
+}
+
+/**
+ * 获取优化历史
+ */
+function getOptimizationHistory(limit = 10) {
+  return optimizationHistory.slice(0, limit);
+}
+
+/**
+ * 清空向量存储
+ */
+function clearVectorStore() {
+  codeVectorStore.clear();
+  logger.info('向量存储已清空');
+}
+
+module.exports = {
+  indexCodeSnippet,
+  retrieveSimilarSnippets,
+  optimizeWithRAG,
+  getOptimizationHistory,
+  clearVectorStore,
+  AIClient
+};

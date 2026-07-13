@@ -1,0 +1,1 @@
+module.exports = { getMessage: () => '最终消息', version: '3.0.0' };
