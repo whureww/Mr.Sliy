@@ -194,6 +194,15 @@ backend/
 
 ## 📝 更新日志
 
+### v2.4.8
+> 更新日期: 2026-07-13
+
+- **🐛 知识库清空修复**：修复npm安装后知识库被清空的问题，`postinstall.js` 脚本中所有异步操作（`knowledgeBase.init()`、`importFromFile()`、`seedDefaultKnowledge()`、`getStats()`）添加 `await`，确保知识库数据完整导入后再退出
+- **🐛 AI更新解析修复**：修复AI智能更新"解析AI响应失败"时进度条卡死的问题，增强JSON解析逻辑（优先匹配 ```json``` 代码块，添加必要字段验证），失败时调用 `onProgress` 通知前端停止进度条
+- **✨ README自动更新**：每次版本迭代时自动更新 README.md，添加新版本条目到更新日志顶部，包含更新日期和详细变更内容
+- **🔧 项目结构清理**：删除临时目录（`publish_temp/`）、测试文件（`test-worker.js`、`test_modules/`），精简项目结构
+- **🔧 代码验证**：所有修改文件通过语法检查，确保功能完整性
+
 ### v2.4.7
 - **🐛 标题对齐修复**：修复智能体大标题文字无法对齐的问题，新增 `stripAnsi()`、`getDisplayWidth()`、`padEndDisplay()` 工具函数正确计算中文字符和emoji的终端显示宽度
 - **🐛 知识库统计修复**：修复知识库统计显示 `undefined` 的问题，新增缓存统计信息机制（`cachedStats`），`getStatus()` 改为同步获取

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../utils/logger');
 const { execute, query, queryOne } = require('../../utils/database');
-const { generateUUID, bumpVersion } = require('../../utils/helpers');
+const { generateUUID, bumpVersion, updateReadme } = require('../../utils/helpers');
 const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
@@ -394,7 +394,11 @@ class SelfUpdateManager {
           confirmedAt: updateRecord.confirmedAt
         });
 
-        const versionResult = await this.bumpProjectVersion();
+        const changelogItems = [
+          `**${updateRecord.update_type === 'code' ? '代码更新' : updateRecord.update_type === 'config' ? '配置更新' : updateRecord.update_type === 'knowledge' ? '知识库更新' : '依赖更新'}**: ${updateRecord.update_source === 'ai_suggestion' ? 'AI生成的更新' : '手动更新'}`,
+          `更新内容: ${this._getContentPreview(updateRecord.update_content)}`
+        ];
+        const versionResult = await this.bumpProjectVersion(changelogItems);
         logger.info(`更新应用成功: ${updateId}，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
 
         reportProgress(7, '更新完成', applyResult, 100);
@@ -769,8 +773,9 @@ class SelfUpdateManager {
   /**
    * 版本迭代：每次更新成功后自动递增版本号
    * 规则：每个版本最多10个小版本（0-9），达到9时进位
+   * 同步更新 README.md 的更新日志
    */
-  async bumpProjectVersion() {
+  async bumpProjectVersion(changelogItems = []) {
     const pkgPath = path.join(__dirname, '../../../package.json');
     const pkg = require(pkgPath);
     const oldVersion = pkg.version;
@@ -778,6 +783,14 @@ class SelfUpdateManager {
 
     pkg.version = newVersion;
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    const readmePath = path.join(__dirname, '../../../README.md');
+    const readmeResult = updateReadme(readmePath, newVersion, changelogItems);
+    if (readmeResult.success) {
+      logger.info(`README更新成功`);
+    } else {
+      logger.warn(`README更新失败: ${readmeResult.error}`);
+    }
 
     logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
 
@@ -839,14 +852,32 @@ ${suggestion}
 
     let updateData;
     try {
-      const jsonMatch = result.content.match(/```json\s*([\s\S]*?)\s*```/) || result.content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        updateData = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-      } else {
-        updateData = typeof result.content === 'object' ? result.content : JSON.parse(result.content);
+      let contentToParse = result.content;
+      
+      if (typeof contentToParse === 'string') {
+        const jsonBlockMatch = contentToParse.match(/```json\s*([\s\S]*?)\s*```/);
+        if (jsonBlockMatch && jsonBlockMatch[1]) {
+          contentToParse = jsonBlockMatch[1];
+        } else {
+          const jsonInlineMatch = contentToParse.match(/\{[\s\S]*\}/);
+          if (jsonInlineMatch) {
+            contentToParse = jsonInlineMatch[0];
+          }
+        }
+      }
+      
+      updateData = typeof contentToParse === 'object' ? contentToParse : JSON.parse(contentToParse);
+      
+      if (!updateData.updateType || !updateData.content) {
+        throw new Error('AI响应缺少必要字段(updateType或content)');
       }
     } catch (e) {
-      return { success: false, error: '解析AI响应失败' };
+      logger.error('解析AI响应失败:', e.message);
+      logger.error('AI原始响应:', result.content ? (result.content.substring(0, 500) + (result.content.length > 500 ? '...' : '')) : result);
+      if (onProgress) {
+        onProgress({ progress: 40, description: '解析AI响应失败', status: 'failed', details: { error: e.message } });
+      }
+      return { success: false, error: '解析AI响应失败: ' + e.message };
     }
 
     if (onProgress) {

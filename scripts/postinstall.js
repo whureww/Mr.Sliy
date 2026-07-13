@@ -33,8 +33,7 @@ function checkAndCreateEnvFile() {
   }
 }
 
-function initializeDatabase() {
-  return new Promise((resolve) => {
+async function initializeDatabase() {
     const dbPath = path.join(__dirname, '../database/code_optimizer.db');
 
     if (fs.existsSync(dbPath)) {
@@ -46,15 +45,14 @@ function initializeDatabase() {
         log('📚 正在导入知识库数据...', 'yellow');
         try {
           const { knowledgeBase } = require('../src/services/vector/knowledgeBase.js');
-          knowledgeBase.init();
-          const result = knowledgeBase.importFromFile(knowledgeExportPath, { merge: true, skipExisting: true });
+          await knowledgeBase.init();
+          const result = await knowledgeBase.importFromFile(knowledgeExportPath, { merge: true, skipExisting: true });
           log(`✅ 知识库导入完成 (新增 ${result.importedEntries} 条知识, ${result.importedCases} 个案例)`, 'green');
         } catch (error) {
           log(`⚠️  知识库导入失败: ${error.message}`, 'yellow');
         }
       }
       
-      resolve();
       return;
     }
 
@@ -70,25 +68,21 @@ function initializeDatabase() {
       if (fs.existsSync(knowledgeExportPath)) {
         log('📚 正在导入知识库数据...', 'yellow');
         const { knowledgeBase } = require('../src/services/vector/knowledgeBase.js');
-        knowledgeBase.init();
-        const result = knowledgeBase.importFromFile(knowledgeExportPath, { merge: false });
+        await knowledgeBase.init();
+        const result = await knowledgeBase.importFromFile(knowledgeExportPath, { merge: false });
         log(`✅ 知识库导入完成 (${result.importedEntries} 条知识, ${result.importedCases} 个案例)`, 'green');
       } else {
         log('🌱 正在初始化默认知识库...', 'yellow');
         const { knowledgeBase } = require('../src/services/vector/knowledgeBase.js');
-        knowledgeBase.init();
-        knowledgeBase.seedDefaultKnowledge();
-        const stats = knowledgeBase.getStats();
+        await knowledgeBase.init();
+        await knowledgeBase.seedDefaultKnowledge();
+        const stats = await knowledgeBase.getStats();
         log(`✅ 知识库初始化完成 (${stats.totalEntries}条知识, ${stats.totalCases}个案例)`, 'green');
       }
-      
-      resolve();
     } catch (error) {
       log(`⚠️  数据库初始化失败: ${error.message}`, 'yellow');
       log('   请手动运行: npm run init && npm run seed', 'yellow');
-      resolve();
     }
-  });
 }
 
 async function downloadWasmFiles() {

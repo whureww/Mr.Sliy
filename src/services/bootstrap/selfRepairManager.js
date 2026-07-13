@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { logger } = require('../../utils/logger');
 const { execute, query, queryOne } = require('../../utils/database');
-const { generateUUID, bumpVersion } = require('../../utils/helpers');
+const { generateUUID, bumpVersion, updateReadme } = require('../../utils/helpers');
 const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
@@ -132,7 +132,12 @@ class SelfRepairManager {
           errorCount: 1
         });
 
-        const versionResult = await this.bumpProjectVersion();
+        const changelogItems = [
+          `**修复**: ${strategyInfo.description}`,
+          `错误类型: ${errorType}`,
+          `修复策略: ${strategyName}`
+        ];
+        const versionResult = await this.bumpProjectVersion(changelogItems);
         logger.info(`修复成功，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
 
         return {
@@ -522,8 +527,9 @@ class SelfRepairManager {
   /**
    * 版本迭代：每次修复成功后自动递增版本号
    * 规则：每个版本最多10个小版本（0-9），达到9时进位
+   * 同步更新 README.md 的更新日志
    */
-  async bumpProjectVersion() {
+  async bumpProjectVersion(changelogItems = []) {
     const pkgPath = path.join(__dirname, '../../../package.json');
     const pkg = require(pkgPath);
     const oldVersion = pkg.version;
@@ -531,6 +537,14 @@ class SelfRepairManager {
 
     pkg.version = newVersion;
     fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n', 'utf8');
+
+    const readmePath = path.join(__dirname, '../../../README.md');
+    const readmeResult = updateReadme(readmePath, newVersion, changelogItems);
+    if (readmeResult.success) {
+      logger.info(`README更新成功`);
+    } else {
+      logger.warn(`README更新失败: ${readmeResult.error}`);
+    }
 
     logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
 
