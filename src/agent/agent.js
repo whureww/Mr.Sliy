@@ -718,11 +718,16 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
           }
           
           if (backupType === 'system') {
-            return await rollbackManager.createFullSystemBackup();
+            return await rollbackManager.createFullSystemBackup({
+              onProgress: p.onProgress,
+              requestPermission: p.requestPermission
+            });
           }
           
           return await rollbackManager.createBackup(backupType, process.cwd(), {
-            description: p.description
+            description: p.description,
+            onProgress: p.onProgress,
+            requestPermission: p.requestPermission
           });
         }
         
@@ -1005,6 +1010,27 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
    */
   async testCloudConnection() {
     return await knowledgeBase.testCloudConnection();
+  }
+
+  /**
+   * 切换到指定数据库连接
+   */
+  async switchDatabaseConnection(connectionConfig) {
+    return await knowledgeBase.switchDatabaseConnection(connectionConfig);
+  }
+
+  /**
+   * 使用自定义配置测试连接
+   */
+  async testConnectionWithConfig(connectionConfig) {
+    return await knowledgeBase.testConnectionWithConfig(connectionConfig);
+  }
+
+  /**
+   * 获取当前数据库连接ID
+   */
+  getCurrentDatabaseConnectionId() {
+    return knowledgeBase.getCurrentConnectionId();
   }
 
   /**

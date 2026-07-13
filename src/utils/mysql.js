@@ -3,6 +3,7 @@
  * 用于云端知识库同步
  * 可选配置，未启用时不影响本地SQLite
  * 支持加密配置存储，确保隐私安全
+ * 支持多数据库连接配置和动态切换
  */
 
 const mysql = require('mysql2/promise');
@@ -10,6 +11,7 @@ const { config } = require('../config');
 const { logger } = require('./logger');
 
 let pool = null;
+let currentConnectionConfig = null;
 
 /**
  * 获取MySQL连接池配置
@@ -27,6 +29,24 @@ function getMySQLConnectionConfig() {
   }
 
   return null;
+}
+
+/**
+ * 使用自定义配置获取MySQL连接池配置
+ */
+function getConnectionConfigFromCustom(customConfig) {
+  if (!customConfig || !customConfig.enabled || !customConfig.host) {
+    return null;
+  }
+
+  return {
+    host: customConfig.host,
+    port: customConfig.port || 3306,
+    user: customConfig.user,
+    password: customConfig.password,
+    database: customConfig.database || 'code_optimizer',
+    connectionLimit: customConfig.connectionLimit || 10
+  };
 }
 
 /**
@@ -208,6 +228,113 @@ function isEnabled() {
   return config.mysql.enabled && getPool() !== null;
 }
 
+/**
+ * 使用自定义配置创建连接池
+ */
+function createPoolWithConfig(customConfig) {
+  const mysqlConfig = getConnectionConfigFromCustom(customConfig);
+  
+  if (!mysqlConfig || !mysqlConfig.host) {
+    return null;
+  }
+
+  try {
+    const newPool = mysql.createPool({
+      host: mysqlConfig.host,
+      port: mysqlConfig.port,
+      user: mysqlConfig.user,
+      password: mysqlConfig.password,
+      database: mysqlConfig.database,
+      connectionLimit: mysqlConfig.connectionLimit,
+      waitForConnections: true,
+      queueLimit: 0,
+      charset: 'utf8mb4'
+    });
+
+    logger.info(`MySQL连接池创建成功 (${customConfig.name || customConfig.id})`);
+    return newPool;
+  } catch (error) {
+    logger.warn(`MySQL连接池创建失败: ${error.message}`);
+    return null;
+  }
+}
+
+/**
+ * 使用自定义配置测试连接
+ */
+async function testConnectionWithConfig(customConfig) {
+  const pool = createPoolWithConfig(customConfig);
+  
+  if (!pool) {
+    return { success: false, message: '连接配置无效' };
+  }
+  
+  try {
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+    await pool.end();
+    return { success: true, message: 'MySQL连接成功' };
+  } catch (error) {
+    if (pool) {
+      try {
+        await pool.end();
+      } catch (e) {
+        logger.debug('关闭临时连接池失败:', e.message);
+      }
+    }
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * 切换到指定数据库连接
+ */
+async function switchConnection(connectionConfig) {
+  if (pool) {
+    await closePool();
+  }
+
+  currentConnectionConfig = connectionConfig;
+  
+  const mysqlConfig = getConnectionConfigFromCustom(connectionConfig);
+  if (!mysqlConfig || !mysqlConfig.host) {
+    return { success: false, message: '无效的连接配置' };
+  }
+
+  try {
+    pool = mysql.createPool({
+      host: mysqlConfig.host,
+      port: mysqlConfig.port,
+      user: mysqlConfig.user,
+      password: mysqlConfig.password,
+      database: mysqlConfig.database,
+      connectionLimit: mysqlConfig.connectionLimit,
+      waitForConnections: true,
+      queueLimit: 0,
+      charset: 'utf8mb4'
+    });
+
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+
+    logger.info(`已切换到数据库连接: ${connectionConfig.name || connectionConfig.id}`);
+    return { success: true, message: '数据库连接切换成功' };
+  } catch (error) {
+    pool = null;
+    currentConnectionConfig = null;
+    return { success: false, message: error.message };
+  }
+}
+
+/**
+ * 获取当前连接配置
+ */
+function getCurrentConnectionConfig() {
+  return currentConnectionConfig || config.mysql;
+}
+
 module.exports = {
   getPool,
   testConnection,
@@ -215,5 +342,9 @@ module.exports = {
   execute,
   initDatabase,
   closePool,
-  isEnabled
+  isEnabled,
+  createPoolWithConfig,
+  testConnectionWithConfig,
+  switchConnection,
+  getCurrentConnectionConfig
 };

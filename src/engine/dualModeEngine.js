@@ -9,7 +9,7 @@ const { knowledgeBase } = require('../services/vector/knowledgeBase');
 const { providerManager } = require('../services/llm/providers');
 const { logger } = require('../utils/logger');
 const { generateUUID, getFileLanguage } = require('../utils/helpers');
-const { isOnlineMode } = require('../config');
+const { isOnlineMode, checkNetworkConnectivity, getNetworkStatus } = require('../config');
 const { ProgressBar } = require('../utils/progress');
 const fs = require('fs');
 const path = require('path');
@@ -29,15 +29,22 @@ class DualModeEngine {
   async init() {
     if (this.initialized) return;
     
-    // 初始化本地知识库
     knowledgeBase.init();
     knowledgeBase.seedDefaultKnowledge();
     
-    // 刷新提供商状态
     try {
       await providerManager.refreshProviderStatus();
     } catch (e) {
       logger.debug('刷新提供商状态失败: ' + e.message);
+    }
+    
+    if (this.mode === 'auto') {
+      try {
+        const isConnected = await checkNetworkConnectivity();
+        logger.info(`网络连接状态: ${isConnected ? '已连接' : '未连接'}`);
+      } catch (e) {
+        logger.debug('网络检测失败: ' + e.message);
+      }
     }
     
     this.initialized = true;
@@ -57,16 +64,52 @@ class DualModeEngine {
   }
 
   /**
-   * 获取当前实际工作模式
+   * 获取当前实际工作模式（同步，使用缓存的网络状态）
    */
   getActualMode() {
     if (this.mode === 'auto') {
-      // 自动判断：有可用云端提供商则在线，否则离线
       const availableProviders = providerManager.getAvailableProviders();
       const hasOnlineProvider = availableProviders.some(p => p.available && p.name !== 'ollama');
-      return hasOnlineProvider ? 'online' : 'offline';
+      
+      if (!hasOnlineProvider) {
+        return 'offline';
+      }
+      
+      const networkStatus = getNetworkStatus();
+      if (networkStatus.connected === false) {
+        return 'offline';
+      }
+      
+      return 'online';
     }
     return this.mode;
+  }
+
+  /**
+   * 获取当前实际工作模式（异步，强制检测网络）
+   */
+  async getActualModeAsync() {
+    if (this.mode !== 'auto') {
+      return this.mode;
+    }
+    
+    const availableProviders = providerManager.getAvailableProviders();
+    const hasOnlineProvider = availableProviders.some(p => p.available && p.name !== 'ollama');
+    
+    if (!hasOnlineProvider) {
+      logger.debug('自动模式: 无可用云端提供商，切换为离线模式');
+      return 'offline';
+    }
+    
+    const isConnected = await checkNetworkConnectivity();
+    
+    if (isConnected) {
+      logger.debug('自动模式: 网络连接正常，使用在线模式');
+      return 'online';
+    } else {
+      logger.debug('自动模式: 网络不可用，切换为离线模式');
+      return 'offline';
+    }
   }
 
   /**
@@ -75,7 +118,7 @@ class DualModeEngine {
   async analyzeFile(filePath, options = {}) {
     await this.init();
     const startTime = Date.now();
-    const actualMode = this.getActualMode();
+    const actualMode = this.mode === 'auto' ? await this.getActualModeAsync() : this.getActualMode();
     const onProgress = options.onProgress;
 
     logger.info(`开始分析文件: ${filePath} [模式: ${actualMode}]`);
@@ -171,7 +214,7 @@ class DualModeEngine {
   async analyzeSnippet(codeSnippet, language = 'javascript', options = {}) {
     await this.init();
     const startTime = Date.now();
-    const actualMode = this.getActualMode();
+    const actualMode = this.mode === 'auto' ? await this.getActualModeAsync() : this.getActualMode();
     const onProgress = options.onProgress;
 
     logger.info(`开始分析代码片段 [模式: ${actualMode}]`);
@@ -251,7 +294,7 @@ class DualModeEngine {
   async analyzeProject(projectPath, options = {}) {
     await this.init();
     const startTime = Date.now();
-    const actualMode = this.getActualMode();
+    const actualMode = this.mode === 'auto' ? await this.getActualModeAsync() : this.getActualMode();
     const onProgress = options.onProgress;
     
     logger.info(`开始分析项目: ${projectPath} [模式: ${actualMode}]`);
@@ -566,11 +609,14 @@ class DualModeEngine {
     const actualMode = this.getActualMode();
     const providers = providerManager.getAvailableProviders();
     const kbStats = knowledgeBase.getCachedStats();
+    const networkStatus = getNetworkStatus();
     
     return {
       mode: this.mode,
       actualMode,
       initialized: this.initialized,
+      networkConnected: networkStatus.connected,
+      networkStale: networkStatus.stale,
       providers: providers.map(p => ({
         name: p.name,
         available: p.available,

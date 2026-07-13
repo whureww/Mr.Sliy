@@ -68,6 +68,7 @@ class KnowledgeBase {
     this.initialized = false;
     this.useMysql = false;
     this.mysqlAvailable = false;
+    this.currentConnectionId = null;
     this.cachedStats = {
       totalEntries: 0,
       totalCases: 0,
@@ -1051,6 +1052,28 @@ class KnowledgeBase {
 
   async testCloudConnection() {
     return await mysql.testConnection();
+  }
+
+  async switchDatabaseConnection(connectionConfig) {
+    const result = await mysql.switchConnection(connectionConfig);
+    
+    if (result.success) {
+      this.currentConnectionId = connectionConfig.id;
+      this.useMysql = true;
+      this.mysqlAvailable = true;
+      this.initialized = false;
+      await this.init();
+    }
+    
+    return result;
+  }
+
+  async testConnectionWithConfig(connectionConfig) {
+    return await mysql.testConnectionWithConfig(connectionConfig);
+  }
+
+  getCurrentConnectionId() {
+    return this.currentConnectionId;
   }
 }
 
