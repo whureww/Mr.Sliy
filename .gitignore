@@ -10,6 +10,12 @@ build/
 out/
 *.vsix
 
+# Database files
+database/*.db
+data/*.db
+*.sqlite
+*.sqlite3
+
 # Environment files
 .env
 .env.local
@@ -28,6 +34,7 @@ out/
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # Logs
 logs/
@@ -53,13 +60,15 @@ tmp/
 temp/
 .cache/
 
-# Tauri
-tauri-desktop/src-tauri/target/
-tauri-desktop/src-tauri/Cargo.lock
+# WASM files (downloaded at install time)
+wasm/
 
-# Testing
-test-results/
-playwright-report/
+# Package files
+*.tgz
+
+# Backup files
+backups/
+module_backups/
 
 # ==================== 项目特定敏感文件 ====================
 # 数据目录（包含加密配置和知识导出）
