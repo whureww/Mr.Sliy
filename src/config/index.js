@@ -35,6 +35,25 @@ const config = {
     syncOnStartup: process.env.MYSQL_SYNC_ON_STARTUP !== 'false'
   },
 
+  // 多数据库连接配置
+  databases: {
+    defaultConnection: process.env.DEFAULT_DB_CONNECTION || 'mysql',
+    connections: {
+      mysql: {
+        id: 'mysql',
+        name: '默认MySQL',
+        type: 'mysql',
+        enabled: process.env.MYSQL_ENABLED === 'true' || false,
+        host: process.env.MYSQL_HOST || '',
+        port: parseInt(process.env.MYSQL_PORT) || 3306,
+        user: process.env.MYSQL_USER || '',
+        password: process.env.MYSQL_PASSWORD || '',
+        database: process.env.MYSQL_DATABASE || 'code_optimizer',
+        connectionLimit: parseInt(process.env.MYSQL_CONNECTION_LIMIT) || 10
+      }
+    }
+  },
+
   // AI配置
   ai: {
     apiKey: process.env.AI_API_KEY || '',
@@ -244,10 +263,152 @@ function validate() {
   return true;
 }
 
+function addDatabaseConnection(connection) {
+  if (!connection.id || !connection.name || !connection.type) {
+    return { success: false, message: '缺少必要参数(id/name/type)' };
+  }
+  
+  if (config.databases.connections[connection.id]) {
+    return { success: false, message: '连接ID已存在' };
+  }
+  
+  config.databases.connections[connection.id] = {
+    id: connection.id,
+    name: connection.name,
+    type: connection.type || 'mysql',
+    enabled: connection.enabled || false,
+    host: connection.host || '',
+    port: connection.port || 3306,
+    user: connection.user || '',
+    password: connection.password || '',
+    database: connection.database || 'code_optimizer',
+    connectionLimit: connection.connectionLimit || 10
+  };
+  
+  return { success: true, message: '数据库连接添加成功' };
+}
+
+function updateDatabaseConnection(id, updates) {
+  if (!config.databases.connections[id]) {
+    return { success: false, message: '连接不存在' };
+  }
+  
+  Object.assign(config.databases.connections[id], updates);
+  return { success: true, message: '数据库连接更新成功' };
+}
+
+function deleteDatabaseConnection(id) {
+  if (id === 'mysql') {
+    return { success: false, message: '默认连接不能删除' };
+  }
+  
+  if (!config.databases.connections[id]) {
+    return { success: false, message: '连接不存在' };
+  }
+  
+  delete config.databases.connections[id];
+  
+  if (config.databases.defaultConnection === id) {
+    config.databases.defaultConnection = 'mysql';
+  }
+  
+  return { success: true, message: '数据库连接删除成功' };
+}
+
+function getDatabaseConnections() {
+  return Object.values(config.databases.connections);
+}
+
+function getDatabaseConnection(id) {
+  return config.databases.connections[id] || null;
+}
+
+function setDefaultConnection(id) {
+  if (!config.databases.connections[id]) {
+    return { success: false, message: '连接不存在' };
+  }
+  
+  config.databases.defaultConnection = id;
+  
+  const conn = config.databases.connections[id];
+  config.mysql.enabled = conn.enabled;
+  config.mysql.host = conn.host;
+  config.mysql.port = conn.port;
+  config.mysql.user = conn.user;
+  config.mysql.password = conn.password;
+  config.mysql.database = conn.database;
+  config.mysql.connectionLimit = conn.connectionLimit;
+  
+  return { success: true, message: '默认连接已切换到: ' + conn.name };
+}
+
+let networkStatus = null;
+let lastNetworkCheck = 0;
+const NETWORK_CHECK_INTERVAL = 30000;
+
+async function checkNetworkConnectivity() {
+  const now = Date.now();
+  if (networkStatus !== null && now - lastNetworkCheck < NETWORK_CHECK_INTERVAL) {
+    return networkStatus;
+  }
+  
+  const testUrls = [
+    'https://api.openai.com/v1/models',
+    'https://api.deepseek.com/v1/models',
+    'https://open.bigmodel.cn/api/paas/v4/models',
+    'https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation'
+  ];
+  
+  let connected = false;
+  
+  for (const url of testUrls) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        signal: controller.signal,
+        headers: { 'Connection': 'keep-alive' }
+      });
+      
+      clearTimeout(timeout);
+      
+      if (response.ok || response.status === 401 || response.status === 403) {
+        connected = true;
+        break;
+      }
+    } catch (e) {
+      continue;
+    }
+  }
+  
+  networkStatus = connected;
+  lastNetworkCheck = now;
+  
+  return connected;
+}
+
+function getNetworkStatus() {
+  return {
+    connected: networkStatus,
+    lastCheck: lastNetworkCheck,
+    stale: lastNetworkCheck === 0 || Date.now() - lastNetworkCheck > NETWORK_CHECK_INTERVAL
+  };
+}
+
 module.exports = {
   config,
   get,
   isOnlineMode,
   isOfflineMode,
-  validate
+  validate,
+  addDatabaseConnection,
+  updateDatabaseConnection,
+  deleteDatabaseConnection,
+  getDatabaseConnections,
+  getDatabaseConnection,
+  setDefaultConnection,
+  checkNetworkConnectivity,
+  getNetworkStatus
 };

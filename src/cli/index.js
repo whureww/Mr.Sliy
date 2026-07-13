@@ -1463,6 +1463,7 @@ async function cloudSyncMenu() {
     console.log(c('    1) 测试连接        (test)', 'white'));
     console.log(c('    2) 上传到云端      (upload)', 'white'));
     console.log(c('    3) 从云端下载      (download)', 'white'));
+    console.log(c('    4) 数据库连接管理  (manage)', 'white'));
     console.log(c('    0) 返回            (back)', 'dim'));
     console.log();
     
@@ -1485,6 +1486,10 @@ async function cloudSyncMenu() {
       case '3':
       case 'download':
         await downloadFromCloud();
+        break;
+      case '4':
+      case 'manage':
+        await manageDatabaseConnections();
         break;
       default:
         console.log(c('  无效的选择，请重新输入', 'yellow'));
@@ -1560,6 +1565,410 @@ async function downloadFromCloud() {
     }
   } catch (error) {
     console.log(c('  ✗ 同步失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function manageDatabaseConnections() {
+  while (true) {
+    console.log();
+    console.log(c('  🗄️  数据库连接管理', 'bright cyan'));
+    console.log(c('  输入 q 返回上一级', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    const { getDatabaseConnections, getDatabaseConnection, config } = require('../config');
+    const connections = getDatabaseConnections();
+    const defaultConn = getDatabaseConnection(config.databases.defaultConnection);
+    
+    console.log(c('  当前默认连接: ' + (defaultConn ? c(defaultConn.name, 'green') : c('无', 'yellow')), 'white'));
+    console.log();
+    
+    if (connections.length === 0) {
+      console.log(c('  暂无数据库连接配置', 'yellow'));
+    } else {
+      console.log(c('  已配置连接:', 'cyan'));
+      connections.forEach((conn, i) => {
+        const isDefault = conn.id === config.databases.defaultConnection;
+        const status = conn.enabled ? '已启用' : '未启用';
+        const statusColor = conn.enabled ? 'green' : 'yellow';
+        const defaultMarker = isDefault ? c(' [默认]', 'green') : '';
+        console.log(c('  ' + (i + 1) + '. ' + conn.name + defaultMarker, 'white'));
+        console.log(c('     类型: ' + conn.type + '  |  状态: ' + status, statusColor));
+        console.log(c('     服务器: ' + conn.host + ':' + conn.port, 'dim'));
+        console.log(c('     数据库: ' + conn.database, 'dim'));
+      });
+    }
+    
+    console.log();
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) 添加新连接      (add)', 'white'));
+    console.log(c('    2) 编辑连接        (edit)', 'white'));
+    console.log(c('    3) 删除连接        (delete)', 'white'));
+    console.log(c('    4) 切换默认连接    (switch)', 'white'));
+    console.log(c('    5) 测试连接        (test)', 'white'));
+    console.log(c('    0) 返回            (back)', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit' || choice === '0' || choice.toLowerCase() === 'back') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+      case 'add':
+        await addDatabaseConnection();
+        break;
+      case '2':
+      case 'edit':
+        await editDatabaseConnection();
+        break;
+      case '3':
+      case 'delete':
+        await deleteDatabaseConnection();
+        break;
+      case '4':
+      case 'switch':
+        await switchDefaultConnection();
+        break;
+      case '5':
+      case 'test':
+        await testSpecificConnection();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+    }
+  }
+}
+
+async function addDatabaseConnection() {
+  console.log();
+  console.log(c('  添加新数据库连接', 'bright cyan'));
+  console.log(c('─'.repeat(70), 'dim'));
+  
+  const { addDatabaseConnection: addConn } = require('../config');
+  
+  const id = await ask('  请输入连接ID (用于标识，如 mydb): ');
+  if (id === '__CANCEL__') return;
+  if (id.toLowerCase() === 'q' || id.toLowerCase() === 'quit') return;
+  if (!id) {
+    console.log(c('  连接ID不能为空', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const name = await ask('  请输入连接名称 (显示名称): ');
+  if (name === '__CANCEL__') return;
+  if (!name) {
+    console.log(c('  连接名称不能为空', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const type = await ask('  请输入数据库类型 (mysql，默认): ');
+  if (type === '__CANCEL__') return;
+  
+  const host = await ask('  请输入主机地址: ');
+  if (host === '__CANCEL__') return;
+  if (!host) {
+    console.log(c('  主机地址不能为空', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const port = await ask('  请输入端口 (默认 3306): ');
+  if (port === '__CANCEL__') return;
+  
+  const user = await ask('  请输入用户名: ');
+  if (user === '__CANCEL__') return;
+  
+  const password = await ask('  请输入密码 (输入时不显示): ');
+  if (password === '__CANCEL__') return;
+  
+  const database = await ask('  请输入数据库名 (默认 code_optimizer): ');
+  if (database === '__CANCEL__') return;
+  
+  const enabled = await ask('  是否启用 (y/N): ');
+  if (enabled === '__CANCEL__') return;
+  
+  const result = addConn({
+    id: id.trim(),
+    name: name.trim(),
+    type: type.trim() || 'mysql',
+    host: host.trim(),
+    port: port.trim() ? parseInt(port) : 3306,
+    user: user.trim(),
+    password: password,
+    database: database.trim() || 'code_optimizer',
+    enabled: enabled.toLowerCase() === 'y' || enabled.toLowerCase() === 'yes'
+  });
+  
+  console.log();
+  if (result.success) {
+    console.log(c('  ✅ ' + result.message, 'green'));
+    
+    const confirmTest = await ask('  是否测试连接？(y/N): ');
+    if (confirmTest === '__CANCEL__') {
+      await waitEnter();
+      return;
+    }
+    
+    if (confirmTest.toLowerCase() === 'y' || confirmTest.toLowerCase() === 'yes') {
+      const { getDatabaseConnection } = require('../config');
+      const conn = getDatabaseConnection(id);
+      if (conn) {
+        await testConnectionWithConfig(conn);
+      }
+    }
+  } else {
+    console.log(c('  ✗ ' + result.message, 'red'));
+    await waitEnter();
+  }
+}
+
+async function editDatabaseConnection() {
+  console.log();
+  console.log(c('  编辑数据库连接', 'bright cyan'));
+  console.log(c('─'.repeat(70), 'dim'));
+  
+  const { getDatabaseConnections, getDatabaseConnection, updateDatabaseConnection } = require('../config');
+  const connections = getDatabaseConnections();
+  
+  if (connections.length === 0) {
+    console.log(c('  暂无数据库连接', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  connections.forEach((conn, i) => {
+    console.log(c('  ' + (i + 1) + '. ' + conn.name, 'white'));
+    console.log(c('     服务器: ' + conn.host + ':' + conn.port, 'dim'));
+  });
+  
+  const choice = await ask('  请选择要编辑的连接序号: ');
+  if (choice === '__CANCEL__') return;
+  if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit') return;
+  
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= connections.length) {
+    console.log(c('  无效的选择', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const conn = connections[index];
+  console.log();
+  console.log(c('  当前配置:', 'cyan'));
+  console.log(c('    名称: ' + conn.name, 'white'));
+  console.log(c('    类型: ' + conn.type, 'white'));
+  console.log(c('    主机: ' + conn.host, 'white'));
+  console.log(c('    端口: ' + conn.port, 'white'));
+  console.log(c('    用户: ' + conn.user, 'white'));
+  console.log(c('    数据库: ' + conn.database, 'white'));
+  console.log(c('    启用: ' + (conn.enabled ? '是' : '否'), conn.enabled ? 'green' : 'yellow'));
+  console.log();
+  
+  const name = await ask('  请输入新的连接名称 (回车保持不变): ');
+  if (name === '__CANCEL__') return;
+  
+  const host = await ask('  请输入新的主机地址 (回车保持不变): ');
+  if (host === '__CANCEL__') return;
+  
+  const port = await ask('  请输入新的端口 (回车保持不变): ');
+  if (port === '__CANCEL__') return;
+  
+  const user = await ask('  请输入新的用户名 (回车保持不变): ');
+  if (user === '__CANCEL__') return;
+  
+  const password = await ask('  请输入新的密码 (回车保持不变，输入时不显示): ');
+  if (password === '__CANCEL__') return;
+  
+  const database = await ask('  请输入新的数据库名 (回车保持不变): ');
+  if (database === '__CANCEL__') return;
+  
+  const enabled = await ask('  是否启用 (y/N，回车保持不变): ');
+  if (enabled === '__CANCEL__') return;
+  
+  const updates = {};
+  if (name.trim()) updates.name = name.trim();
+  if (host.trim()) updates.host = host.trim();
+  if (port.trim()) updates.port = parseInt(port);
+  if (user.trim()) updates.user = user.trim();
+  if (password !== undefined && password !== null) updates.password = password;
+  if (database.trim()) updates.database = database.trim();
+  if (enabled && (enabled.toLowerCase() === 'y' || enabled.toLowerCase() === 'yes')) updates.enabled = true;
+  if (enabled && (enabled.toLowerCase() === 'n' || enabled.toLowerCase() === 'no')) updates.enabled = false;
+  
+  const result = updateDatabaseConnection(conn.id, updates);
+  
+  console.log();
+  if (result.success) {
+    console.log(c('  ✅ ' + result.message, 'green'));
+  } else {
+    console.log(c('  ✗ ' + result.message, 'red'));
+  }
+  await waitEnter();
+}
+
+async function deleteDatabaseConnection() {
+  console.log();
+  console.log(c('  删除数据库连接', 'bright cyan'));
+  console.log(c('─'.repeat(70), 'dim'));
+  
+  const { getDatabaseConnections, deleteDatabaseConnection: delConn } = require('../config');
+  const connections = getDatabaseConnections();
+  
+  if (connections.length <= 1) {
+    console.log(c('  至少需要保留一个数据库连接', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  connections.forEach((conn, i) => {
+    const isDefault = conn.id === 'mysql' ? c(' [默认]', 'green') : '';
+    console.log(c('  ' + (i + 1) + '. ' + conn.name + isDefault, 'white'));
+    console.log(c('     服务器: ' + conn.host + ':' + conn.port, 'dim'));
+  });
+  
+  const choice = await ask('  请选择要删除的连接序号: ');
+  if (choice === '__CANCEL__') return;
+  if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit') return;
+  
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= connections.length) {
+    console.log(c('  无效的选择', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const conn = connections[index];
+  if (conn.id === 'mysql') {
+    console.log(c('  默认连接不能删除', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const confirm = await ask('  确认删除连接 "' + conn.name + '"？(y/N): ');
+  if (confirm === '__CANCEL__') return;
+  if (confirm.toLowerCase() !== 'y' && confirm.toLowerCase() !== 'yes') {
+    console.log(c('  已取消', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const result = delConn(conn.id);
+  
+  console.log();
+  if (result.success) {
+    console.log(c('  ✅ ' + result.message, 'green'));
+  } else {
+    console.log(c('  ✗ ' + result.message, 'red'));
+  }
+  await waitEnter();
+}
+
+async function switchDefaultConnection() {
+  console.log();
+  console.log(c('  切换默认数据库连接', 'bright cyan'));
+  console.log(c('─'.repeat(70), 'dim'));
+  
+  const { getDatabaseConnections, setDefaultConnection, config } = require('../config');
+  const connections = getDatabaseConnections();
+  
+  if (connections.length === 0) {
+    console.log(c('  暂无数据库连接', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  connections.forEach((conn, i) => {
+    const isDefault = conn.id === config.databases.defaultConnection;
+    const marker = isDefault ? c(' [当前默认]', 'green') : '';
+    console.log(c('  ' + (i + 1) + '. ' + conn.name + marker, isDefault ? 'green' : 'white'));
+    console.log(c('     服务器: ' + conn.host + ':' + conn.port, 'dim'));
+    console.log(c('     状态: ' + (conn.enabled ? '已启用' : '未启用'), conn.enabled ? 'green' : 'yellow'));
+  });
+  
+  const choice = await ask('  请选择要设为默认的连接序号: ');
+  if (choice === '__CANCEL__') return;
+  if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit') return;
+  
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= connections.length) {
+    console.log(c('  无效的选择', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const conn = connections[index];
+  
+  const result = setDefaultConnection(conn.id);
+  
+  console.log();
+  if (result.success) {
+    console.log(c('  ✅ ' + result.message, 'green'));
+    
+    const confirmTest = await ask('  是否测试新的默认连接？(y/N): ');
+    if (confirmTest === '__CANCEL__') {
+      await waitEnter();
+      return;
+    }
+    
+    if (confirmTest.toLowerCase() === 'y' || confirmTest.toLowerCase() === 'yes') {
+      await testCloudConnection();
+    }
+  } else {
+    console.log(c('  ✗ ' + result.message, 'red'));
+    await waitEnter();
+  }
+}
+
+async function testSpecificConnection() {
+  console.log();
+  console.log(c('  测试数据库连接', 'bright cyan'));
+  console.log(c('─'.repeat(70), 'dim'));
+  
+  const { getDatabaseConnections } = require('../config');
+  const mysql = require('../utils/mysql');
+  const connections = getDatabaseConnections();
+  
+  if (connections.length === 0) {
+    console.log(c('  暂无数据库连接', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  connections.forEach((conn, i) => {
+    console.log(c('  ' + (i + 1) + '. ' + conn.name, 'white'));
+    console.log(c('     服务器: ' + conn.host + ':' + conn.port, 'dim'));
+  });
+  
+  const choice = await ask('  请选择要测试的连接序号: ');
+  if (choice === '__CANCEL__') return;
+  if (choice.toLowerCase() === 'q' || choice.toLowerCase() === 'quit') return;
+  
+  const index = parseInt(choice) - 1;
+  if (isNaN(index) || index < 0 || index >= connections.length) {
+    console.log(c('  无效的选择', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const conn = connections[index];
+  
+  console.log(c('  正在测试连接 "' + conn.name + '"...', 'cyan'));
+  
+  const result = await mysql.testConnectionWithConfig(conn);
+  
+  console.log();
+  if (result.success) {
+    console.log(c('  ✅ ' + result.message, 'green'));
+  } else {
+    console.log(c('  ✗ 连接失败: ' + result.message, 'red'));
+    console.log(c('  提示: 请确保 MySQL 服务器已启动并开放对应端口', 'yellow'));
   }
   
   await waitEnter();
@@ -2358,14 +2767,98 @@ async function createBackup() {
   }
   
   console.log(c('  正在创建备份...', 'cyan'));
+  console.log();
   
   try {
-    const result = await agent.executeTool('create_backup', { backupType: type });
+    let progressBar = null;
+    let lastProgress = -1;
+    
+    const onProgress = (info) => {
+      const { progress, status, description, currentFile } = info;
+      
+      if (progress !== null && progress !== lastProgress) {
+        lastProgress = progress;
+        
+        if (!progressBar) {
+          progressBar = require('../utils/progress').ProgressBar;
+          progressBar = new progressBar({ total: 100 });
+        }
+        
+        process.stdout.clearLine();
+        process.stdout.cursorTo(0);
+        
+        let statusColor = 'cyan';
+        if (status === 'success') statusColor = 'green';
+        if (status === 'failed') statusColor = 'red';
+        
+        const bar = progressBar.render(progress);
+        const statusText = c(`${description}`, statusColor);
+        const fileText = currentFile ? c(` (${currentFile})`, 'dim') : '';
+        
+        process.stdout.write(`  ${bar} ${progress}% ${statusText}${fileText}`);
+        
+        if (status === 'success' || status === 'failed') {
+          process.stdout.write('\n');
+        }
+      }
+    };
+    
+    const requestPermission = async (permissionInfo) => {
+      console.log();
+      console.log(c('  ⚠️ ' + permissionInfo.title, 'yellow'));
+      console.log(c('    ' + permissionInfo.message, 'white'));
+      
+      if (permissionInfo.details) {
+        if (permissionInfo.details.currentPath) {
+          console.log(c('    当前路径: ' + permissionInfo.details.currentPath, 'dim'));
+        }
+        if (permissionInfo.details.availableSpace) {
+          console.log(c('    可用空间: ' + permissionInfo.details.availableSpace, 'dim'));
+        }
+        if (permissionInfo.details.requiredSpace) {
+          console.log(c('    所需空间: ' + permissionInfo.details.requiredSpace, 'dim'));
+        }
+      }
+      
+      if (permissionInfo.type === 'change_backup_location' && permissionInfo.details.alternatives) {
+        console.log();
+        console.log(c('    可用的备用位置:', 'cyan'));
+        permissionInfo.details.alternatives.forEach((alt, index) => {
+          console.log(c(`      ${index + 1}. ${alt.path} (${alt.available})`, 'white'));
+        });
+        console.log();
+        
+        const choice = await ask('    请选择备用位置 (输入序号) 或输入自定义路径: ');
+        
+        if (choice === '__CANCEL__') return { granted: false };
+        
+        const numChoice = parseInt(choice);
+        if (!isNaN(numChoice) && numChoice > 0 && numChoice <= permissionInfo.details.alternatives.length) {
+          return { granted: true, path: permissionInfo.details.alternatives[numChoice - 1].path };
+        } else if (choice.trim()) {
+          return { granted: true, path: choice.trim() };
+        }
+        
+        return { granted: false };
+      } else {
+        const confirm = await ask('    是否允许继续? (y/n): ');
+        return { granted: confirm.toLowerCase() === 'y' };
+      }
+    };
+    
+    const result = await agent.executeTool('create_backup', { 
+      backupType: type,
+      onProgress,
+      requestPermission
+    });
+    
+    console.log();
     
     if (result.success) {
       console.log(c('  ✓ 备份成功！', 'green'));
       console.log(c('    备份ID: ' + result.backupId, 'white'));
       console.log(c('    备份类型: ' + result.backupType, 'white'));
+      console.log(c('    文件数: ' + result.filesCount + ' 个', 'white'));
       if (result.size) {
         console.log(c('    大小: ' + (result.size / 1024 / 1024).toFixed(2) + ' MB', 'dim'));
       }
@@ -2373,6 +2866,7 @@ async function createBackup() {
       console.log(c('  ✗ 备份失败: ' + result.error, 'red'));
     }
   } catch (error) {
+    console.log();
     console.log(c('  ✗ 备份失败: ' + error.message, 'red'));
   }
   
