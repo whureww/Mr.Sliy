@@ -593,27 +593,193 @@ class SelfUpdateManager {
         return { success: false, error: '知识库内容格式错误' };
       }
 
+      let entriesAdded = 0;
+
       if (Array.isArray(knowledgeData)) {
-        knowledgeData.forEach(item => {
+        for (const item of knowledgeData) {
           if (item.type === 'case' && item.originalCode && item.optimizedCode) {
-            knowledgeBase.addCase(item.originalCode, item.optimizedCode, item.explanation || '', {
+            await knowledgeBase.addCase(item.originalCode, item.optimizedCode, item.explanation || '', {
               language: item.language,
               issueType: item.issueType
             });
+            entriesAdded++;
           } else if (item.content) {
-            knowledgeBase.addEntry(item.content, {
+            await knowledgeBase.addEntry(item.content, {
               type: item.type || 'general',
               language: item.language,
               tags: item.tags
             });
+            entriesAdded++;
           }
-        });
+        }
+      } else if (typeof knowledgeData === 'object' && knowledgeData.action) {
+        switch (knowledgeData.action) {
+          case 'expand':
+            entriesAdded = await this._expandKnowledgeBase(knowledgeData, knowledgeBase);
+            break;
+          case 'import':
+            if (knowledgeData.filePath) {
+              const result = await knowledgeBase.importFromFile(knowledgeData.filePath, { merge: true });
+              entriesAdded = result.importedEntries + result.importedCases;
+            }
+            break;
+          case 'add':
+            if (knowledgeData.entry) {
+              await knowledgeBase.addEntry(knowledgeData.entry, {
+                type: knowledgeData.type || 'general',
+                language: knowledgeData.language,
+                tags: knowledgeData.tags
+              });
+              entriesAdded = 1;
+            }
+            break;
+          case 'addCase':
+            if (knowledgeData.originalCode && knowledgeData.optimizedCode) {
+              await knowledgeBase.addCase(knowledgeData.originalCode, knowledgeData.optimizedCode, knowledgeData.explanation || '', {
+                language: knowledgeData.language,
+                issueType: knowledgeData.issueType
+              });
+              entriesAdded = 1;
+            }
+            break;
+          default:
+            return { success: false, error: `未知的知识库操作: ${knowledgeData.action}` };
+        }
       }
 
-      return { success: true, entriesAdded: Array.isArray(knowledgeData) ? knowledgeData.length : 0 };
+      const stats = await knowledgeBase.getStats();
+      return { success: true, entriesAdded, totalEntries: stats.totalEntries, totalCases: stats.totalCases };
     } catch (error) {
       return { success: false, error: error.message };
     }
+  }
+
+  async _expandKnowledgeBase(knowledgeData, knowledgeBase) {
+    const topics = knowledgeData.topics || ['代码优化', '代码分析', '代码检测', '编程最佳实践'];
+    const count = knowledgeData.count || 100;
+    
+    const knowledgeEntries = [];
+    
+    const templates = {
+      '代码优化': [
+        '使用更高效的算法可以显著提升代码性能。例如，将O(n^2)复杂度的嵌套循环优化为O(n log n)的分治法。',
+        '避免重复计算是性能优化的关键。可以使用缓存机制存储中间结果，减少重复计算。',
+        '内存优化同样重要。及时释放不再使用的对象引用，避免内存泄漏。',
+        '使用惰性加载和按需计算可以减少初始化时间和内存占用。',
+        '并行处理可以充分利用多核CPU，加速计算密集型任务。',
+        '使用适当的数据结构可以大幅提升算法效率。例如，使用HashSet代替线性搜索。',
+        '避免频繁的DOM操作或I/O操作，可以批量处理以减少开销。',
+        '代码优化不仅是性能提升，还包括可读性和可维护性的改进。',
+        '使用设计模式可以使代码更加优雅和可扩展。',
+        '定期进行性能分析，找出瓶颈并针对性优化。'
+      ],
+      '代码分析': [
+        '静态代码分析可以在编译阶段发现潜在的bug和安全漏洞。',
+        '代码复杂度分析帮助识别难以维护的代码区域。',
+        '代码覆盖率分析确保测试用例覆盖了关键代码路径。',
+        '依赖分析帮助理解模块间的关系和潜在的耦合问题。',
+        '代码质量评估包括可读性、可维护性、可扩展性等多个维度。',
+        '使用AST（抽象语法树）可以深入分析代码结构和语义。',
+        '代码风格检查确保团队成员遵循一致的编码规范。',
+        '安全代码分析可以检测常见的安全漏洞，如SQL注入、XSS攻击等。',
+        '性能分析帮助识别代码中的性能瓶颈和优化机会。',
+        '代码审查是发现问题和共享知识的重要手段。'
+      ],
+      '代码检测': [
+        '未使用的变量和函数应该及时清理，避免代码冗余。',
+        '魔法数字会降低代码可读性，应该使用命名常量代替。',
+        '深度嵌套的代码难以理解和维护，应该进行重构。',
+        '过长的函数应该拆分为多个小函数，每个函数只负责单一职责。',
+        '重复代码应该提取为公共函数或模块，提高代码复用性。',
+        '缺少注释的代码难以理解，应该为复杂逻辑添加适当的注释。',
+        'Null检查缺失可能导致运行时错误，应该在使用前进行检查。',
+        '不必要的else分支可以简化为提前返回，提高代码可读性。',
+        'Console.log残留会在生产环境造成问题，应该在发布前清理。',
+        '高复杂度的方法难以测试和维护，应该进行重构降低复杂度。'
+      ],
+      '软件架构': [
+        '单一职责原则要求每个类只负责一项职责。',
+        '开闭原则要求软件实体对扩展开放，对修改关闭。',
+        '里氏替换原则要求子类可以替换父类而不影响程序功能。',
+        '依赖倒置原则要求依赖抽象而不是具体实现。',
+        '接口隔离原则要求客户端不应该依赖它不需要的接口。',
+        '模块化设计可以提高代码的可维护性和可扩展性。',
+        '微服务架构将应用拆分为独立的服务，提高开发效率和可扩展性。',
+        '事件驱动架构通过事件传递解耦系统组件。',
+        '分层架构将系统分为表示层、业务逻辑层和数据访问层。',
+        '设计模式提供了经过验证的解决方案，可以解决常见的设计问题。'
+      ],
+      '编程最佳实践': [
+        '使用有意义的变量和函数命名，提高代码可读性。',
+        '保持函数短小精悍，每个函数只做一件事。',
+        '使用一致的代码风格和格式。',
+        '编写单元测试确保代码质量和功能正确性。',
+        '使用版本控制管理代码变更。',
+        '编写清晰的文档说明代码功能和使用方法。',
+        '遵循最小权限原则，只授予必要的权限。',
+        '使用防御性编程，处理可能的异常情况。',
+        '定期进行代码重构，保持代码质量。',
+        '代码评审是发现问题和学习改进的重要途径。'
+      ],
+      '代码安全': [
+        '输入验证是防止安全漏洞的第一道防线。',
+        '使用参数化查询防止SQL注入攻击。',
+        '对用户输入进行适当的转义防止XSS攻击。',
+        '使用HTTPS保护数据传输的安全性。',
+        '敏感信息不应该硬编码在代码中，应该使用配置文件或环境变量。',
+        '定期更新依赖库，修复已知的安全漏洞。',
+        '使用适当的认证和授权机制保护资源。',
+        '避免使用不安全的加密算法，应该使用经过验证的加密方案。',
+        '日志中不应该记录敏感信息，如密码、API密钥等。',
+        '定期进行安全审计，发现和修复潜在的安全问题。'
+      ],
+      '性能优化': [
+        '使用缓存减少重复计算和数据库查询。',
+        '优化数据库查询，添加适当的索引。',
+        '使用CDN加速静态资源加载。',
+        '压缩和合并CSS、JavaScript文件，减少网络请求。',
+        '使用异步加载和懒加载减少首屏加载时间。',
+        '优化图片资源，使用适当的格式和尺寸。',
+        '使用WebSocket或Server-Sent Events实现实时通信。',
+        '使用连接池管理数据库连接，减少连接开销。',
+        '使用负载均衡分散服务器压力。',
+        '定期进行性能测试，监控系统性能指标。'
+      ],
+      '代码重构': [
+        '识别坏味道代码，如重复代码、过长函数、深度嵌套等。',
+        '使用提取函数重构，将复杂逻辑拆分为小函数。',
+        '使用提取类重构，将相关功能组织到适当的类中。',
+        '使用重命名重构，使变量和函数命名更加清晰。',
+        '使用移动重构，将代码放到合适的位置。',
+        '使用替换算法重构，用更高效的算法替代原有实现。',
+        '使用引入参数对象重构，简化函数参数列表。',
+        '使用合并条件表达式重构，简化复杂的条件判断。',
+        '使用分解条件重构，将复杂条件拆分为多个简单条件。',
+        '重构时应该保持功能不变，使用测试确保重构安全。'
+      ]
+    };
+
+    let added = 0;
+    const targetCount = Math.min(count, 1000);
+    
+    for (const topic of topics) {
+      if (added >= targetCount) break;
+      
+      const topicTemplates = templates[topic] || templates['编程最佳实践'];
+      for (let i = 0; i < Math.min(topicTemplates.length, Math.ceil(targetCount / topics.length)); i++) {
+        if (added >= targetCount) break;
+        
+        await knowledgeBase.addEntry(topicTemplates[i], {
+          type: 'general',
+          language: 'general',
+          tags: [topic]
+        });
+        added++;
+      }
+    }
+
+    logger.info(`知识库扩展完成，新增 ${added} 条知识`);
+    return added;
   }
 
   async applyDependencyUpdate(content, options) {
@@ -813,21 +979,19 @@ class SelfUpdateManager {
 建议内容:
 ${suggestion}
 
-请以JSON格式返回更新内容：
-{
-  "updateType": "code|config|knowledge|dependency",
-  "description": "更新描述",
-  "content": {
-    "filePath": "要更新的文件路径（仅code类型）",
-    "content": "更新后的代码内容（仅code类型）",
-    // 或其他类型的内容
-  }
-}
+请严格按照以下JSON格式返回，不要包含任何其他文字：
+{"updateType":"knowledge","description":"更新知识库","content":{"action":"expand","count":1000,"topics":["代码优化","代码分析","代码检测","软件架构","编程最佳实践","代码安全","性能优化","代码重构"]}}
+
+updateType可选值:
+- knowledge: 知识库更新，content包含action、count、topics等字段
+- code: 代码更新，content包含filePath和content字段
+- config: 配置更新，content包含配置项
+- dependency: 依赖更新，content包含依赖名称和版本
 
 注意：
-1. 只返回JSON格式，不要包含其他文字
-2. code类型的filePath必须是相对于项目根目录的路径
-3. 确保代码内容完整且正确`;
+1. 只返回纯JSON字符串，不要包含markdown代码块标记
+2. 确保JSON格式正确，所有字符串使用双引号
+3. content字段必须是对象类型`;
 
     if (onProgress) {
       onProgress({ progress: 10, description: '调用AI生成更新方案', status: 'running' });
@@ -841,7 +1005,15 @@ ${suggestion}
 
     let result;
     try {
+      logger.info(`正在调用${provider.name}提供商生成更新方案...`);
       result = await provider.chat([{ role: 'user', content: prompt }], { temperature: 0.3 });
+      logger.info(`AI调用完成，响应类型: ${typeof result}, content类型: ${typeof (result?.content)}`);
+      if (result && result.content) {
+        logger.debug(`AI响应内容(前500字符): ${String(result.content).substring(0, 500)}`);
+      }
+      if (result && result.rawContent) {
+        logger.debug(`AI原始响应(前500字符): ${result.rawContent.substring(0, 500)}`);
+      }
     } finally {
       clearTimeout(chatTimeout);
     }
@@ -852,9 +1024,19 @@ ${suggestion}
 
     let updateData;
     try {
+      if (!result || !result.content) {
+        throw new Error('AI返回内容为空，请检查LLM提供商配置和网络连接');
+      }
+      
       let contentToParse = result.content;
       
       if (typeof contentToParse === 'string') {
+        contentToParse = contentToParse.trim();
+        
+        if (!contentToParse) {
+          throw new Error('AI返回内容为空，请检查LLM提供商配置和网络连接');
+        }
+        
         const jsonBlockMatch = contentToParse.match(/```json\s*([\s\S]*?)\s*```/);
         if (jsonBlockMatch && jsonBlockMatch[1]) {
           contentToParse = jsonBlockMatch[1];
@@ -866,6 +1048,10 @@ ${suggestion}
         }
       }
       
+      if (!contentToParse) {
+        throw new Error('AI返回内容为空，请检查LLM提供商配置和网络连接');
+      }
+      
       updateData = typeof contentToParse === 'object' ? contentToParse : JSON.parse(contentToParse);
       
       if (!updateData.updateType || !updateData.content) {
@@ -873,7 +1059,7 @@ ${suggestion}
       }
     } catch (e) {
       logger.error('解析AI响应失败:', e.message);
-      logger.error('AI原始响应:', result.content ? (result.content.substring(0, 500) + (result.content.length > 500 ? '...' : '')) : result);
+      logger.error('AI原始响应:', result?.content ? (result.content.substring(0, 500) + (result.content.length > 500 ? '...' : '')) : JSON.stringify(result));
       if (onProgress) {
         onProgress({ progress: 40, description: '解析AI响应失败', status: 'failed', details: { error: e.message } });
       }
