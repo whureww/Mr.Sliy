@@ -429,6 +429,7 @@ const allTablesSqlite = [
     update_type VARCHAR(50) NOT NULL,
     target_version VARCHAR(20),
     current_version VARCHAR(20),
+    version_after VARCHAR(20),
     update_source VARCHAR(100),
     update_content TEXT,
     status VARCHAR(20) DEFAULT 'pending',
@@ -562,6 +563,7 @@ function ensureSqliteTables() {
     db.exec(`
       ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS rejected_step VARCHAR(100);
       ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS rolled_back_reason VARCHAR(200);
+      ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS version_after VARCHAR(20);
       ALTER TABLE IF EXISTS self_repair_history ADD COLUMN IF NOT EXISTS rolled_back_reason VARCHAR(200);
     `);
     logger.debug('已检查并添加缺失字段');
