@@ -99,7 +99,7 @@ class RollbackManager {
         if (onProgress) {
           onProgress({ progress: 50, status: 'running', description: `正在备份 ${path.basename(targetPath)}` });
         }
-        const copyResult = this.copyFileWithRetry(targetPath, path.join(backupDir, path.basename(targetPath)));
+        const copyResult = await this.copyFileWithRetry(targetPath, path.join(backupDir, path.basename(targetPath)));
         if (copyResult.success) {
           filesToBackup.push(targetPath);
         } else {
@@ -338,13 +338,14 @@ class RollbackManager {
     }
   }
 
-  copyFileWithRetry(src, dest, maxRetries = 3) {
+  async copyFileWithRetry(src, dest, maxRetries = 3) {
     for (let i = 0; i < maxRetries; i++) {
       try {
         const srcStats = fs.statSync(src);
         
         if (srcStats.size > 50 * 1024 * 1024) {
-          return this.copyLargeFileSync(src, dest);
+          const result = await this.copyLargeFileSync(src, dest);
+          return result;
         }
         
         try {
@@ -352,7 +353,8 @@ class RollbackManager {
         } catch (copyError) {
           if (copyError.code === 'EPERM' || copyError.code === 'EBUSY') {
             logger.debug(`文件可能被占用，尝试流式复制: ${src}`);
-            return this.copyLargeFileSync(src, dest);
+            const result = await this.copyLargeFileSync(src, dest);
+            return result;
           }
           throw copyError;
         }
@@ -361,9 +363,7 @@ class RollbackManager {
       } catch (error) {
         if (i < maxRetries - 1) {
           logger.debug(`文件复制失败，重试 ${i + 1}/${maxRetries}: ${src} - ${error.message}`);
-          const waitTime = (i + 1) * 1000;
-          const start = Date.now();
-          while (Date.now() - start < waitTime) {}
+          await new Promise(resolve => setTimeout(resolve, (i + 1) * 1000));
         } else {
           logger.warn(`文件复制失败(已重试${maxRetries}次): ${src} - ${error.message}`);
           return { success: false, error: error.message };
@@ -1007,7 +1007,7 @@ class RollbackManager {
         if (stats.isDirectory()) {
           await this.copyDirectoryExcludeSafe(srcPath, destPath, excludeDirs, onFileCopied);
         } else {
-          const copyResult = this.copyFileWithRetry(srcPath, destPath);
+          const copyResult = await this.copyFileWithRetry(srcPath, destPath);
           if (copyResult.success) {
             if (onFileCopied) {
               onFileCopied(srcPath, false);

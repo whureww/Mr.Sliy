@@ -199,9 +199,30 @@ class SelfUpdateManager {
 
       if (!options.skipBackup) {
         reportProgress(2, '创建备份', { type: updateRecord.update_type });
+        
+        if (onProgress) {
+          onProgress({ progress: 15, status: 'running', description: '创建备份' });
+        }
+        
         const backupResult = await rollbackManager.createBackup('update', process.cwd(), {
           version: updateRecord.current_version,
-          description: `Update ${updateId} backup`
+          description: `Update ${updateId} backup`,
+          onProgress: (p) => {
+            if (onProgress) {
+              onProgress({ ...p });
+            }
+          },
+          requestPermission: async (permissionRequest) => {
+            if (onProgress) {
+              onProgress({ 
+                progress: null, 
+                status: 'confirming', 
+                description: permissionRequest.title,
+                details: permissionRequest
+              });
+            }
+            return { granted: false };
+          }
         });
         
         if (backupResult.success) {
@@ -209,6 +230,14 @@ class SelfUpdateManager {
           logger.info(`备份创建成功: ${backupResult.backupId}`);
         } else {
           logger.warn(`备份创建失败: ${backupResult.error}`);
+          if (onProgress) {
+            onProgress({ 
+              progress: 15, 
+              status: 'warning', 
+              description: `备份创建失败: ${backupResult.error}`,
+              backupFailed: true
+            });
+          }
         }
       }
 
