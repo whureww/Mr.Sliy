@@ -34,6 +34,7 @@ class DualModeEngine {
     
     try {
       await providerManager.refreshProviderStatus();
+      logger.info('提供商状态刷新完成');
     } catch (e) {
       logger.debug('刷新提供商状态失败: ' + e.message);
     }
@@ -42,6 +43,12 @@ class DualModeEngine {
       try {
         const isConnected = await checkNetworkConnectivity();
         logger.info(`网络连接状态: ${isConnected ? '已连接' : '未连接'}`);
+      } catch (e) {
+        logger.debug('网络检测失败: ' + e.message);
+      }
+    } else {
+      try {
+        await checkNetworkConnectivity();
       } catch (e) {
         logger.debug('网络检测失败: ' + e.message);
       }
@@ -68,6 +75,16 @@ class DualModeEngine {
    */
   getActualMode() {
     if (this.mode === 'auto') {
+      const networkStatus = getNetworkStatus();
+      
+      if (networkStatus.connected === null) {
+        return 'offline';
+      }
+      
+      if (networkStatus.connected === false) {
+        return 'offline';
+      }
+      
       const availableProviders = providerManager.getAvailableProviders();
       const hasOnlineProvider = availableProviders.some(p => p.available && p.name !== 'ollama');
       
@@ -75,14 +92,25 @@ class DualModeEngine {
         return 'offline';
       }
       
-      const networkStatus = getNetworkStatus();
-      if (networkStatus.connected === false) {
-        return 'offline';
-      }
-      
       return 'online';
     }
     return this.mode;
+  }
+
+  async refreshNetworkStatus() {
+    try {
+      await checkNetworkConnectivity();
+    } catch (e) {
+      logger.debug('刷新网络状态失败: ' + e.message);
+    }
+  }
+
+  async refreshProviderStatus() {
+    try {
+      await providerManager.refreshProviderStatus();
+    } catch (e) {
+      logger.debug('刷新提供商状态失败: ' + e.message);
+    }
   }
 
   /**
@@ -404,27 +432,27 @@ class DualModeEngine {
   async optimizeOffline(issue, context) {
     try {
       // 1. 检索相似案例
-      const similarCases = knowledgeBase.findSimilarCases(issue.codeSnippet, {
+      const similarCases = await knowledgeBase.findSimilarCases(issue.codeSnippet, {
         language: context.language,
         issueType: context.issueType,
         topK: 3
-      });
+      }) || [];
 
       // 2. 检索相关知识
-      const relatedKnowledge = knowledgeBase.searchEntries(
+      const relatedKnowledge = await knowledgeBase.searchEntries(
         `${context.issueType} ${context.message}`,
         {
           language: context.language,
           topK: 3
         }
-      );
+      ) || [];
 
       // 3. 构建离线优化建议
       let optimizedCode = issue.codeSnippet;
       let explanation = '';
       const suggestions = [];
 
-      if (similarCases.length > 0 && similarCases[0].similarity > 0.5) {
+      if (Array.isArray(similarCases) && similarCases.length > 0 && similarCases[0].similarity > 0.5) {
         const bestCase = similarCases[0];
         optimizedCode = bestCase.optimizedCode;
         explanation = bestCase.explanation;
@@ -438,11 +466,13 @@ class DualModeEngine {
         explanation = this.generateOfflineExplanation(issue, relatedKnowledge);
       }
 
-      relatedKnowledge.forEach(k => {
-        if (k.similarity > 0.3) {
-          suggestions.push(k.content);
-        }
-      });
+      if (Array.isArray(relatedKnowledge)) {
+        relatedKnowledge.forEach(k => {
+          if (k.similarity > 0.3) {
+            suggestions.push(k.content);
+          }
+        });
+      }
 
       return {
         success: true,
@@ -450,8 +480,8 @@ class DualModeEngine {
         optimizedCode,
         explanation: explanation || '基于本地知识库规则的建议',
         suggestions: suggestions.length > 0 ? suggestions : ['建议参考编码规范进行优化'],
-        similarCases: similarCases.slice(0, 3),
-        knowledgeSources: relatedKnowledge.slice(0, 3)
+        similarCases: Array.isArray(similarCases) ? similarCases.slice(0, 3) : [],
+        knowledgeSources: Array.isArray(relatedKnowledge) ? relatedKnowledge.slice(0, 3) : []
       };
 
     } catch (error) {
@@ -473,25 +503,25 @@ class DualModeEngine {
   async optimizeOnline(issue, context) {
     try {
       // 1. 先进行RAG检索（增强上下文）
-      const similarCases = knowledgeBase.findSimilarCases(issue.codeSnippet, {
+      const similarCases = await knowledgeBase.findSimilarCases(issue.codeSnippet, {
         language: context.language,
         issueType: context.issueType,
         topK: 3
-      });
+      }) || [];
 
-      const relatedKnowledge = knowledgeBase.searchEntries(
+      const relatedKnowledge = await knowledgeBase.searchEntries(
         `${context.issueType} ${context.message}`,
         {
           language: context.language,
           topK: 3
         }
-      );
+      ) || [];
 
       // 2. 构建增强提示
       const enhancedContext = {
         ...context,
-        similarCases: similarCases.filter(c => c.similarity > 0.3),
-        relatedKnowledge: relatedKnowledge.filter(k => k.similarity > 0.3)
+        similarCases: Array.isArray(similarCases) ? similarCases.filter(c => c.similarity > 0.3) : [],
+        relatedKnowledge: Array.isArray(relatedKnowledge) ? relatedKnowledge.filter(k => k.similarity > 0.3) : []
       };
 
       // 3. 调用云端大模型

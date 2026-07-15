@@ -998,19 +998,31 @@ class SelfUpdateManager {
 建议内容:
 ${suggestion}
 
-请严格按照以下JSON格式返回，不要包含任何其他文字：
-{"updateType":"knowledge","description":"更新知识库","content":{"action":"expand","count":1000,"topics":["代码优化","代码分析","代码检测","软件架构","编程最佳实践","代码安全","性能优化","代码重构"]}}
+请根据建议内容智能判断更新类型，并严格按照以下JSON格式返回，不要包含任何其他文字：
 
-updateType可选值:
-- knowledge: 知识库更新，content包含action、count、topics等字段
-- code: 代码更新，content包含filePath和content字段
-- config: 配置更新，content包含配置项
-- dependency: 依赖更新，content包含依赖名称和版本
+更新类型选择规则:
+1. 如果建议涉及代码功能修改、新增功能、修复bug，请使用 "code" 类型
+2. 如果建议涉及知识库扩充、添加学习资料，请使用 "knowledge" 类型
+3. 如果建议涉及配置参数调整，请使用 "config" 类型
+4. 如果建议涉及依赖包更新，请使用 "dependency" 类型
+
+代码更新示例:
+{"updateType":"code","description":"优化文件扫描功能","content":{"filePath":"src/utils/scanner.js","content":"function scanFiles(dir) {\n  // 优化后的扫描逻辑\n  return [];\n}"}}
+
+知识库更新示例:
+{"updateType":"knowledge","description":"扩充代码优化知识库","content":{"action":"expand","count":500,"topics":["代码优化","性能优化","代码安全"]}}
+
+配置更新示例:
+{"updateType":"config","description":"调整日志级别","content":{"log_level":"debug"}}
+
+依赖更新示例:
+{"updateType":"dependency","description":"更新依赖包","content":{"name":"lodash","version":"^4.17.21"}}
 
 注意：
-1. 只返回纯JSON字符串，不要包含markdown代码块标记
-2. 确保JSON格式正确，所有字符串使用双引号
-3. content字段必须是对象类型`;
+1. 优先考虑代码更新，只有明确提到知识库扩充时才使用knowledge类型
+2. 只返回纯JSON字符串，不要包含markdown代码块标记
+3. 确保JSON格式正确，所有字符串使用双引号
+4. content字段必须是对象类型`;
 
     if (onProgress) {
       onProgress({ progress: 10, description: '调用AI生成更新方案', status: 'running' });
