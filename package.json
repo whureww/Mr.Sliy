@@ -8,6 +8,8 @@
     "sliy": "src/agent.js"
   },
   "files": [
+    "README.md",
+    "LICENSE",
     "src/",
     "database/schema.sql",
     "database/init.js",
