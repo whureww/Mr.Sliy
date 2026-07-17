@@ -1278,7 +1278,12 @@ class KnowledgeBase {
         }))
       };
       
-      const result = await this.importFromJSON(importData, { merge: true, skipExisting: false });
+      const originalUseMysql = this.useMysql;
+      this.useMysql = false;
+      
+      const result = await this.importFromJSON(importData, { merge: false, skipExisting: false });
+      
+      this.useMysql = originalUseMysql;
       
       return {
         success: true,
