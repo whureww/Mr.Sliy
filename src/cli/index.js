@@ -11,6 +11,7 @@ const { agent } = require('../agent/agent');
 const { logger } = require('../utils/logger');
 const { ProgressBar, MultiStepProgress } = require('../utils/progress');
 const { padEndDisplay } = require('../utils/helpers');
+const mysql = require('../utils/mysql');
 
 const colors = {
   reset: '\x1b[0m',
@@ -1731,15 +1732,19 @@ async function addDatabaseConnection() {
     
     if (confirmTest.toLowerCase() === 'y' || confirmTest.toLowerCase() === 'yes') {
       const { getDatabaseConnection } = require('../config');
-      const { testConnectionWithConfig } = require('../utils/mysql');
       const conn = getDatabaseConnection(id);
       if (conn) {
-        const testResult = await testConnectionWithConfig(conn);
-        console.log();
-        if (testResult.success) {
-          console.log(c('  ✅ ' + testResult.message, 'green'));
-        } else {
-          console.log(c('  ✗ 测试连接失败: ' + testResult.message, 'red'));
+        try {
+          const testResult = await mysql.testConnectionWithConfig(conn);
+          console.log();
+          if (testResult.success) {
+            console.log(c('  ✅ ' + testResult.message, 'green'));
+          } else {
+            console.log(c('  ✗ 测试连接失败: ' + testResult.message, 'red'));
+          }
+        } catch (error) {
+          console.log();
+          console.log(c('  ✗ 测试连接异常: ' + error.message, 'red'));
         }
       }
     }
@@ -1981,14 +1986,19 @@ async function testSpecificConnection() {
   
   console.log(c('  正在测试连接 "' + conn.name + '"...', 'cyan'));
   
-  const result = await mysql.testConnectionWithConfig(conn);
-  
-  console.log();
-  if (result.success) {
-    console.log(c('  ✅ ' + result.message, 'green'));
-  } else {
-    console.log(c('  ✗ 连接失败: ' + result.message, 'red'));
-    console.log(c('  提示: 请确保 MySQL 服务器已启动并开放对应端口', 'yellow'));
+  try {
+    const result = await mysql.testConnectionWithConfig(conn);
+    
+    console.log();
+    if (result.success) {
+      console.log(c('  ✅ ' + result.message, 'green'));
+    } else {
+      console.log(c('  ✗ 连接失败: ' + result.message, 'red'));
+      console.log(c('  提示: 请确保 MySQL 服务器已启动并开放对应端口', 'yellow'));
+    }
+  } catch (error) {
+    console.log();
+    console.log(c('  ✗ 测试连接异常: ' + error.message, 'red'));
   }
   
   await waitEnter();
