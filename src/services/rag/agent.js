@@ -331,7 +331,8 @@ async function optimizeWithRAG(issue, context) {
  */
 function saveOptimizationRecord(record) {
   try {
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     const stmt = db.prepare(`
       INSERT INTO ai_optimize_record
       (id, issue_id, task_id, original_code, optimized_code, explanation,

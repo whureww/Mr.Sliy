@@ -81,7 +81,59 @@ class KnowledgeBase {
   async init() {
     if (this.initialized) return;
 
-    if (config.mysql && config.mysql.enabled) {
+    this.useMysql = false;
+    this.mysqlAvailable = false;
+
+    let activeConn = null;
+    let activeConnId = null;
+
+    const defaultConnId = config.databases.defaultConnection;
+    const defaultConn = config.databases.connections[defaultConnId];
+
+    if (defaultConn && defaultConn.enabled && defaultConn.host) {
+      activeConn = defaultConn;
+      activeConnId = defaultConnId;
+    } else {
+      for (const [id, conn] of Object.entries(config.databases.connections)) {
+        if (conn.enabled && conn.host) {
+          activeConn = conn;
+          activeConnId = id;
+          break;
+        }
+      }
+    }
+
+    if (activeConn) {
+      try {
+        config.mysql.enabled = true;
+        config.mysql.host = activeConn.host;
+        config.mysql.port = activeConn.port;
+        config.mysql.user = activeConn.user;
+        config.mysql.password = activeConn.password;
+        config.mysql.database = activeConn.database;
+        config.mysql.connectionLimit = activeConn.connectionLimit;
+
+        const testResult = await mysql.testConnection();
+        if (!testResult.success) {
+          throw new Error(testResult.message);
+        }
+
+        const initResult = await mysql.initDatabase();
+        if (!initResult) {
+          throw new Error('MySQL数据库表初始化失败');
+        }
+
+        this.useMysql = true;
+        this.mysqlAvailable = true;
+        this.currentConnectionId = activeConnId;
+        logger.info(`知识库使用云端MySQL (${activeConn.name})`);
+      } catch (e) {
+        logger.warn('云端MySQL连接失败，回退到本地SQLite:', e.message);
+        this.useMysql = false;
+        this.mysqlAvailable = false;
+        config.mysql.enabled = false;
+      }
+    } else if (config.mysql && config.mysql.enabled && config.mysql.host) {
       try {
         const testResult = await mysql.testConnection();
         if (!testResult.success) {
@@ -112,7 +164,8 @@ class KnowledgeBase {
   }
 
   _initSqlite() {
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     
     db.exec(`
       CREATE TABLE IF NOT EXISTS kb_entries (
@@ -200,7 +253,8 @@ class KnowledgeBase {
       }
     }
 
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     const stmt = db.prepare(`
       INSERT INTO kb_entries (id, content, content_type, language, tags, source, vector_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -247,7 +301,8 @@ class KnowledgeBase {
       }
     }
 
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     const stmt = db.prepare(`
       INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, vector_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -301,7 +356,8 @@ class KnowledgeBase {
     }
 
     if (!this.useMysql) {
-      const db = getDatabase();
+      const { getSqliteDatabase } = require('../../utils/database');
+      const db = getSqliteDatabase();
       let sql = 'SELECT id, content, content_type, language, tags, source, vector_json FROM kb_entries';
       const conditions = [];
       const params = [];
@@ -377,7 +433,8 @@ class KnowledgeBase {
     }
 
     if (!this.useMysql) {
-      const db = getDatabase();
+      const { getSqliteDatabase } = require('../../utils/database');
+      const db = getSqliteDatabase();
       let sql = 'SELECT id, original_code, optimized_code, explanation, language, issue_type, vector_json, usage_count, rating FROM kb_cases';
       const conditions = [];
       const params = [];
@@ -448,7 +505,8 @@ class KnowledgeBase {
       }
     }
 
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     const entryCount = db.prepare('SELECT COUNT(*) as count FROM kb_entries').get().count;
     const caseCount = db.prepare('SELECT COUNT(*) as count FROM kb_cases').get().count;
 
@@ -492,7 +550,8 @@ class KnowledgeBase {
     }
 
     if (!this.useMysql) {
-      const db = getDatabase();
+      const { getSqliteDatabase } = require('../../utils/database');
+      const db = getSqliteDatabase();
       entries = db.prepare('SELECT * FROM kb_entries').all();
       cases = db.prepare('SELECT * FROM kb_cases').all();
     }
@@ -625,7 +684,8 @@ class KnowledgeBase {
       }
     }
 
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     
     if (!merge) {
       db.prepare('DELETE FROM kb_entries').run();
@@ -886,7 +946,8 @@ class KnowledgeBase {
       }
     }
 
-    const db = getDatabase();
+    const { getSqliteDatabase } = require('../../utils/database');
+    const db = getSqliteDatabase();
     const stmt = db.prepare(`
       UPDATE kb_cases 
       SET usage_count = usage_count + 1, 

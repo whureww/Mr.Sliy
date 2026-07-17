@@ -165,7 +165,8 @@ function requestLogger(req, res, next) {
  * 操作日志记录
  */
 async function logOperation(data) {
-  const db = require('./database').getDatabase();
+  const { getSqliteDatabase } = require('./database');
+  const db = getSqliteDatabase();
   
   try {
     const stmt = db.prepare(`

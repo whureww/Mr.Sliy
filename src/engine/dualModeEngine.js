@@ -29,7 +29,7 @@ class DualModeEngine {
   async init() {
     if (this.initialized) return;
     
-    knowledgeBase.init();
+    await knowledgeBase.init();
     knowledgeBase.seedDefaultKnowledge();
     
     try {

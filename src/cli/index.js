@@ -82,7 +82,7 @@ function handleGlobalKeypress(chunk, key) {
     handleMenuKeypress(key);
   } else if (inputState.mode === 'search') {
     handleSearchKeypress(key);
-  } else if (inputState.mode === 'input') {
+  } else if (inputState.mode === 'input' || inputState.mode === 'password') {
     handleInputKeypress(key);
   } else {
     return;
@@ -196,7 +196,11 @@ function handleInputKeypress(key) {
     return;
   } else if (!key.ctrl && !key.meta && key.sequence && typeof key.sequence === 'string') {
     inputState.inputBuffer += key.sequence;
-    process.stdout.write(key.sequence);
+    if (inputState.mode !== 'password') {
+      process.stdout.write(key.sequence);
+    } else {
+      process.stdout.write('*');
+    }
   }
 }
 
@@ -588,6 +592,15 @@ function ask(prompt) {
     inputState.mode = 'input';
     inputState.inputBuffer = '';
     inputState.promptText = prompt;
+    inputState.inputResolve = resolve;
+    process.stdout.write(c(prompt, 'white'));
+  });
+}
+
+function askPassword(prompt) {
+  return new Promise((resolve) => {
+    inputState.mode = 'password';
+    inputState.inputBuffer = '';
     inputState.inputResolve = resolve;
     process.stdout.write(c(prompt, 'white'));
   });
@@ -1685,7 +1698,7 @@ async function addDatabaseConnection() {
   const user = await ask('  请输入用户名: ');
   if (user === '__CANCEL__') return;
   
-  const password = await ask('  请输入密码 (输入时不显示): ');
+  const password = await askPassword('  请输入密码 (输入时不显示): ');
   if (password === '__CANCEL__') return;
   
   const database = await ask('  请输入数据库名 (默认 code_optimizer): ');
@@ -1718,9 +1731,16 @@ async function addDatabaseConnection() {
     
     if (confirmTest.toLowerCase() === 'y' || confirmTest.toLowerCase() === 'yes') {
       const { getDatabaseConnection } = require('../config');
+      const { testConnectionWithConfig } = require('../utils/mysql');
       const conn = getDatabaseConnection(id);
       if (conn) {
-        await testConnectionWithConfig(conn);
+        const testResult = await testConnectionWithConfig(conn);
+        console.log();
+        if (testResult.success) {
+          console.log(c('  ✅ ' + testResult.message, 'green'));
+        } else {
+          console.log(c('  ✗ 测试连接失败: ' + testResult.message, 'red'));
+        }
       }
     }
   } else {
@@ -1783,7 +1803,7 @@ async function editDatabaseConnection() {
   const user = await ask('  请输入新的用户名 (回车保持不变): ');
   if (user === '__CANCEL__') return;
   
-  const password = await ask('  请输入新的密码 (回车保持不变，输入时不显示): ');
+  const password = await askPassword('  请输入新的密码 (回车保持不变，输入时不显示): ');
   if (password === '__CANCEL__') return;
   
   const database = await ask('  请输入新的数据库名 (回车保持不变): ');
@@ -1980,7 +2000,7 @@ async function searchKnowledge() {
   if (query.toLowerCase() === 'q' || query.toLowerCase() === 'quit') return;
   if (!query) return;
   
-  const results = agent.queryKnowledge(query);
+  const results = await agent.queryKnowledge(query);
   console.log();
   console.log(c('  找到 ' + results.total + ' 条结果', 'white'));
   console.log();

@@ -59,7 +59,18 @@ function getPool() {
     return null;
   }
 
-  if (!pool) {
+  const configKey = `${mysqlConfig.host}:${mysqlConfig.port}:${mysqlConfig.database}:${mysqlConfig.user}`;
+
+  if (!pool || currentConnectionConfig !== configKey) {
+    if (pool) {
+      try {
+        pool.end();
+      } catch (e) {
+        logger.debug('关闭旧连接池失败:', e.message);
+      }
+      pool = null;
+    }
+
     try {
       pool = mysql.createPool({
         host: mysqlConfig.host,
@@ -73,10 +84,12 @@ function getPool() {
         charset: 'utf8mb4'
       });
 
+      currentConnectionConfig = configKey;
       logger.info('MySQL连接池创建成功');
     } catch (error) {
       logger.warn(`MySQL连接池创建失败: ${error.message}`);
       pool = null;
+      currentConnectionConfig = null;
     }
   }
 
@@ -152,43 +165,42 @@ async function initDatabase() {
   }
   
   try {
-    // 创建知识条目表
     await query(`
-      CREATE TABLE IF NOT EXISTS knowledge_entries (
+      CREATE TABLE IF NOT EXISTS kb_entries (
         id VARCHAR(36) PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        category VARCHAR(50) NOT NULL,
         content TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        language VARCHAR(50),
         tags TEXT,
-        language VARCHAR(20) DEFAULT 'general',
-        source VARCHAR(50) DEFAULT 'default',
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_category (category),
-        INDEX idx_language (language)
+        source VARCHAR(100),
+        vector_json TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    
-    // 创建优化案例表
+
     await query(`
-      CREATE TABLE IF NOT EXISTS optimization_cases (
+      CREATE TABLE IF NOT EXISTS kb_cases (
         id VARCHAR(36) PRIMARY KEY,
-        title VARCHAR(255) NOT NULL,
-        category VARCHAR(50) NOT NULL,
-        before_code TEXT,
-        after_code TEXT,
-        description TEXT,
-        language VARCHAR(20) DEFAULT 'javascript',
-        complexity VARCHAR(20) DEFAULT 'medium',
-        tags TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_category (category),
-        INDEX idx_language (language)
+        original_code TEXT NOT NULL,
+        optimized_code TEXT NOT NULL,
+        explanation TEXT,
+        language VARCHAR(50),
+        issue_type VARCHAR(50),
+        vector_json TEXT,
+        usage_count INT DEFAULT 0,
+        rating DECIMAL(3,1) DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    
-    // 创建同步元数据表
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS kb_metadata (
+        meta_key VARCHAR(100) PRIMARY KEY,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     await query(`
       CREATE TABLE IF NOT EXISTS sync_metadata (
         id INT PRIMARY KEY AUTO_INCREMENT,
@@ -201,6 +213,11 @@ async function initDatabase() {
         UNIQUE KEY uk_table_machine (table_name, machine_id)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    await query(`CREATE INDEX idx_content_type ON kb_entries(content_type)`).catch(() => {});
+    await query(`CREATE INDEX idx_language ON kb_entries(language)`).catch(() => {});
+    await query(`CREATE INDEX idx_issue_type ON kb_cases(issue_type)`).catch(() => {});
+    await query(`CREATE INDEX idx_cases_language ON kb_cases(language)`).catch(() => {});
     
     logger.info('MySQL数据库表初始化完成');
     return true;

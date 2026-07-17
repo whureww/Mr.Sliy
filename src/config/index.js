@@ -4,6 +4,48 @@
  */
 
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+
+const CONFIG_FILE = path.join(process.cwd(), 'data', 'database_connections.json');
+
+function loadConnectionsFromFile() {
+  try {
+    if (fs.existsSync(CONFIG_FILE)) {
+      const data = fs.readFileSync(CONFIG_FILE, 'utf8');
+      const saved = JSON.parse(data);
+      if (saved && saved.connections) {
+        return {
+          defaultConnection: saved.defaultConnection,
+          connections: saved.connections
+        };
+      }
+    }
+  } catch (e) {
+    console.log('加载数据库连接配置失败:', e.message);
+  }
+  return null;
+}
+
+function saveConnectionsToFile() {
+  try {
+    const dir = path.dirname(CONFIG_FILE);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    const data = {
+      defaultConnection: config.databases.defaultConnection,
+      connections: config.databases.connections
+    };
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(data, null, 2), 'utf8');
+    return true;
+  } catch (e) {
+    console.log('保存数据库连接配置失败:', e.message);
+    return false;
+  }
+}
+
+const savedConfig = loadConnectionsFromFile();
 
 const config = {
   // 服务配置
@@ -37,8 +79,8 @@ const config = {
 
   // 多数据库连接配置
   databases: {
-    defaultConnection: process.env.DEFAULT_DB_CONNECTION || 'mysql',
-    connections: {
+    defaultConnection: savedConfig?.defaultConnection || process.env.DEFAULT_DB_CONNECTION || 'mysql',
+    connections: savedConfig?.connections || {
       mysql: {
         id: 'mysql',
         name: '默认MySQL',
@@ -285,6 +327,8 @@ function addDatabaseConnection(connection) {
     connectionLimit: connection.connectionLimit || 10
   };
   
+  saveConnectionsToFile();
+  
   return { success: true, message: '数据库连接添加成功' };
 }
 
@@ -294,6 +338,8 @@ function updateDatabaseConnection(id, updates) {
   }
   
   Object.assign(config.databases.connections[id], updates);
+  saveConnectionsToFile();
+  
   return { success: true, message: '数据库连接更新成功' };
 }
 
@@ -311,6 +357,8 @@ function deleteDatabaseConnection(id) {
   if (config.databases.defaultConnection === id) {
     config.databases.defaultConnection = 'mysql';
   }
+  
+  saveConnectionsToFile();
   
   return { success: true, message: '数据库连接删除成功' };
 }
@@ -338,6 +386,8 @@ function setDefaultConnection(id) {
   config.mysql.password = conn.password;
   config.mysql.database = conn.database;
   config.mysql.connectionLimit = conn.connectionLimit;
+  
+  saveConnectionsToFile();
   
   return { success: true, message: '默认连接已切换到: ' + conn.name };
 }

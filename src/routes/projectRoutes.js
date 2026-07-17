@@ -4,13 +4,13 @@
 
 const express = require('express');
 const router = express.Router();
-const { getDatabase } = require('../utils/database');
+const { getSqliteDatabase } = require('../utils/database');
 const { success, error, paginate } = require('../utils/response');
 const { logger } = require('../utils/logger');
 
 router.get('/', (req, res) => {
   try {
-    const db = getDatabase();
+    const db = getSqliteDatabase();
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
     
@@ -29,7 +29,7 @@ router.get('/', (req, res) => {
 
 router.get('/:id', (req, res) => {
   try {
-    const db = getDatabase();
+    const db = getSqliteDatabase();
     const stmt = db.prepare('SELECT * FROM scan_project WHERE id = ?');
     const project = stmt.get(req.params.id);
     

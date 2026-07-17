@@ -4,7 +4,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { getDatabase } = require('../utils/database');
+const { getSqliteDatabase } = require('../utils/database');
 const { success, error } = require('../utils/response');
 const { generateUUID } = require('../utils/helpers');
 
@@ -27,7 +27,7 @@ router.post('/generate', (req, res) => {
 
 router.get('/', (req, res) => {
   try {
-    const db = getDatabase();
+    const db = getSqliteDatabase();
     const stmt = db.prepare('SELECT * FROM code_report ORDER BY created_at DESC LIMIT 20');
     const reports = stmt.all();
     

@@ -4,14 +4,13 @@
  */
 
 const Database = require('better-sqlite3');
-const mysql = require('mysql2/promise');
 const path = require('path');
 const fs = require('fs');
 const { config } = require('../config');
 const { logger } = require('./logger');
+const mysql = require('./mysql');
 
 let dbInstance = null;
-let mysqlPool = null;
 
 /**
  * 获取数据库实例（单例模式）
@@ -20,10 +19,66 @@ let mysqlPool = null;
 function getDatabase() {
   const mysqlEnabled = config.mysql?.enabled;
 
-  if (mysqlEnabled) {
-    return getMySqlPool();
+  if (!mysqlEnabled) {
+    if (!dbInstance) {
+      let dbPath = config.database.path;
+
+      if (!path.isAbsolute(dbPath)) {
+        dbPath = path.resolve(path.join(__dirname, '../../', dbPath));
+      }
+
+      const dbDir = path.dirname(dbPath);
+      if (!fs.existsSync(dbDir)) {
+        fs.mkdirSync(dbDir, { recursive: true });
+      }
+
+      dbInstance = new Database(dbPath);
+
+      dbInstance.pragma('foreign_keys = ON');
+      dbInstance.pragma('journal_mode = WAL');
+
+      ensureSqliteTables();
+    }
+
+    return dbInstance;
   }
 
+  try {
+    const pool = mysql.getPool();
+    if (pool) {
+      return pool;
+    }
+  } catch (e) {
+    logger.debug('获取MySQL连接池失败，回退到SQLite:', e.message);
+  }
+
+  if (!dbInstance) {
+    let dbPath = config.database.path;
+
+    if (!path.isAbsolute(dbPath)) {
+      dbPath = path.resolve(path.join(__dirname, '../../', dbPath));
+    }
+
+    const dbDir = path.dirname(dbPath);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+
+    dbInstance = new Database(dbPath);
+
+    dbInstance.pragma('foreign_keys = ON');
+    dbInstance.pragma('journal_mode = WAL');
+
+    ensureSqliteTables();
+  }
+
+  return dbInstance;
+}
+
+/**
+ * 获取 SQLite 数据库实例（始终返回 SQLite）
+ */
+function getSqliteDatabase() {
   if (!dbInstance) {
     let dbPath = config.database.path;
 
@@ -51,39 +106,27 @@ function getDatabase() {
  * 获取 MySQL 连接池
  */
 async function getMySqlPool() {
-  if (!mysqlPool) {
-    const mysqlConfig = config.mysql;
-
-    mysqlPool = mysql.createPool({
-      host: mysqlConfig.host,
-      port: mysqlConfig.port || 3306,
-      user: mysqlConfig.user,
-      password: mysqlConfig.password,
-      database: mysqlConfig.database,
-      connectionLimit: mysqlConfig.connectionLimit || 10,
-      waitForConnections: true,
-      queueLimit: 0
-    });
-
-    // 测试连接
-    try {
-      const connection = await mysqlPool.getConnection();
-      connection.release();
-      console.log('MySQL 连接池创建成功');
-    } catch (error) {
-      console.error('MySQL 连接失败:', error.message);
-      throw error;
-    }
+  const pool = mysql.getPool();
+  if (!pool) {
+    throw new Error('MySQL连接池未创建');
   }
-
-  return mysqlPool;
+  return pool;
 }
 
 /**
  * 判断当前是否使用 MySQL
  */
 function isUsingMySql() {
-  return config.mysql?.enabled === true;
+  if (config.mysql?.enabled !== true) {
+    return false;
+  }
+  
+  try {
+    const pool = mysql.getPool();
+    return pool !== null && pool !== undefined;
+  } catch (e) {
+    return false;
+  }
 }
 
 /**
@@ -93,11 +136,6 @@ async function closeDatabase() {
   if (dbInstance) {
     dbInstance.close();
     dbInstance = null;
-  }
-
-  if (mysqlPool) {
-    await mysqlPool.end();
-    mysqlPool = null;
   }
 }
 
@@ -111,12 +149,11 @@ async function query(sql, params = []) {
       const [rows] = await pool.execute(sql, params);
       return rows;
     } catch (error) {
-      logger.warn('MySQL查询失败，回退到SQLite:', error.message);
-      config.mysql.enabled = false;
+      logger.debug('MySQL查询失败，回退到SQLite:', error.message);
     }
   }
 
-  const db = getDatabase();
+  const db = getSqliteDatabase();
   try {
     const stmt = db.prepare(sql);
     return stmt.all(...params);
@@ -135,12 +172,11 @@ async function queryOne(sql, params = []) {
       const [rows] = await pool.execute(sql, params);
       return rows[0] || null;
     } catch (error) {
-      logger.warn('MySQL查询失败，回退到SQLite:', error.message);
-      config.mysql.enabled = false;
+      logger.debug('MySQL查询失败，回退到SQLite:', error.message);
     }
   }
 
-  const db = getDatabase();
+  const db = getSqliteDatabase();
   try {
     const stmt = db.prepare(sql);
     return stmt.get(...params);
@@ -163,12 +199,11 @@ async function execute(sql, params = []) {
         lastInsertRowid: result.insertId
       };
     } catch (error) {
-      logger.warn('MySQL执行失败，回退到SQLite:', error.message);
-      config.mysql.enabled = false;
+      logger.debug('MySQL执行失败，回退到SQLite:', error.message);
     }
   }
 
-  const db = getDatabase();
+  const db = getSqliteDatabase();
   try {
     const stmt = db.prepare(sql);
     const result = stmt.run(...params);
@@ -190,7 +225,7 @@ function transaction(callback) {
     throw new Error('MySQL 模式不支持 transaction，请使用连接池手动事务');
   }
 
-  const db = getDatabase();
+  const db = getSqliteDatabase();
   const txn = db.transaction(callback);
   return txn();
 }
@@ -203,7 +238,7 @@ function batchExecute(sqlArray, paramsArray) {
     throw new Error('MySQL 模式不支持 batchExecute，请使用连接池');
   }
 
-  const db = getDatabase();
+  const db = getSqliteDatabase();
   const stmt = db.prepare(sqlArray);
 
   const insertMany = db.transaction((items) => {
@@ -539,9 +574,16 @@ let sqliteInitialized = false;
 
 function ensureSqliteTables() {
   if (sqliteInitialized) return;
+
+  const mysqlEnabled = config.mysql?.enabled;
+  if (mysqlEnabled) {
+    logger.debug('MySQL已启用，跳过SQLite表初始化');
+    return;
+  }
+
   sqliteInitialized = true;
 
-  const db = getDatabase();
+  const db = getSqliteDatabase();
   
   for (const sql of allTablesSqlite) {
     try {
@@ -678,6 +720,7 @@ async function initMySqlTables() {
 
 module.exports = {
   getDatabase,
+  getSqliteDatabase,
   getMySqlPool,
   isUsingMySql,
   closeDatabase,
