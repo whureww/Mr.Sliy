@@ -1395,7 +1395,8 @@ async function knowledgeMenu() {
     console.log(c('    3) 导出知识库      (export)', 'white'));
     console.log(c('    4) 添加知识条目    (add)', 'white'));
     console.log(c('    5) 查看统计        (stats)', 'white'));
-    console.log(c('    6) 云端同步设置    (cloud)', 'white'));
+    console.log(c('    6) 检测重复条目    (duplicate)', 'white'));
+    console.log(c('    7) 云端同步设置    (cloud)', 'white'));
     console.log(c('    0) 返回主菜单      (back)', 'dim'));
     console.log();
     
@@ -1428,6 +1429,10 @@ async function knowledgeMenu() {
         await showKnowledgeStats();
         break;
       case '6':
+      case 'duplicate':
+        await checkDuplicateEntries();
+        break;
+      case '7':
       case 'cloud':
         await cloudSyncMenu();
         break;
@@ -1532,7 +1537,31 @@ async function testCloudConnection() {
 
 async function uploadToCloud() {
   console.log();
-  const confirm = await ask('  确认将本地知识库同步到云端？(y/N): ');
+  console.log(c('  上传模式:', 'cyan'));
+  console.log(c('    1) 合并更新 (merge) - 有则更新，无则添加', 'white'));
+  console.log(c('    2) 覆盖云端 (overwrite) - 删除云端所有数据后重新上传', 'white'));
+  console.log(c('    3) 仅追加 (append) - 只添加新数据，不更新已有数据', 'white'));
+  console.log();
+  
+  const modeChoice = await ask('  请选择上传模式 (默认 1): ');
+  if (modeChoice === '__CANCEL__') return;
+  
+  let mode = 'merge';
+  switch (modeChoice) {
+    case '2':
+    case 'overwrite':
+      mode = 'overwrite';
+      break;
+    case '3':
+    case 'append':
+      mode = 'append';
+      break;
+    default:
+      mode = 'merge';
+  }
+  
+  const modeName = mode === 'merge' ? '合并更新' : mode === 'overwrite' ? '覆盖云端' : '仅追加';
+  const confirm = await ask(`  确认${modeName}模式上传到云端？(y/N): `);
   
   if (confirm === '__CANCEL__') return;
   if (confirm.toLowerCase() !== 'y' && confirm.toLowerCase() !== 'yes') {
@@ -1544,9 +1573,12 @@ async function uploadToCloud() {
   console.log(c('  正在同步到云端...', 'cyan'));
   
   try {
-    const result = await agent.syncKnowledgeToCloud();
+    const result = await agent.syncKnowledgeToCloud(mode);
     if (result.success) {
       console.log(c('  ✅ ' + result.message, 'green'));
+      if (result.updatedEntries > 0 || result.updatedCases > 0) {
+        console.log(c(`  📝 更新: ${result.updatedEntries} 条知识, ${result.updatedCases} 个案例`, 'yellow'));
+      }
     } else {
       console.log(c('  ✗ 同步失败: ' + result.message, 'red'));
     }
@@ -2242,6 +2274,65 @@ async function showKnowledgeStats() {
   }
   
   console.log();
+  await waitEnter();
+}
+
+async function checkDuplicateEntries() {
+  console.log();
+  console.log(c('  🔍 检测重复知识条目', 'cyan'));
+  console.log(c('  ─────────────────────────────────────────', 'dim'));
+  
+  try {
+    const result = await agent.findDuplicateEntries();
+    
+    if (result.entries.length === 0 && result.cases.length === 0) {
+      console.log(c('  ✅ 未发现重复条目', 'green'));
+      await waitEnter();
+      return;
+    }
+    
+    console.log(c('  📋 发现重复条目:', 'yellow'));
+    
+    if (result.entries.length > 0) {
+      console.log(c(`  知识条目: ${result.entries.length} 组重复`, 'white'));
+      result.entries.slice(0, 5).forEach((item, index) => {
+        console.log(c(`    ${index + 1}. ${item.content.substring(0, 50)}...`, 'dim'));
+      });
+      if (result.entries.length > 5) {
+        console.log(c(`    ...还有 ${result.entries.length - 5} 组重复`, 'dim'));
+      }
+    }
+    
+    if (result.cases.length > 0) {
+      console.log(c(`  优化案例: ${result.cases.length} 组重复`, 'white'));
+      result.cases.slice(0, 5).forEach((item, index) => {
+        console.log(c(`    ${index + 1}. ${item.original_code.substring(0, 50)}...`, 'dim'));
+      });
+      if (result.cases.length > 5) {
+        console.log(c(`    ...还有 ${result.cases.length - 5} 组重复`, 'dim'));
+      }
+    }
+    
+    console.log();
+    const confirm = await ask('  是否删除重复条目？(y/N): ');
+    
+    if (confirm.toLowerCase() === 'y' || confirm.toLowerCase() === 'yes') {
+      console.log(c('  正在删除重复条目...', 'cyan'));
+      const removeResult = await agent.removeDuplicates();
+      
+      if (removeResult.success) {
+        console.log(c('  ✅ ' + removeResult.message, 'green'));
+      } else {
+        console.log(c('  ✗ 删除失败: ' + removeResult.message, 'red'));
+      }
+    } else {
+      console.log(c('  已取消删除', 'yellow'));
+    }
+    
+  } catch (error) {
+    console.log(c('  ✗ 检测失败: ' + error.message, 'red'));
+  }
+  
   await waitEnter();
 }
 
