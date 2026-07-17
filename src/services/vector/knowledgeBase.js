@@ -480,6 +480,185 @@ class KnowledgeBase {
     return this.searchCases(codeSnippet, options);
   }
 
+  async applyOptimizationPattern(codeSnippet, options = {}) {
+    await this.init();
+    
+    const similarCases = await this.searchCases(codeSnippet, {
+      topK: 5,
+      language: options.language
+    });
+
+    if (similarCases.length === 0) {
+      return {
+        success: false,
+        optimizedCode: codeSnippet,
+        explanation: '未找到相似的优化案例',
+        suggestions: [],
+        appliedPatterns: []
+      };
+    }
+
+    let optimizedCode = codeSnippet;
+    const appliedPatterns = [];
+    const suggestions = [];
+
+    for (const caseItem of similarCases) {
+      if (caseItem.similarity > 0.3) {
+        const result = this.applyPattern(codeSnippet, caseItem);
+        if (result.changed) {
+          optimizedCode = result.code;
+          appliedPatterns.push({
+            patternId: caseItem.id,
+            similarity: caseItem.similarity,
+            explanation: caseItem.explanation
+          });
+          suggestions.push(caseItem.explanation);
+        }
+      }
+    }
+
+    const changed = optimizedCode !== codeSnippet;
+
+    return {
+      success: changed,
+      optimizedCode,
+      explanation: changed 
+        ? `应用了${appliedPatterns.length}个优化模式` 
+        : '未找到可应用的优化模式',
+      suggestions,
+      appliedPatterns,
+      similarCases: similarCases.filter(c => c.similarity > 0.2)
+    };
+  }
+
+  applyPattern(codeSnippet, caseItem) {
+    const originalCode = caseItem.originalCode;
+    const optimizedCode = caseItem.optimizedCode;
+
+    if (!originalCode || !optimizedCode) {
+      return { changed: false, code: codeSnippet };
+    }
+
+    try {
+      const diff = this.computeDiff(originalCode, optimizedCode);
+      
+      if (diff.length > 0) {
+        let result = codeSnippet;
+        
+        for (const change of diff) {
+          if (change.type === 'replace') {
+            if (result.includes(change.from)) {
+              result = result.replace(change.from, change.to);
+            }
+          } else if (change.type === 'insert') {
+            const insertPoint = result.lastIndexOf(change.after) || result.length;
+            result = result.slice(0, insertPoint + change.after.length) + '\n' + change.text + result.slice(insertPoint + change.after.length);
+          } else if (change.type === 'delete') {
+            if (result.includes(change.text)) {
+              result = result.replace(change.text, '');
+            }
+          }
+        }
+        
+        return { changed: result !== codeSnippet, code: result };
+      }
+    } catch (e) {
+      logger.debug('模式应用失败:', e.message);
+    }
+
+    return { changed: false, code: codeSnippet };
+  }
+
+  computeDiff(original, optimized) {
+    const originalLines = original.split('\n');
+    const optimizedLines = optimized.split('\n');
+    const diff = [];
+
+    const lcs = this.longestCommonSubsequence(originalLines, optimizedLines);
+    
+    let i = 0, j = 0, lcsIdx = 0;
+    
+    while (i < originalLines.length || j < optimizedLines.length) {
+      if (lcsIdx < lcs.length && originalLines[i] === lcs[lcsIdx] && optimizedLines[j] === lcs[lcsIdx]) {
+        i++;
+        j++;
+        lcsIdx++;
+      } else if (j < optimizedLines.length && (i >= originalLines.length || originalLines[i] !== optimizedLines[j])) {
+        const prevLine = j > 0 ? optimizedLines[j - 1] : '';
+        diff.push({
+          type: 'insert',
+          text: optimizedLines[j],
+          after: prevLine
+        });
+        j++;
+      } else if (i < originalLines.length && (j >= optimizedLines.length || originalLines[i] !== optimizedLines[j])) {
+        diff.push({
+          type: 'delete',
+          text: originalLines[i]
+        });
+        i++;
+      } else {
+        i++;
+        j++;
+      }
+    }
+
+    return this.mergeDiff(diff);
+  }
+
+  longestCommonSubsequence(a, b) {
+    const m = a.length;
+    const n = b.length;
+    const dp = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1] === b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    const result = [];
+    let i = m, j = n;
+    while (i > 0 && j > 0) {
+      if (a[i - 1] === b[j - 1]) {
+        result.unshift(a[i - 1]);
+        i--;
+        j--;
+      } else if (dp[i - 1][j] > dp[i][j - 1]) {
+        i--;
+      } else {
+        j--;
+      }
+    }
+
+    return result;
+  }
+
+  mergeDiff(diff) {
+    const merged = [];
+    
+    for (let i = 0; i < diff.length; i++) {
+      const current = diff[i];
+      
+      if (current.type === 'delete' && i + 1 < diff.length && diff[i + 1].type === 'insert') {
+        merged.push({
+          type: 'replace',
+          from: current.text,
+          to: diff[i + 1].text
+        });
+        i++;
+      } else {
+        merged.push(current);
+      }
+    }
+    
+    return merged;
+  }
+
   async getStats() {
     await this.init();
 
