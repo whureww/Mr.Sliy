@@ -994,9 +994,10 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
 
   /**
    * 同步知识库到云端
+   * @param {string} mode - 同步模式: 'merge'(默认)合并更新, 'overwrite'覆盖, 'append'追加
    */
-  async syncKnowledgeToCloud() {
-    return await knowledgeBase.syncToCloud();
+  async syncKnowledgeToCloud(mode = 'merge') {
+    return await knowledgeBase.syncToCloud(mode);
   }
 
   /**
@@ -1004,6 +1005,20 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
    */
   async syncKnowledgeFromCloud() {
     return await knowledgeBase.syncFromCloud();
+  }
+
+  /**
+   * 查找重复的知识条目
+   */
+  async findDuplicateEntries() {
+    return await knowledgeBase.findDuplicateEntries();
+  }
+
+  /**
+   * 删除重复的知识条目
+   */
+  async removeDuplicates() {
+    return await knowledgeBase.removeDuplicates();
   }
 
   /**

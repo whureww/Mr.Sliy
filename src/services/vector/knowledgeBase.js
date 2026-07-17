@@ -1136,7 +1136,151 @@ class KnowledgeBase {
     stmt.run(rating || 5, caseId);
   }
 
-  async syncToCloud() {
+  async findDuplicateEntries() {
+    await this.init();
+    
+    const duplicates = {
+      entries: [],
+      cases: []
+    };
+
+    if (this.useMysql) {
+      try {
+        duplicates.entries = await mysql.query(`
+          SELECT id, content, COUNT(*) as count 
+          FROM kb_entries 
+          GROUP BY content 
+          HAVING COUNT(*) > 1
+        `);
+        duplicates.cases = await mysql.query(`
+          SELECT id, original_code, COUNT(*) as count 
+          FROM kb_cases 
+          GROUP BY original_code 
+          HAVING COUNT(*) > 1
+        `);
+      } catch (e) {
+        logger.warn('MySQL查询重复失败，回退到SQLite:', e.message);
+        this.useMysql = false;
+      }
+    }
+
+    if (!this.useMysql) {
+      const { getSqliteDatabase } = require('../../utils/database');
+      const db = getSqliteDatabase();
+      duplicates.entries = db.prepare(`
+        SELECT id, content, COUNT(*) as count 
+        FROM kb_entries 
+        GROUP BY content 
+        HAVING COUNT(*) > 1
+      `).all();
+      duplicates.cases = db.prepare(`
+        SELECT id, original_code, COUNT(*) as count 
+        FROM kb_cases 
+        GROUP BY original_code 
+        HAVING COUNT(*) > 1
+      `).all();
+    }
+
+    return duplicates;
+  }
+
+  async removeDuplicates() {
+    await this.init();
+    
+    let removedEntries = 0;
+    let removedCases = 0;
+
+    if (this.useMysql) {
+      try {
+        const duplicates = await mysql.query(`
+          SELECT content 
+          FROM kb_entries 
+          GROUP BY content 
+          HAVING COUNT(*) > 1
+        `);
+        
+        for (const item of duplicates) {
+          const entries = await mysql.query('SELECT id FROM kb_entries WHERE content = ?', [item.content]);
+          const idsToKeep = [entries[0].id];
+          const idsToRemove = entries.slice(1).map(e => e.id);
+          
+          for (const id of idsToRemove) {
+            await mysql.execute('DELETE FROM kb_entries WHERE id = ?', [id]);
+            removedEntries++;
+          }
+        }
+
+        const caseDuplicates = await mysql.query(`
+          SELECT original_code 
+          FROM kb_cases 
+          GROUP BY original_code 
+          HAVING COUNT(*) > 1
+        `);
+        
+        for (const item of caseDuplicates) {
+          const cases = await mysql.query('SELECT id FROM kb_cases WHERE original_code = ?', [item.original_code]);
+          const idsToKeep = [cases[0].id];
+          const idsToRemove = cases.slice(1).map(e => e.id);
+          
+          for (const id of idsToRemove) {
+            await mysql.execute('DELETE FROM kb_cases WHERE id = ?', [id]);
+            removedCases++;
+          }
+        }
+      } catch (e) {
+        logger.warn('MySQL删除重复失败，回退到SQLite:', e.message);
+        this.useMysql = false;
+      }
+    }
+
+    if (!this.useMysql) {
+      const { getSqliteDatabase } = require('../../utils/database');
+      const db = getSqliteDatabase();
+      
+      const duplicates = db.prepare(`
+        SELECT content 
+        FROM kb_entries 
+        GROUP BY content 
+        HAVING COUNT(*) > 1
+      `).all();
+      
+      for (const item of duplicates) {
+        const entries = db.prepare('SELECT id FROM kb_entries WHERE content = ?').all(item.content);
+        const idsToRemove = entries.slice(1).map(e => e.id);
+        
+        for (const id of idsToRemove) {
+          db.prepare('DELETE FROM kb_entries WHERE id = ?').run(id);
+          removedEntries++;
+        }
+      }
+
+      const caseDuplicates = db.prepare(`
+        SELECT original_code 
+        FROM kb_cases 
+        GROUP BY original_code 
+        HAVING COUNT(*) > 1
+      `).all();
+      
+      for (const item of caseDuplicates) {
+        const cases = db.prepare('SELECT id FROM kb_cases WHERE original_code = ?').all(item.original_code);
+        const idsToRemove = cases.slice(1).map(e => e.id);
+        
+        for (const id of idsToRemove) {
+          db.prepare('DELETE FROM kb_cases WHERE id = ?').run(id);
+          removedCases++;
+        }
+      }
+    }
+
+    return {
+      success: true,
+      removedEntries,
+      removedCases,
+      message: `已删除 ${removedEntries} 条重复知识条目和 ${removedCases} 个重复案例`
+    };
+  }
+
+  async syncToCloud(mode = 'merge') {
     if (!this.mysqlAvailable) {
       return { success: false, message: 'MySQL不可用' };
     }
@@ -1145,76 +1289,95 @@ class KnowledgeBase {
       const data = await this.exportToJSON({ includeVectors: false });
       let syncedEntries = 0;
       let syncedCases = 0;
+      let updatedEntries = 0;
+      let updatedCases = 0;
+      
+      if (mode === 'overwrite') {
+        await mysql.execute('DELETE FROM kb_entries');
+        await mysql.execute('DELETE FROM kb_cases');
+      }
       
       for (const entry of data.entries) {
-        const existing = await mysql.query(
-          'SELECT id FROM kb_entries WHERE id = ?',
-          [entry.id]
-        );
-        
-        if (existing.length > 0) {
-          await mysql.execute(
-            `UPDATE kb_entries SET content = ?, content_type = ?, language = ?, tags = ?, source = ? WHERE id = ?`,
-            [
-              entry.content,
-              entry.content_type,
-              entry.language,
-              entry.tags ? JSON.stringify(entry.tags) : null,
-              entry.source,
-              entry.id
-            ]
+        if (mode !== 'overwrite') {
+          const existing = await mysql.query(
+            'SELECT id FROM kb_entries WHERE id = ?',
+            [entry.id]
           );
-        } else {
-          await mysql.execute(
-            `INSERT INTO kb_entries (id, content, content_type, language, tags, source) VALUES (?, ?, ?, ?, ?, ?)`,
-            [
-              entry.id,
-              entry.content,
-              entry.content_type,
-              entry.language,
-              entry.tags ? JSON.stringify(entry.tags) : null,
-              entry.source
-            ]
-          );
+          
+          if (existing.length > 0) {
+            if (mode === 'merge') {
+              await mysql.execute(
+                `UPDATE kb_entries SET content = ?, content_type = ?, language = ?, tags = ?, source = ? WHERE id = ?`,
+                [
+                  entry.content,
+                  entry.content_type,
+                  entry.language,
+                  entry.tags ? JSON.stringify(entry.tags) : null,
+                  entry.source,
+                  entry.id
+                ]
+              );
+              updatedEntries++;
+            }
+            continue;
+          }
         }
+        
+        await mysql.execute(
+          `INSERT INTO kb_entries (id, content, content_type, language, tags, source) VALUES (?, ?, ?, ?, ?, ?)`,
+          [
+            entry.id,
+            entry.content,
+            entry.content_type,
+            entry.language,
+            entry.tags ? JSON.stringify(entry.tags) : null,
+            entry.source
+          ]
+        );
         syncedEntries++;
       }
       
       for (const caseItem of data.cases) {
-        const existing = await mysql.query(
-          'SELECT id FROM kb_cases WHERE id = ?',
-          [caseItem.id]
-        );
-        
-        if (existing.length > 0) {
-          await mysql.execute(
-            `UPDATE kb_cases SET original_code = ?, optimized_code = ?, explanation = ?, language = ?, issue_type = ?, usage_count = ?, rating = ? WHERE id = ?`,
-            [
-              caseItem.original_code,
-              caseItem.optimized_code,
-              caseItem.explanation,
-              caseItem.language,
-              caseItem.issue_type || 'general',
-              caseItem.usage_count || 0,
-              caseItem.rating || 0,
-              caseItem.id
-            ]
+        if (mode !== 'overwrite') {
+          const existing = await mysql.query(
+            'SELECT id FROM kb_cases WHERE id = ?',
+            [caseItem.id]
           );
-        } else {
-          await mysql.execute(
-            `INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, usage_count, rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              caseItem.id,
-              caseItem.original_code,
-              caseItem.optimized_code,
-              caseItem.explanation,
-              caseItem.language,
-              caseItem.issue_type || 'general',
-              caseItem.usage_count || 0,
-              caseItem.rating || 0
-            ]
-          );
+          
+          if (existing.length > 0) {
+            if (mode === 'merge') {
+              await mysql.execute(
+                `UPDATE kb_cases SET original_code = ?, optimized_code = ?, explanation = ?, language = ?, issue_type = ?, usage_count = ?, rating = ? WHERE id = ?`,
+                [
+                  caseItem.original_code,
+                  caseItem.optimized_code,
+                  caseItem.explanation,
+                  caseItem.language,
+                  caseItem.issue_type || 'general',
+                  caseItem.usage_count || 0,
+                  caseItem.rating || 0,
+                  caseItem.id
+                ]
+              );
+              updatedCases++;
+            }
+            continue;
+          }
         }
+        
+        await mysql.execute(
+          `INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, usage_count, rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            caseItem.id,
+            caseItem.original_code,
+            caseItem.optimized_code,
+            caseItem.explanation,
+            caseItem.language,
+            caseItem.issue_type || 'general',
+            caseItem.usage_count || 0,
+            caseItem.rating || 0
+          ]
+        );
         syncedCases++;
       }
       
@@ -1239,7 +1402,14 @@ class KnowledgeBase {
         success: true,
         syncedEntries,
         syncedCases,
-        message: `同步成功: ${syncedEntries} 条知识, ${syncedCases} 个案例`
+        updatedEntries,
+        updatedCases,
+        mode,
+        message: mode === 'overwrite' 
+          ? `覆盖成功: ${syncedEntries} 条知识, ${syncedCases} 个案例`
+          : mode === 'append'
+            ? `追加成功: ${syncedEntries} 条知识, ${syncedCases} 个案例`
+            : `同步成功: ${syncedEntries} 条新增, ${updatedEntries} 条更新知识; ${syncedCases} 个新增, ${updatedCases} 个更新案例`
       };
     } catch (error) {
       return { success: false, message: error.message };
