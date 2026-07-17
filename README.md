@@ -18,9 +18,11 @@
   - Console.log 残留
   - 高复杂度方法
 - **智能优化**：结合大语言模型提供专业的代码优化建议
-- **知识库管理**：内置 RAG 知识库，支持自定义知识扩展，可离线使用
+- **知识库管理**：内置 RAG 知识库，支持自定义知识扩展，支持云端数据库同步
 - **进度可视化**：所有操作都有实时进度条展示
 - **CLI 交互**：友好的命令行界面，支持多种交互方式
+- **双数据库支持**：支持 SQLite（本地）和 MySQL（云端），自动回退机制
+- **自更新与自修复**：支持代码、配置、知识库更新，自动检测并修复问题
 
 ## 🚀 快速开始
 
@@ -28,6 +30,7 @@
 
 - Node.js >= 18.0.0
 - Windows / macOS / Linux
+- MySQL 5.7+（可选，用于云端数据库）
 
 ### 安装
 
@@ -50,16 +53,26 @@ mr-sliy
 - 当前工作模式（离线/在线/自动）
 - 已注册的 LLM 提供商数量
 - 知识库条目数量
+- 当前数据库存储类型（SQLite/MySQL）
 
 ### 首次使用
 
 启动后输入 `/provider` 进入提供商管理：
 
 1. 选择 `2) 注册新提供商`
-2. 输入提供商名称（如 `deepseek`、`zhipuai`、`tongyi`）
+2. 输入提供商名称（如 `deepseek`、`zhipu`、`tongyi`）
 3. 输入 API Key
 4. 选择 `1) 切换` 到新注册的提供商
 5. 开始使用 AI 功能！
+
+### 配置云端数据库
+
+启动后输入 `/knowledge` 进入知识库管理：
+
+1. 选择数据库连接配置选项
+2. 输入 MySQL 连接信息（主机、端口、用户名、密码、数据库名）
+3. 测试连接并设置为默认连接
+4. 重启后自动使用云端数据库
 
 ### 离线使用
 
@@ -117,11 +130,11 @@ mr-sliy scan <path>
 OPENAI_API_KEY=your-openai-key
 OPENAI_MODEL=gpt-4
 
-CLAUDE_API_KEY=your-claude-key
-CLAUDE_MODEL=claude-3-sonnet-20240229
-
 DEEPSEEK_API_KEY=your-deepseek-key
 DEEPSEEK_MODEL=deepseek-chat
+
+ZHIPU_API_KEY=your-zhipu-key
+ZHIPU_MODEL=glm-4
 
 # 本地模型（Ollama）
 OLLAMA_URL=http://localhost:11434
@@ -148,41 +161,72 @@ MYSQL_DATABASE=code_optimizer
 | 提供商 | 模型示例 | 说明 |
 |--------|----------|------|
 | OpenAI | gpt-4, gpt-3.5-turbo | OpenAI 官方 API |
-| Claude | claude-3-sonnet, claude-3-opus | Anthropic Claude |
 | DeepSeek | deepseek-chat, deepseek-coder | 深度求索 |
 | 智谱 AI | glm-4, glm-3-turbo | 清华智谱 |
 | 通义千问 | qwen-plus, qwen-max | 阿里云 |
 | Moonshot | kimi-chat, moonshot-v1-8k | 月之暗面 |
-| Google Gemini | gemini-pro, gemini-1.5-pro | Google AI |
-| 豆包 | Doubao-7B, Doubao-pro | 字节跳动 |
-| 文心一言 | ernie-3.5, ernie-4.0 | 百度 |
 | Ollama | codellama, llama2 | 本地部署模型 |
 
 ## 🗂️ 项目结构
 
 ```
-backend/
-├── src/
-│   ├── agent/              # 智能体核心逻辑
-│   ├── cli/                # 命令行界面
-│   ├── config/             # 配置管理
-│   ├── engine/             # 双模式引擎（在线/离线）
-│   ├── services/
-│   │   ├── ast/            # Tree-sitter AST 解析
-│   │   ├── detection/      # 问题检测器
-│   │   ├── llm/            # LLM 提供商适配
-│   │   ├── rag/            # RAG 知识库
-│   │   └── vector/         # 向量数据库
-│   ├── skills/
-│   │   ├── code-analysis/  # 代码分析技能
-│   │   ├── code-detection/ # 代码检测技能
-│   │   └── code-optimization/ # 代码优化技能
-│   ├── routes/             # API 路由
-│   └── utils/              # 工具函数
-├── database/                # 数据库脚本
-├── scripts/                # 安装脚本
-├── wasm/                   # Tree-sitter WASM 解析器
-└── data/                   # 数据存储
+src/
+├── agent/                  # 智能体核心逻辑
+│   └── agent.js
+├── cli/                    # 命令行界面
+│   └── index.js
+├── config/                 # 配置管理
+│   └── index.js
+├── engine/                 # 双模式引擎（在线/离线）
+│   └── dualModeEngine.js
+├── middlewares/            # Express 中间件
+│   ├── errorHandler.js
+│   └── index.js
+├── routes/                 # API 路由
+│   ├── aiRoutes.js
+│   ├── configRoutes.js
+│   ├── issueRoutes.js
+│   ├── projectRoutes.js
+│   ├── reportRoutes.js
+│   ├── scanRoutes.js
+│   ├── updateRoutes.js
+│   └── userRoutes.js
+├── services/
+│   ├── ast/                # Tree-sitter AST 解析
+│   │   └── parser.js
+│   ├── bootstrap/          # 自更新与自修复
+│   │   ├── confirmationGate.js
+│   │   ├── rollback.js
+│   │   ├── selfRepairManager.js
+│   │   └── selfUpdateManager.js
+│   ├── detection/          # 问题检测器
+│   │   └── detector.js
+│   ├── llm/                # LLM 提供商适配
+│   │   └── providers.js
+│   ├── rag/                # RAG 知识库
+│   │   └── agent.js
+│   └── vector/             # 向量数据库
+│       └── knowledgeBase.js
+├── skills/                 # 技能模块
+│   ├── code-analysis/
+│   ├── code-detection/
+│   │   └── rules/          # 检测规则
+│   └── code-optimization/
+├── utils/                  # 工具函数
+│   ├── crypto.js
+│   ├── database.js         # 数据库抽象层
+│   ├── eventBus.js
+│   ├── helpers.js
+│   ├── logger.js
+│   ├── moduleRegistry.js
+│   ├── mysql.js            # MySQL 连接工具
+│   ├── progress.js
+│   └── response.js
+├── workers/                # Worker 线程池
+│   ├── parser.js
+│   └── pool.js
+├── agent.js                # CLI 入口
+└── index.js                # Web 服务入口
 ```
 
 ## 🛡️ 安全
@@ -191,6 +235,34 @@ backend/
 - 使用 `.npmignore` 排除敏感文件
 - 支持加密配置存储
 - 不上传任何代码或数据到第三方服务器
+
+## 📊 数据库架构
+
+### 支持的数据库
+
+| 数据库类型 | 适用场景 | 特性 |
+|------------|----------|------|
+| SQLite | 本地开发、离线使用 | 无需额外安装，文件存储 |
+| MySQL | 云端部署、多实例同步 | 支持远程连接，数据同步 |
+
+### 自动回退机制
+
+当 MySQL 连接不可用时，系统会自动回退到 SQLite，确保服务正常运行：
+
+1. MySQL 连接池创建失败 → 使用 SQLite
+2. MySQL 查询失败 → 记录日志并使用 SQLite
+3. MySQL 表初始化失败 → 使用 SQLite
+
+## 📝 更新日志
+
+### v2.7.2
+> 更新日期: 2026-07-17
+
+- **🐛 MySQL 索引创建修复**：修复 MySQL 不支持 `CREATE INDEX IF NOT EXISTS` 语法的问题，改用 `CREATE INDEX` 并忽略重复索引错误
+- **🐛 sqlite3 模块修复**：修复项目使用 `better-sqlite3` 而非 `sqlite3` 的模块引用错误
+- **🐛 db.prepare is not a function 修复**：添加 `getSqliteDatabase()` 函数，替换所有直接使用 `getDatabase()` 的地方，确保 MySQL 启用时回退到 SQLite 能正确获取 SQLite 数据库实例
+- **🔧 isUsingMySql() 优化**：检查实际连接池状态而非仅检查配置，确保数据库切换逻辑正确
+- **🔧 数据库调用统一**：修复知识图谱、路由、日志等模块的数据库调用，确保 SQLite 模式下正常工作
 
 ### v2.7.1
 > 更新日期: 2026-07-15
@@ -270,6 +342,8 @@ backend/
 - **🔧 代码验证**：所有修改文件通过语法检查，确保功能完整性
 
 ### v2.4.7
+> 更新日期: 2026-07-12
+
 - **🐛 标题对齐修复**：修复智能体大标题文字无法对齐的问题，新增 `stripAnsi()`、`getDisplayWidth()`、`padEndDisplay()` 工具函数正确计算中文字符和emoji的终端显示宽度
 - **🐛 知识库统计修复**：修复知识库统计显示 `undefined` 的问题，新增缓存统计信息机制（`cachedStats`），`getStatus()` 改为同步获取
 - **🐛 MySQL回退修复**：修复 MySQL 连接失败时未正确回退到 SQLite 的问题，`testConnection()` 和 `initDatabase()` 失败时自动设置 `config.mysql.enabled = false`
@@ -283,18 +357,24 @@ backend/
 - **🔧 CLI显示增强**：更新成功后显示版本迭代信息（如 `2.4.6 -> 2.4.7`）
 
 ### v2.4.6
+> 更新日期: 2026-07-12
+
 - **☁️ 知识库默认云端存储**：知识库默认优先从云端MySQL读取，MySQL不可用时自动回退到本地SQLite
 - **🔄 智能双模式切换**：所有知识库操作（增删改查、导入导出、同步）自动适配MySQL和SQLite
 - **🔒 敏感信息保护**：数据库连接信息通过 `.env` 文件配置，已在 `.gitignore` 中排除，不会泄露到GitHub
 - **📊 存储状态显示**：知识库统计接口返回 `storage` 字段，标识当前使用的是 mysql 还是 sqlite
 
 ### v2.4.5
+> 更新日期: 2026-07-11
+
 - **🔧 重构回滚机制**：回滚作为更新和修复的子模块，不再是独立模块
 - **📊 代码结构优化**：删除独立的 rollback.js，回滚逻辑整合到 selfUpdateManager 和 selfRepairManager
 - **🔄 更新路由结构**：回滚路由改为 `/updates/:id/rollback` 和 `/repairs/:id/rollback`
 - **💾 统一模块备份**：使用 moduleRegistry 的备份机制，删除重复的模块备份目录
 
 ### v2.4.3
+> 更新日期: 2026-07-11
+
 - **🔒 多步骤门控确认**：在热更新过程中添加3个确认步骤（确认备份完成→确认应用更新→确认更新完成）
 - **📊 详细确认信息**：显示风险等级、影响范围、受影响文件、备份状态、回滚可能性
 - **🔄 优化回滚机制**：支持模块级回滚，确保可以精确回滚到更新前状态
@@ -302,12 +382,16 @@ backend/
 - **⚠️ 请求修改方案**：门控支持用户请求修改方案，拒绝时可说明修改需求
 
 ### v2.4.2
+> 更新日期: 2026-07-10
+
 - **📊 更新进度条**：在自更新过程中显示实时进度条，包含详细的更新步骤（加载记录→创建备份→等待确认→应用更新→验证→完成）
 - **📝 更新内容预览**：更新前显示更新详情面板，包括更新ID、类型、版本信息和更新内容预览
 - **⏱️ 耗时统计**：显示更新操作的总耗时
 - **📋 步骤权重**：各步骤按权重计算进度百分比（应用更新40%、验证更新20%等）
 
 ### v2.4.1
+> 更新日期: 2026-07-10
+
 - **⚡ Worker Threads 优化**：将 AST 解析、代码扫描等 CPU 密集操作移入独立 Worker 线程池，防止主线程阻塞卡死
 - **🔄 线程池管理**：新增 `src/workers/pool.js` 实现线程池，支持自动扩展和任务队列
 - **📦 Worker 解析器**：新增 `src/workers/parser.js`，独立初始化 Tree-sitter，与主线程隔离
@@ -315,6 +399,8 @@ backend/
 - **🔥 防止卡死**：主线程不再被 CPU 密集操作阻塞，保持响应流畅
 
 ### v2.4.0
+> 更新日期: 2026-07-09
+
 - **🔥 模块独立化架构**：将智能体每个功能模块独立出来，运行中修改个别功能不影响其他功能和智能体运行
 - **🔄 热替换机制**：替换原有沙箱功能，采用 `delete require.cache + 重新require` 实现模块热替换
 - **📦 ModuleRegistry**：新增模块注册中心，支持 `load/unload/reload` 操作
@@ -324,9 +410,13 @@ backend/
 - **🎯 更新进度条**：支持实时更新进度和内容显示
 
 ### v2.3.2
+> 更新日期: 2026-07-08
+
 - **🐛 CLI箭头键修复**：修复输入 `/` 后上下箭头选择命令失效的问题，增加对 `key.name` 的检测
 
 ### v2.3.1
+> 更新日期: 2026-07-08
+
 - **📋 合并历史记录**：新增合并查询更新和修复记录功能，可同时查看所有操作历史
 - **🔧 修复失败记录优化**：修复失败时显示"自我修复失败"和"系统已回滚"详细信息
 - **📊 记录类型标识**：更新和修复记录添加 `type` 字段区分类型
@@ -334,6 +424,8 @@ backend/
 - **🐛 Ollama超时修复**：isAvailable()添加abort控制器，避免连接超时阻塞
 
 ### v2.3.0
+> 更新日期: 2026-07-07
+
 - **🔄 新增自我更新功能**：支持代码、配置、知识库、依赖等更新类型
 - **🔧 新增自动修复功能**：智能体运行时自动检测并修复数据库、网络、依赖、配置等问题
 - **🛡️ 新增安全机制**：沙箱执行、人工确认门控、自动回滚确保更新和修复安全性
@@ -343,49 +435,73 @@ backend/
 - **CLI命令增强**：新增 `/update` 和 `/repair` 命令管理自更新和自修复
 
 ### v2.2.14
+> 更新日期: 2026-07-06
+
 - 修复模型选择记忆功能，切换提供商后退出再开启会自动恢复上次选择的模型
 - 添加活跃提供商持久化到数据库，启动时自动恢复
 
 ### v2.2.7
+> 更新日期: 2026-07-05
+
 - 修复配置提供商后状态不更新的问题
 - 注册/更新提供商后自动刷新缓存
 
 ### v2.2.6
+> 更新日期: 2026-07-05
+
 - 修复 .env.example 中重复的 MySQL 配置导致 MySQL 默认启用的问题
 
 ### v2.2.5
+> 更新日期: 2026-07-04
+
 - 修复提供商状态显示错误的问题（异步方法返回 Promise 被当作 true）
 - 添加提供商状态缓存机制
 - 修复 npm 安装后知识库为空的问题
 
 ### v2.2.4
+> 更新日期: 2026-07-04
+
 - 修复数据库迁移问题（旧版本数据库缺少 issue_type 列）
 - 添加自动迁移逻辑
 
 ### v2.2.3
+> 更新日期: 2026-07-03
+
 - 移除 postinstall 中下载 WASM 的逻辑，使用 tree-sitter-wasms 包自带的 WASM 文件
 
 ### v2.2.2
+> 更新日期: 2026-07-03
+
 - 添加 postinstall 脚本自动下载 WASM 文件
 
 ### v2.2.1
+> 更新日期: 2026-07-02
+
 - 修复 CLI 界面在输入/删除时重复渲染的问题
 
 ### v2.2.0
+> 更新日期: 2026-07-02
+
 - 优化终端输出兼容性
 - 修复方向键选择功能
 
 ### v2.1.0
+> 更新日期: 2026-07-01
+
 - 添加进度可视化功能
 - 所有操作实时展示进度条
 - 添加 AI 对话进度条
 
 ### v2.0.0
+> 更新日期: 2026-06-30
+
 - 完全重构双模式引擎
 - 支持离线模式（不依赖云端大模型）
 - 优化的 Tree-sitter WASM 解析器加载
 
 ### v1.0.0
+> 更新日期: 2026-06-25
+
 - 初始版本发布
 - 支持代码分析和问题检测
 - 支持多个 LLM 提供商
