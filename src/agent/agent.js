@@ -13,6 +13,7 @@ const { skillManager } = require('../skills');
 const { selfUpdateManager } = require('../services/bootstrap/selfUpdateManager');
 const { selfRepairManager } = require('../services/bootstrap/selfRepairManager');
 const { rollbackManager } = require('../services/bootstrap/rollback');
+const { systemMonitor } = require('../utils/systemMonitor');
 
 /**
  * Agent状态
@@ -752,6 +753,7 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
     await engine.init();
     await providerManager.init();
     await skillManager.init();
+    systemMonitor.start();
     logger.info('Code Optimizer Agent 初始化完成');
     return this.getStatus();
   }
@@ -1224,8 +1226,22 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
       currentTask: this.currentTask,
       config: this.config,
       engine: engine.getStatus(),
-      historyCount: this.taskHistory.length
+      historyCount: this.taskHistory.length,
+      health: systemMonitor.getHealthStatus()
     };
+  }
+
+  getHealthStatus() {
+    return systemMonitor.getHealthStatus();
+  }
+
+  getHealthHistory() {
+    return systemMonitor.getHealthHistory();
+  }
+
+  async runHealthCheck() {
+    await systemMonitor.runHealthCheck();
+    return systemMonitor.getHealthStatus();
   }
 
   /**

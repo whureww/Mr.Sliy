@@ -6,7 +6,7 @@ const { generateUUID, bumpVersion, updateReadme } = require('../../utils/helpers
 const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
-const { eventBus } = require('../../utils/eventBus');
+const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
 
 class SelfRepairManager {
   constructor() {
@@ -65,6 +65,56 @@ class SelfRepairManager {
     eventBus.on('module.restored', (data) => {
       logger.warn(`修复模块已恢复: ${data.moduleId}`);
     });
+
+    eventBus.on(SYSTEM_EVENTS.SYSTEM_ERROR, async (error) => {
+      logger.error(`收到系统错误事件: ${error.message}`);
+      await this.handleSystemError(error);
+    });
+
+    eventBus.on(SYSTEM_EVENTS.SYSTEM_DEGRADE, async (data) => {
+      logger.warn(`系统降级事件: ${data.reason}`);
+      await this.handleSystemDegrade(data);
+    });
+  }
+
+  async handleSystemError(error) {
+    try {
+      const result = await this.detectAndRepair(error, {
+        autoConfirm: true,
+        skipBackup: false
+      });
+      
+      if (result.success) {
+        logger.info(`系统错误已自动修复: ${error.message}`);
+        eventBus.emit(SYSTEM_EVENTS.SYSTEM_RECOVER, {
+          error: error.message,
+          strategy: result.strategy
+        });
+      } else {
+        logger.error(`系统错误自动修复失败: ${error.message}`);
+        eventBus.emit(SYSTEM_EVENTS.SYSTEM_DEGRADE, {
+          reason: `错误无法修复: ${error.message}`,
+          error
+        });
+      }
+    } catch (repairError) {
+      logger.error(`处理系统错误时发生异常: ${repairError.message}`);
+    }
+  }
+
+  async handleSystemDegrade(data) {
+    logger.warn(`系统降级处理: ${data.reason}`);
+    if (data.error) {
+      await this.saveRepairRecord({
+        errorType: this.classifyError(data.error),
+        errorMessage: data.error.message,
+        errorStack: data.error.stack,
+        affectedComponent: 'system',
+        repairStrategy: 'degrade',
+        status: 'degraded',
+        appliedAt: Date.now()
+      });
+    }
   }
 
   classifyError(error) {

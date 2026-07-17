@@ -1,7 +1,17 @@
+const SYSTEM_EVENTS = {
+  SYSTEM_ERROR: 'system_error',
+  SYSTEM_WARNING: 'system_warning',
+  SYSTEM_HEALTH_CHECK: 'system_health_check',
+  SYSTEM_HEALTH_STATUS: 'system_health_status',
+  SYSTEM_DEGRADE: 'system_degrade',
+  SYSTEM_RECOVER: 'system_recover'
+};
+
 class EventBus {
   constructor() {
     this.listeners = new Map();
     this.maxListeners = 100;
+    this.validEvents = new Set(Object.values(SYSTEM_EVENTS));
   }
 
   on(event, listener) {
@@ -82,5 +92,6 @@ const eventBus = new EventBus();
 
 module.exports = {
   EventBus,
-  eventBus
+  eventBus,
+  SYSTEM_EVENTS
 };

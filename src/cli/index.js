@@ -54,7 +54,8 @@ const MENU_ITEMS = [
   { key: 'repair', command: '/repair', label: '/repair', desc: '自修复管理', shortcut: 'r', keywords: 'repair self-repair fix 修复' },
   { key: 'mode', command: '/mode', label: '/mode', desc: '切换工作模式', shortcut: 'm', keywords: 'mode online offline auto 模式 离线 在线' },
   { key: 'status', command: '/status', label: '/status', desc: '查看系统状态', shortcut: 'i', keywords: 'status info state stat 状态 信息' },
-  { key: 'help', command: '/help', label: '/help', desc: '帮助文档', shortcut: 'h', keywords: 'help manual usage guide 帮助 说明' },
+  { key: 'health', command: '/health', label: '/health', desc: '健康检查', shortcut: 'h', keywords: 'health check monitor 健康 检查' },
+  { key: 'help', command: '/help', label: '/help', desc: '帮助文档', shortcut: '?', keywords: 'help manual usage guide 帮助 说明' },
   { key: 'clear', command: '/clear', label: '/clear', desc: '清空屏幕', shortcut: 'c', keywords: 'clear cls screen clean 清空 清理' },
   { key: 'exit', command: '/exit', label: '/exit', desc: '退出程序', shortcut: 'e', keywords: 'exit quit bye 离开 退出' }
 ];
@@ -2408,10 +2409,181 @@ async function showStatus() {
   console.log(c('    案例数: ' + kb.totalCases, 'white'));
   console.log();
   
+  console.log(c('  系统健康:', 'cyan'));
+  const health = status.health;
+  if (health) {
+    const statusColor = health.overallStatus === 'healthy' ? 'green' : health.overallStatus === 'warning' ? 'yellow' : 'red';
+    const statusText = health.overallStatus === 'healthy' ? '健康' : health.overallStatus === 'warning' ? '警告' : '错误';
+    console.log(c('    状态: ' + statusText, statusColor));
+    
+    if (health.details) {
+      Object.entries(health.details).forEach(([name, detail]) => {
+        const detailColor = detail.status === 'healthy' ? 'green' : detail.status === 'warning' ? 'yellow' : 'red';
+        const detailMarker = detail.status === 'healthy' ? '✓' : detail.status === 'warning' ? '!' : '✗';
+        console.log(c('    [' + detailMarker + '] ' + name + ': ' + detail.message, detailColor));
+      });
+    }
+    
+    if (health.issues && health.issues.length > 0) {
+      console.log(c('    问题: ' + health.issues.join(', '), 'red'));
+    }
+    if (health.warnings && health.warnings.length > 0) {
+      console.log(c('    警告: ' + health.warnings.join(', '), 'yellow'));
+    }
+  } else {
+    console.log(c('    状态: 未知', 'dim'));
+  }
+  console.log();
+  
   console.log(c('  配置:', 'cyan'));
   console.log(c('    自动保存: ' + (status.config.autoSave ? '是' : '否'), 'white'));
   console.log(c('    最大问题数/文件: ' + status.config.maxIssuesPerFile, 'white'));
   console.log();
+  
+  await waitEnter();
+}
+
+async function healthCheckMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' 🔍 健康检查', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) 立即执行健康检查', 'white'));
+    console.log(c('    2) 查看健康状态', 'white'));
+    console.log(c('    3) 查看历史记录', 'white'));
+    console.log(c('    0) 返回主菜单', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice === '0') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+        await runHealthCheck();
+        break;
+      case '2':
+        await showHealthStatus();
+        break;
+      case '3':
+        await showHealthHistory();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
+  }
+}
+
+async function runHealthCheck() {
+  console.log();
+  console.log(c('  正在执行健康检查...', 'cyan'));
+  
+  try {
+    const status = await agent.runHealthCheck();
+    
+    const statusColor = status.overallStatus === 'healthy' ? 'green' : status.overallStatus === 'warning' ? 'yellow' : 'red';
+    const statusText = status.overallStatus === 'healthy' ? '健康' : status.overallStatus === 'warning' ? '警告' : '错误';
+    
+    console.log();
+    console.log(c('  检查结果: ' + statusText, statusColor));
+    console.log();
+    
+    if (status.details) {
+      Object.entries(status.details).forEach(([name, detail]) => {
+        const detailColor = detail.status === 'healthy' ? 'green' : detail.status === 'warning' ? 'yellow' : 'red';
+        const detailMarker = detail.status === 'healthy' ? '✓' : detail.status === 'warning' ? '!' : '✗';
+        console.log(c('    [' + detailMarker + '] ' + name + ': ' + detail.message, detailColor));
+        
+        if (detail.details) {
+          Object.entries(detail.details).forEach(([key, value]) => {
+            console.log(c('       ' + key + ': ' + value, 'dim'));
+          });
+        }
+      });
+    }
+    
+    if (status.issues && status.issues.length > 0) {
+      console.log();
+      console.log(c('  🚨 发现问题:', 'red'));
+      status.issues.forEach((issue, index) => {
+        console.log(c('    ' + (index + 1) + '. ' + issue, 'red'));
+      });
+    }
+    
+    if (status.warnings && status.warnings.length > 0) {
+      console.log();
+      console.log(c('  ⚠️ 警告:', 'yellow'));
+      status.warnings.forEach((warning, index) => {
+        console.log(c('    ' + (index + 1) + '. ' + warning, 'yellow'));
+      });
+    }
+    
+    if (status.overallStatus === 'healthy') {
+      console.log();
+      console.log(c('  ✅ 系统运行正常', 'green'));
+    }
+    
+  } catch (error) {
+    console.log(c('  ✗ 健康检查失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function showHealthStatus() {
+  console.log();
+  const status = agent.getHealthStatus();
+  
+  const statusColor = status.overallStatus === 'healthy' ? 'green' : status.overallStatus === 'warning' ? 'yellow' : 'red';
+  const statusText = status.overallStatus === 'healthy' ? '健康' : status.overallStatus === 'warning' ? '警告' : '错误';
+  
+  console.log(c('  当前健康状态: ' + statusText, statusColor));
+  console.log(c('  检查时间: ' + new Date(status.timestamp).toLocaleString(), 'dim'));
+  console.log();
+  
+  if (status.details) {
+    Object.entries(status.details).forEach(([name, detail]) => {
+      const detailColor = detail.status === 'healthy' ? 'green' : detail.status === 'warning' ? 'yellow' : 'red';
+      const detailMarker = detail.status === 'healthy' ? '✓' : detail.status === 'warning' ? '!' : '✗';
+      console.log(c('    [' + detailMarker + '] ' + name + ': ' + detail.message, detailColor));
+    });
+  }
+  
+  await waitEnter();
+}
+
+async function showHealthHistory() {
+  console.log();
+  const history = agent.getHealthHistory();
+  
+  if (history.length === 0) {
+    console.log(c('  暂无健康检查历史记录', 'dim'));
+    await waitEnter();
+    return;
+  }
+  
+  console.log(c('  健康检查历史 (最近10次):', 'cyan'));
+  console.log(c('  ─────────────────────────────────────────', 'dim'));
+  
+  const recentHistory = history.slice(-10).reverse();
+  recentHistory.forEach((status, index) => {
+    const statusColor = status.overallStatus === 'healthy' ? 'green' : status.overallStatus === 'warning' ? 'yellow' : 'red';
+    const statusText = status.overallStatus === 'healthy' ? '健康' : status.overallStatus === 'warning' ? '警告' : '错误';
+    const time = new Date(status.timestamp).toLocaleTimeString();
+    
+    console.log(c('    ' + time + ' - ' + statusText, statusColor));
+    if (status.issues && status.issues.length > 0) {
+      console.log(c('       问题: ' + status.issues.length + '个', 'red'));
+    }
+  });
   
   await waitEnter();
 }
@@ -3368,6 +3540,9 @@ async function startCLI() {
         break;
       case 'status':
         await showStatus();
+        break;
+      case 'health':
+        await healthCheckMenu();
         break;
       case 'help':
         await showHelp();

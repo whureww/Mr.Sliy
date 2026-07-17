@@ -6,7 +6,7 @@ const { generateUUID, bumpVersion, updateReadme } = require('../../utils/helpers
 const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
-const { eventBus } = require('../../utils/eventBus');
+const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
 const { rollbackManager } = require('./rollback');
 
 class SelfUpdateManager {
@@ -45,6 +45,57 @@ class SelfUpdateManager {
     eventBus.on('module.restored', (data) => {
       logger.warn(`模块已恢复: ${data.moduleId} from ${data.backupVersion}`);
     });
+
+    eventBus.on(SYSTEM_EVENTS.SYSTEM_WARNING, async (warning) => {
+      logger.warn(`收到系统警告事件: ${warning.message}`);
+      await this.handleSystemWarning(warning);
+    });
+
+    eventBus.on(SYSTEM_EVENTS.SYSTEM_HEALTH_STATUS, async (status) => {
+      await this.handleHealthStatus(status);
+    });
+  }
+
+  async handleSystemWarning(warning) {
+    try {
+      if (warning.type === 'knowledge_base_low_hit_rate') {
+        logger.info('知识库命中率偏低，建议扩充知识库');
+        await this.suggestKnowledgeUpdate();
+      } else if (warning.type === 'provider_failure') {
+        logger.info('提供商调用失败，建议检查配置或切换提供商');
+      } else if (warning.type === 'performance_degradation') {
+        logger.info('系统性能下降，建议检查资源使用情况');
+      }
+    } catch (error) {
+      logger.error(`处理系统警告时发生异常: ${error.message}`);
+    }
+  }
+
+  async suggestKnowledgeUpdate() {
+    const provider = providerManager.getActiveProvider();
+    if (!provider) {
+      logger.warn('未配置LLM提供商，无法生成知识库扩充建议');
+      return;
+    }
+
+    try {
+      const result = await this.updateFromAISuggestion(
+        '检测到知识库命中率偏低，请分析现有知识库并提供扩充建议',
+        { autoConfirm: false }
+      );
+      if (result.success) {
+        logger.info('知识库扩充建议已生成');
+      }
+    } catch (error) {
+      logger.error(`生成知识库扩充建议失败: ${error.message}`);
+    }
+  }
+
+  async handleHealthStatus(status) {
+    logger.debug(`系统健康状态更新: ${JSON.stringify(status)}`);
+    if (status.overallStatus === 'degraded') {
+      logger.warn(`系统健康状态降级: ${status.issues.join(', ')}`);
+    }
   }
 
   async checkForUpdates(options = {}) {
