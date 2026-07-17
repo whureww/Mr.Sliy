@@ -572,16 +572,34 @@ class SelfUpdateManager {
 
       const moduleId = path.basename(filePath, '.js');
       
-      const result = await moduleRegistry.updateModule(moduleId, updateData.content, options);
+      if (moduleRegistry.has(moduleId)) {
+        const result = await moduleRegistry.updateModule(moduleId, updateData.content, options);
 
-      if (result.success) {
-        return { success: true, filePath, moduleId, version: result.newVersion };
+        if (result.success) {
+          return { success: true, filePath, moduleId, version: result.newVersion };
+        } else {
+          return { 
+            success: false, 
+            error: result.error,
+            rolledBack: result.rolledBack
+          };
+        }
       } else {
-        return { 
-          success: false, 
-          error: result.error,
-          rolledBack: result.rolledBack
-        };
+        try {
+          const dir = path.dirname(filePath);
+          if (!fs.existsSync(dir)) {
+            fs.mkdirSync(dir, { recursive: true });
+          }
+          
+          fs.writeFileSync(filePath, updateData.content, 'utf-8');
+          
+          logger.info(`文件更新成功: ${filePath}`);
+          
+          return { success: true, filePath, moduleId };
+        } catch (error) {
+          logger.error(`文件写入失败: ${filePath}`, error);
+          return { success: false, error: error.message };
+        }
       }
     } catch (error) {
       return { success: false, error: error.message };

@@ -4,12 +4,12 @@
 
 const express = require('express');
 const router = express.Router();
-const { getDatabase } = require('../utils/database');
+const { getSqliteDatabase } = require('../utils/database');
 const { success, error } = require('../utils/response');
 
 router.get('/', (req, res) => {
   try {
-    const db = getDatabase();
+    const db = getSqliteDatabase();
     const stmt = db.prepare('SELECT config_key, config_value, config_type, description FROM sys_config WHERE is_public = 1');
     const configs = stmt.all();
     

@@ -921,17 +921,17 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
   /**
    * 查询知识库
    */
-  queryKnowledge(query, options = {}) {
-    const cases = knowledgeBase.searchCases(query, {
+  async queryKnowledge(query, options = {}) {
+    const cases = await knowledgeBase.searchCases(query, {
       language: options.language,
       issueType: options.issueType,
       topK: options.topK || 5
-    });
+    }) || [];
     
-    const entries = knowledgeBase.searchEntries(query, {
+    const entries = await knowledgeBase.searchEntries(query, {
       language: options.language,
       topK: options.topK || 5
-    });
+    }) || [];
     
     return {
       cases,
@@ -963,9 +963,10 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
    * 搜索知识库
    */
   async searchKnowledge(query, options = {}) {
-    const entries = knowledgeBase.searchEntries(query, options);
-    const cases = knowledgeBase.searchCases(query, options);
-    return [...entries, ...cases].slice(0, options.limit || 10);
+    const entries = await knowledgeBase.searchEntries(query, options) || [];
+    const cases = await knowledgeBase.searchCases(query, options) || [];
+    const results = [...entries, ...cases].slice(0, options.limit || 10);
+    return { success: true, results };
   }
 
   /**
@@ -1396,7 +1397,8 @@ ${toolsList}
    */
   saveTaskResult(task, result) {
     try {
-      const db = getDatabase();
+      const { getSqliteDatabase } = require('../utils/database');
+      const db = getSqliteDatabase();
       
       // 创建扫描任务记录
       const taskStmt = db.prepare(`

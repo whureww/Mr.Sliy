@@ -536,7 +536,7 @@ class RollbackManager {
       return { success: false, error: '更新记录不存在' };
     }
 
-    if (updateRecord.status !== 'applied') {
+    if (updateRecord.status !== 'applied' && updateRecord.status !== 'failed') {
       return { success: false, error: `更新状态为 ${updateRecord.status}，无法回滚` };
     }
 

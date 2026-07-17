@@ -938,7 +938,8 @@ async function saveDetectionResults(taskId, projectId, results) {
       }
     } else {
       // SQLite模式：使用better-sqlite3事务
-      const db = getDatabase();
+      const { getSqliteDatabase } = require('../../utils/database');
+      const db = getSqliteDatabase();
       const stmt = db.prepare(insertSql);
       const insertMany = db.transaction((issues) => {
         for (const issue of issues) {
