@@ -8,6 +8,7 @@ const { logger } = require('../../utils/logger');
 const { generateUUID, retry } = require('../../utils/helpers');
 const { getDatabase } = require('../../utils/database');
 const { providerManager } = require('../llm/providers');
+const { knowledgeBase } = require('../vector/knowledgeBase');
 
 // 代码片段向量存储（简化版）
 const codeVectorStore = new Map();
@@ -335,22 +336,21 @@ function saveOptimizationRecord(record) {
     const db = getSqliteDatabase();
     const stmt = db.prepare(`
       INSERT INTO ai_optimize_record
-      (id, issue_id, task_id, original_code, optimized_code, explanation,
+      (issue_id, task_id, original_code, optimized_code, explanation,
        optimization_type, ai_model, tokens_used, api_latency_ms)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     
     stmt.run(
-      record.id,
-      record.issueId,
-      record.taskId,
-      record.originalCode,
-      record.optimizedCode,
-      record.explanation,
-      'refactor',
-      config.ai.model,
-      record.tokensUsed,
-      record.durationMs
+      parseInt(record.issueId) || 0,
+      parseInt(record.taskId) || 0,
+      record.originalCode || '',
+      record.optimizedCode || '',
+      record.explanation || '',
+      record.optimizationType || 'refactor',
+      record.aiModel || config.ai?.model || '',
+      parseInt(record.tokensUsed) || 0,
+      parseInt(record.durationMs) || 0
     );
     
     optimizationHistory.push(record);
@@ -374,10 +374,195 @@ function clearVectorStore() {
   logger.info('向量存储已清空');
 }
 
+async function optimizeOffline(codeSnippet, context) {
+  const startTime = Date.now();
+  
+  try {
+    const kbResult = await knowledgeBase.applyOptimizationPattern(codeSnippet, {
+      language: context.language
+    });
+
+    if (kbResult.success) {
+      const optimizationRecord = {
+        id: generateUUID(),
+        issueId: context.issueId,
+        taskId: context.taskId,
+        originalCode: codeSnippet,
+        optimizedCode: kbResult.optimizedCode,
+        explanation: kbResult.explanation,
+        suggestions: kbResult.suggestions,
+        durationMs: Date.now() - startTime,
+        createdAt: new Date()
+      };
+
+      saveOptimizationRecord(optimizationRecord);
+
+      logger.info(`离线优化完成: ${optimizationRecord.id}`);
+
+      return {
+        success: true,
+        optimizationId: optimizationRecord.id,
+        optimizedCode: kbResult.optimizedCode,
+        explanation: kbResult.explanation,
+        suggestions: kbResult.suggestions,
+        appliedPatterns: kbResult.appliedPatterns,
+        similarCases: kbResult.similarCases,
+        mode: 'offline',
+        durationMs: Date.now() - startTime
+      };
+    }
+
+    const ruleResult = applyStaticRules(codeSnippet, context);
+    
+    if (ruleResult.success) {
+      const optimizationRecord = {
+        id: generateUUID(),
+        issueId: context.issueId,
+        taskId: context.taskId,
+        originalCode: codeSnippet,
+        optimizedCode: ruleResult.optimizedCode,
+        explanation: ruleResult.explanation,
+        suggestions: ruleResult.suggestions,
+        durationMs: Date.now() - startTime,
+        createdAt: new Date()
+      };
+
+      saveOptimizationRecord(optimizationRecord);
+
+      logger.info(`静态规则优化完成: ${optimizationRecord.id}`);
+
+      return {
+        success: true,
+        optimizationId: optimizationRecord.id,
+        optimizedCode: ruleResult.optimizedCode,
+        explanation: ruleResult.explanation,
+        suggestions: ruleResult.suggestions,
+        mode: 'static_rules',
+        durationMs: Date.now() - startTime
+      };
+    }
+
+    return {
+      success: false,
+      message: '离线模式下未找到可应用的优化方案',
+      optimizedCode: codeSnippet,
+      mode: 'offline',
+      durationMs: Date.now() - startTime
+    };
+  } catch (error) {
+    logger.error('离线优化失败:', error);
+    return {
+      success: false,
+      message: error.message,
+      mode: 'offline',
+      durationMs: Date.now() - startTime
+    };
+  }
+}
+
+function applyStaticRules(codeSnippet, context) {
+  const rules = [
+    {
+      name: 'remove-console-log',
+      pattern: /console\.(log|debug|info|warn|error)\([^)]*\);?/g,
+      replacement: '',
+      explanation: '移除调试日志语句'
+    },
+    {
+      name: 'const-instead-of-var',
+      pattern: /\bvar\s+(\w+)\s*=\s*(?!function|new)/g,
+      replacement: 'const $1 =',
+      explanation: '将var替换为const'
+    },
+    {
+      name: 'let-instead-of-var',
+      pattern: /\bvar\s+(\w+)\s*=\s*(?!function|new)/g,
+      replacement: 'let $1 =',
+      explanation: '将var替换为let'
+    },
+    {
+      name: 'arrow-function',
+      pattern: /function\s*\(\)\s*\{/g,
+      replacement: '() => {',
+      explanation: '使用箭头函数简化代码'
+    },
+    {
+      name: 'template-literals',
+      pattern: /(["'])\+\s*(\w+)\s*\+\s*(["'])/g,
+      replacement: '`${$2}`',
+      explanation: '使用模板字符串替代字符串拼接'
+    },
+    {
+      name: 'remove-unused-var',
+      pattern: /^(?:const|let|var)\s+\w+\s*=\s*undefined;?$/gm,
+      replacement: '',
+      explanation: '移除未使用的变量声明'
+    },
+    {
+      name: 'short-circuit-assignment',
+      pattern: /if\s*\(\s*(!)?\s*(\w+)\s*\)\s*\{?\s*\2\s*=\s*(.+?)\s*;?\s*\}?/g,
+      replacement: '$2 = $2 || $3;',
+      explanation: '使用短路赋值简化条件判断'
+    },
+    {
+      name: 'object-shorthand',
+      pattern: /(\w+)\s*:\s*(\w+)\s*(?=,|})/g,
+      replacement: '$1',
+      explanation: '使用对象属性简写'
+    }
+  ];
+
+  let optimizedCode = codeSnippet;
+  const appliedRules = [];
+
+  for (const rule of rules) {
+    const original = optimizedCode;
+    optimizedCode = optimizedCode.replace(rule.pattern, rule.replacement);
+    
+    if (optimizedCode !== original) {
+      appliedRules.push({
+        rule: rule.name,
+        explanation: rule.explanation
+      });
+    }
+  }
+
+  const changed = optimizedCode !== codeSnippet;
+
+  return {
+    success: changed,
+    optimizedCode: changed ? optimizedCode : codeSnippet,
+    explanation: changed 
+      ? `应用了${appliedRules.length}个静态优化规则` 
+      : '未找到可应用的静态优化规则',
+    suggestions: appliedRules.map(r => r.explanation),
+    appliedRules
+  };
+}
+
+async function smartOptimize(codeSnippet, context) {
+  const hasProvider = providerManager.getActiveProvider() !== null;
+  
+  if (hasProvider) {
+    try {
+      const onlineResult = await optimizeWithRAG({ codeSnippet, id: context.issueId }, context);
+      if (onlineResult.success) {
+        return { ...onlineResult, mode: 'online' };
+      }
+    } catch (e) {
+      logger.warn('在线优化失败，回退到离线模式:', e.message);
+    }
+  }
+
+  return optimizeOffline(codeSnippet, context);
+}
+
 module.exports = {
   indexCodeSnippet,
   retrieveSimilarSnippets,
   optimizeWithRAG,
+  optimizeOffline,
+  smartOptimize,
   getOptimizationHistory,
   clearVectorStore,
   AIClient
