@@ -1296,7 +1296,13 @@ class KnowledgeBase {
   }
 
   async testCloudConnection() {
-    return await mysql.testConnection();
+    const result = await mysql.testConnection();
+    if (result.success) {
+      this.mysqlAvailable = true;
+    } else {
+      this.mysqlAvailable = false;
+    }
+    return result;
   }
 
   async switchDatabaseConnection(connectionConfig) {
