@@ -14,6 +14,11 @@ const { selfUpdateManager } = require('../services/bootstrap/selfUpdateManager')
 const { selfRepairManager } = require('../services/bootstrap/selfRepairManager');
 const { rollbackManager } = require('../services/bootstrap/rollback');
 const { systemMonitor } = require('../utils/systemMonitor');
+const { selfSustainEngine } = require('../services/bootstrap/selfSustainEngine');
+const { telemetry } = require('../utils/telemetry');
+const { ruleEngine } = require('../services/bootstrap/ruleEngine');
+const { analysisEngine } = require('../services/bootstrap/analysisEngine');
+const { validator } = require('../services/bootstrap/validator');
 
 /**
  * Agent状态
@@ -754,7 +759,10 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
     await providerManager.init();
     await skillManager.init();
     systemMonitor.start();
-    logger.info('Code Optimizer Agent 初始化完成');
+    analysisEngine.start();
+    selfSustainEngine.start();
+    telemetry.recordEvent('agent_initialized', 'agent', {}, 'info');
+    logger.info('Code Optimizer Agent 初始化完成 (AI自持引擎已启动)');
     return this.getStatus();
   }
 
@@ -1242,6 +1250,73 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
   async runHealthCheck() {
     await systemMonitor.runHealthCheck();
     return systemMonitor.getHealthStatus();
+  }
+
+  /**
+   * AI自持引擎控制
+   */
+  startSelfSustain() {
+    selfSustainEngine.start();
+    telemetry.recordEvent('self_sustain_started', 'agent', {}, 'info');
+    return selfSustainEngine.getStatus();
+  }
+
+  stopSelfSustain() {
+    selfSustainEngine.stop();
+    telemetry.recordEvent('self_sustain_stopped', 'agent', {}, 'info');
+    return selfSustainEngine.getStatus();
+  }
+
+  getSustainStatus() {
+    return selfSustainEngine.getStatus();
+  }
+
+  getSustainDashboard() {
+    return selfSustainEngine.getDashboard();
+  }
+
+  getSustainStats() {
+    return selfSustainEngine.getStats();
+  }
+
+  async triggerAIAnalysis(focus = 'general') {
+    return await selfSustainEngine.triggerManualAnalysis(focus);
+  }
+
+  getRules() {
+    return ruleEngine.getRules();
+  }
+
+  getRuleHistory() {
+    return ruleEngine.getRuleHistory();
+  }
+
+  addRule(rule) {
+    return ruleEngine.addRule(rule);
+  }
+
+  removeRule(ruleId) {
+    return ruleEngine.removeRule(ruleId);
+  }
+
+  getTelemetry() {
+    return telemetry.collect();
+  }
+
+  getTelemetryMetrics() {
+    return telemetry.getMetrics();
+  }
+
+  getValidationStats() {
+    return validator.getValidationStats();
+  }
+
+  getAnalysisHistory() {
+    return analysisEngine.getAnalysisHistory();
+  }
+
+  getCycleHistory() {
+    return selfSustainEngine.getCycleHistory();
   }
 
   /**
