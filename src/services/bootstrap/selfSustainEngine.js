@@ -40,7 +40,7 @@ class SelfSustainEngine {
 
   start() {
     if (this.isRunning) {
-      logger.warn('AI自持引擎已在运行中');
+      logger.debug('AI自持引擎已在运行中');
       return;
     }
 

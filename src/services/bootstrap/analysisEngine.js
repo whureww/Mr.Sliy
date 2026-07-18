@@ -43,7 +43,7 @@ class AnalysisEngine {
 
   start() {
     if (this.isRunning) {
-      logger.warn('AI分析引擎已在运行中');
+      logger.debug('AI分析引擎已在运行中');
       return;
     }
 
