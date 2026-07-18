@@ -597,6 +597,9 @@ function ask(prompt) {
     inputState.promptText = prompt;
     inputState.inputResolve = resolve;
     process.stdout.write(c(prompt, 'white'));
+    if (typeof process.stdout.flush === 'function') {
+      process.stdout.flush();
+    }
   });
 }
 
@@ -738,6 +741,9 @@ async function handleAIChat(initialMessage) {
 
       const result = await agent.chat(message, { onProgress });
 
+      progressBar.stopAnimation();
+
+      process.stdout.write('\n');
       console.log(c(' 🤖 AI:', 'green'));
       console.log(c('    ' + result.content.replace(/\n/g, '\n    '), 'white'));
 
@@ -758,6 +764,10 @@ async function handleAIChat(initialMessage) {
 
       console.log();
       console.log(c('─'.repeat(70), 'dim'));
+      process.stdout.write('\n');
+      if (typeof process.stdout.flush === 'function') {
+        process.stdout.flush();
+      }
       const nextInput = await ask(c(' 💬 ', 'green') + c('继续对话或输入 q 返回: ', 'white'));
       
       if (nextInput === '__CANCEL__' || nextInput.toLowerCase() === 'q' || nextInput.toLowerCase() === 'quit' || !nextInput.trim()) {

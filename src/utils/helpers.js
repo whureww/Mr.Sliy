@@ -287,12 +287,11 @@ function updateReadme(readmePath, newVersion, changelogItems = []) {
   
   let content = fs.readFileSync(readmePath, 'utf8');
   
-  content = content.replace(/### v[\d.]+/, `### v${newVersion}`);
-  
   if (changelogItems.length > 0) {
-    const changelogSection = content.match(/## 📝 更新日志[\s\S]*/);
-    if (changelogSection) {
-      const existingContent = changelogSection[0];
+    const versionSectionMatch = content.match(/### v[\d.]+[\s\S]*/);
+    
+    if (versionSectionMatch) {
+      const existingContent = versionSectionMatch[0];
       const firstVersionMatch = existingContent.match(/### v[\d.]+/);
       
       if (firstVersionMatch) {

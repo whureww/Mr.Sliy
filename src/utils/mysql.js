@@ -218,6 +218,78 @@ async function initDatabase() {
     await query(`CREATE INDEX idx_language ON kb_entries(language)`).catch(() => {});
     await query(`CREATE INDEX idx_issue_type ON kb_cases(issue_type)`).catch(() => {});
     await query(`CREATE INDEX idx_cases_language ON kb_cases(language)`).catch(() => {});
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS self_update_history (
+        id VARCHAR(36) PRIMARY KEY,
+        update_type VARCHAR(50) NOT NULL,
+        target_version VARCHAR(20),
+        current_version VARCHAR(20),
+        version_after VARCHAR(20),
+        update_source VARCHAR(100),
+        update_content TEXT,
+        status VARCHAR(20) DEFAULT 'pending',
+        user_confirmed BOOLEAN DEFAULT 0,
+        confirmed_at DATETIME,
+        rejected_step VARCHAR(100),
+        sandbox_result TEXT,
+        applied_at DATETIME,
+        rollback_version VARCHAR(20),
+        rollback_at DATETIME,
+        rolled_back_reason VARCHAR(200),
+        error_message TEXT,
+        duration_ms INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS self_repair_history (
+        id VARCHAR(36) PRIMARY KEY,
+        error_type VARCHAR(100) NOT NULL,
+        error_message TEXT,
+        error_stack TEXT,
+        affected_component VARCHAR(100),
+        repair_strategy VARCHAR(100),
+        repair_content TEXT,
+        status VARCHAR(20) DEFAULT 'pending',
+        user_confirmed BOOLEAN DEFAULT 0,
+        confirmed_at DATETIME,
+        sandbox_result TEXT,
+        applied_at DATETIME,
+        rollback_at DATETIME,
+        rolled_back_reason VARCHAR(200),
+        error_count INT DEFAULT 1,
+        last_error_at DATETIME,
+        duration_ms INT,
+        error_message_detail TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS confirmation_history (
+        id VARCHAR(36) PRIMARY KEY,
+        operation_type VARCHAR(100) NOT NULL,
+        risk_level VARCHAR(20) NOT NULL,
+        step_name VARCHAR(100),
+        step_number INT DEFAULT 0,
+        total_steps INT DEFAULT 0,
+        description TEXT NOT NULL,
+        impact VARCHAR(500),
+        files_affected TEXT,
+        backup_available BOOLEAN DEFAULT 0,
+        rollback_possible BOOLEAN DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'pending',
+        reason VARCHAR(200),
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`ALTER TABLE self_update_history ADD COLUMN version_after VARCHAR(20)`).catch(() => {});
+    await query(`ALTER TABLE self_update_history ADD COLUMN rejected_step VARCHAR(100)`).catch(() => {});
+    await query(`ALTER TABLE self_update_history ADD COLUMN rolled_back_reason VARCHAR(200)`).catch(() => {});
+    await query(`ALTER TABLE self_repair_history ADD COLUMN rolled_back_reason VARCHAR(200)`).catch(() => {});
     
     logger.info('MySQL数据库表初始化完成');
     return true;

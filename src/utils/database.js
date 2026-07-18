@@ -575,12 +575,6 @@ let sqliteInitialized = false;
 function ensureSqliteTables() {
   if (sqliteInitialized) return;
 
-  const mysqlEnabled = config.mysql?.enabled;
-  if (mysqlEnabled) {
-    logger.debug('MySQL已启用，跳过SQLite表初始化');
-    return;
-  }
-
   sqliteInitialized = true;
 
   const db = getSqliteDatabase();
@@ -708,11 +702,105 @@ async function initMySqlTables() {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       INDEX idx_access_key (access_key),
       INDEX idx_access_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // 自更新历史表
+    `CREATE TABLE IF NOT EXISTS self_update_history (
+      id VARCHAR(36) PRIMARY KEY,
+      update_type VARCHAR(50) NOT NULL,
+      target_version VARCHAR(20),
+      current_version VARCHAR(20),
+      version_after VARCHAR(20),
+      update_source VARCHAR(100),
+      update_content TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      user_confirmed BOOLEAN DEFAULT 0,
+      confirmed_at DATETIME,
+      rejected_step VARCHAR(100),
+      sandbox_result TEXT,
+      applied_at DATETIME,
+      rollback_version VARCHAR(20),
+      rollback_at DATETIME,
+      rolled_back_reason VARCHAR(200),
+      error_message TEXT,
+      duration_ms INT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_update_type (update_type),
+      INDEX idx_update_status (status),
+      INDEX idx_update_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // 自修复历史表
+    `CREATE TABLE IF NOT EXISTS self_repair_history (
+      id VARCHAR(36) PRIMARY KEY,
+      error_type VARCHAR(100) NOT NULL,
+      error_message TEXT,
+      error_stack TEXT,
+      affected_component VARCHAR(100),
+      repair_strategy VARCHAR(100),
+      repair_content TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      user_confirmed BOOLEAN DEFAULT 0,
+      confirmed_at DATETIME,
+      sandbox_result TEXT,
+      applied_at DATETIME,
+      rollback_at DATETIME,
+      rolled_back_reason VARCHAR(200),
+      error_count INT DEFAULT 1,
+      last_error_at DATETIME,
+      duration_ms INT,
+      error_message_detail TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_repair_error_type (error_type),
+      INDEX idx_repair_status (status),
+      INDEX idx_repair_created_at (created_at),
+      INDEX idx_repair_component (affected_component)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
+
+    // 确认历史表
+    `CREATE TABLE IF NOT EXISTS confirmation_history (
+      id VARCHAR(36) PRIMARY KEY,
+      operation_type VARCHAR(100) NOT NULL,
+      risk_level VARCHAR(20) NOT NULL,
+      step_name VARCHAR(100),
+      step_number INT DEFAULT 0,
+      total_steps INT DEFAULT 0,
+      description TEXT NOT NULL,
+      impact VARCHAR(500),
+      files_affected TEXT,
+      backup_available BOOLEAN DEFAULT 0,
+      rollback_possible BOOLEAN DEFAULT 0,
+      status VARCHAR(20) DEFAULT 'pending',
+      reason VARCHAR(200),
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_confirmation_operation (operation_type),
+      INDEX idx_confirmation_risk_level (risk_level),
+      INDEX idx_confirmation_status (status),
+      INDEX idx_confirmation_created_at (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
   ];
 
   for (const sql of tables) {
     await pool.execute(sql);
+  }
+
+  const alterStatements = [
+    'ALTER TABLE self_update_history ADD COLUMN version_after VARCHAR(20)',
+    'ALTER TABLE self_update_history ADD COLUMN rejected_step VARCHAR(100)',
+    'ALTER TABLE self_update_history ADD COLUMN rolled_back_reason VARCHAR(200)',
+    'ALTER TABLE self_repair_history ADD COLUMN rolled_back_reason VARCHAR(200)'
+  ];
+
+  for (const sql of alterStatements) {
+    try {
+      await pool.execute(sql);
+    } catch (e) {
+      if (e.message.includes('Duplicate column name')) {
+        logger.debug(`字段已存在，跳过: ${e.message}`);
+      } else {
+        logger.warn(`ALTER TABLE执行失败: ${e.message}`);
+      }
+    }
   }
 
   console.log('MySQL 数据库表初始化完成');

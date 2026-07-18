@@ -8,6 +8,8 @@ class RuleEngine {
     this.rules = new Map();
     this.ruleHistory = [];
     this.maxHistorySize = 200;
+    this.startupTime = Date.now();
+    this.minStartupDelay = 5 * 60 * 1000;
     this.init();
   }
 
@@ -78,7 +80,7 @@ class RuleEngine {
         id: 'switch_provider_on_failure',
         name: '提供商连续失败切换',
         description: '当LLM提供商连续失败3次时自动切换到备用提供商',
-        condition: { type: 'metric_threshold', metric: 'providerFailureRate', operator: '>=', value: 30 },
+        condition: { type: 'metric_threshold', metric: 'providerFailureRate', operator: '>=', value: 30, minSamples: 5 },
         action: 'switch_provider',
         actionParams: {},
         priority: 80
@@ -87,7 +89,7 @@ class RuleEngine {
         id: 'knowledge_base_low_hit_rate',
         name: '知识库命中率偏低',
         description: '当知识库命中率低于50%时触发知识库扩充',
-        condition: { type: 'metric_threshold', metric: 'knowledgeHitRate', operator: '<', value: 50 },
+        condition: { type: 'metric_threshold', metric: 'knowledgeHitRate', operator: '<', value: 50, minSamples: 20 },
         action: 'suggest_knowledge_update',
         actionParams: {},
         priority: 70
@@ -96,7 +98,7 @@ class RuleEngine {
         id: 'high_error_rate',
         name: '错误率过高',
         description: '当优化失败率超过30%时触发AI分析',
-        condition: { type: 'metric_threshold', metric: 'optimizationSuccessRate', operator: '<', value: 70 },
+        condition: { type: 'metric_threshold', metric: 'optimizationSuccessRate', operator: '<', value: 70, minSamples: 10 },
         action: 'trigger_ai_analysis',
         actionParams: { focus: 'optimization_quality' },
         priority: 90
@@ -105,7 +107,7 @@ class RuleEngine {
         id: 'frequent_repairs',
         name: '频繁修复触发',
         description: '当修复尝试次数超过10次时触发深度分析',
-        condition: { type: 'metric_threshold', metric: 'repairAttempts', operator: '>=', value: 10 },
+        condition: { type: 'metric_threshold', metric: 'repairAttempts', operator: '>=', value: 10, minSamples: 5 },
         action: 'trigger_ai_analysis',
         actionParams: { focus: 'system_stability' },
         priority: 75
@@ -122,9 +124,20 @@ class RuleEngine {
     ];
 
     for (const rule of defaultRules) {
-      if (!this.rules.has(rule.id)) {
+      const existingRule = this.rules.get(rule.id);
+      if (!existingRule) {
         this.rules.set(rule.id, rule);
         this.saveRuleToDb(rule);
+      } else {
+        const existingCondition = typeof existingRule.condition === 'string' ? 
+          JSON.parse(existingRule.condition) : existingRule.condition;
+        if (!existingCondition.minSamples && rule.condition.minSamples) {
+          existingCondition.minSamples = rule.condition.minSamples;
+          existingRule.condition = existingCondition;
+          this.rules.set(rule.id, existingRule);
+          this.saveRuleToDb(existingRule);
+          logger.info(`更新规则 ${rule.id}，添加最小样本数限制`);
+        }
       }
     }
   }
@@ -160,6 +173,12 @@ class RuleEngine {
   }
 
   async evaluate(context) {
+    const elapsedSinceStartup = Date.now() - this.startupTime;
+    if (elapsedSinceStartup < this.minStartupDelay) {
+      logger.debug(`启动保护中，跳过规则评估 (已启动 ${Math.floor(elapsedSinceStartup / 1000)} 秒)`);
+      return [];
+    }
+
     const matchedRules = [];
     const sortedRules = Array.from(this.rules.values())
       .filter(r => r.enabled !== false)
@@ -197,7 +216,7 @@ class RuleEngine {
   }
 
   evaluateMetricThreshold(condition, context) {
-    const { metric, operator, value } = condition;
+    const { metric, operator, value, minSamples } = condition;
     const metrics = context.metrics || telemetry.getMetrics();
 
     let actualValue = metrics[metric];
@@ -208,6 +227,12 @@ class RuleEngine {
 
     if (actualValue === undefined) return false;
 
+    const sampleCount = this.getSampleCount(metric);
+    if (minSamples && sampleCount < minSamples) {
+      logger.debug(`规则 ${metric} 跳过：样本数不足 (${sampleCount}/${minSamples})`);
+      return false;
+    }
+
     switch (operator) {
       case '>=': return actualValue >= value;
       case '<=': return actualValue <= value;
@@ -216,6 +241,22 @@ class RuleEngine {
       case '==': return actualValue === value;
       case '!=': return actualValue !== value;
       default: return false;
+    }
+  }
+
+  getSampleCount(metric) {
+    const metrics = telemetry.getMetrics();
+    switch (metric) {
+      case 'optimizationSuccessRate':
+        return metrics.optimizationRequests || 0;
+      case 'knowledgeHitRate':
+        return metrics.knowledgeQueries || 0;
+      case 'providerFailureRate':
+        return metrics.providerCalls || 0;
+      case 'repairAttempts':
+        return metrics.repairAttempts || 0;
+      default:
+        return 0;
     }
   }
 

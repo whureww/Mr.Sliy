@@ -79,6 +79,9 @@ class Validator {
         case 'rule':
           validation.metrics = await this.validateRule(beforeState, afterState);
           break;
+        case 'cycle':
+          validation.metrics = await this.validateCycle(beforeState, afterState);
+          break;
         default:
           validation.metrics = this.compareStates(beforeState, afterState);
       }
@@ -149,6 +152,27 @@ class Validator {
       success,
       improvementScore: success ? 0.5 : 0,
       details: { ruleActionsBefore, ruleActionsAfter }
+    };
+  }
+
+  async validateCycle(beforeState, afterState) {
+    const beforeErrors = beforeState.metrics.errors?.length || 0;
+    const afterErrors = afterState.metrics.errors?.length || 0;
+    
+    const errorsNotIncreased = afterErrors <= beforeErrors;
+    const systemStable = !beforeState.metrics.criticalError && !afterState.metrics.criticalError;
+    
+    const success = errorsNotIncreased && systemStable;
+
+    return {
+      success,
+      improvementScore: success ? 0.3 : 0,
+      details: { 
+        errorsNotIncreased, 
+        systemStable,
+        beforeErrors,
+        afterErrors
+      }
     };
   }
 
