@@ -1,6 +1,6 @@
 {
   "name": "mr-sliy",
-  "version": "2.9.4",
+  "version": "2.4.7",
   "description": "Mr.Sliy - 基于Tree-sitter与RAG的多语言代码优化智能体",
   "main": "src/agent.js",
   "bin": {
@@ -8,8 +8,6 @@
     "sliy": "src/agent.js"
   },
   "files": [
-    "README.md",
-    "LICENSE",
     "src/",
     "database/schema.sql",
     "database/init.js",
@@ -52,7 +50,6 @@
     "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
-    "mr-sliy": "^2.7.6",
     "mysql2": "^3.22.5",
     "tree-sitter-wasms": "^0.1.13",
     "uuid": "^9.0.1",

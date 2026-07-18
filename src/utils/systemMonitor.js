@@ -18,7 +18,7 @@ class SystemMonitor {
 
   start() {
     if (this.isRunning) {
-      logger.warn('系统监控已在运行中');
+      logger.debug('系统监控已在运行中');
       return;
     }
 
