@@ -15,7 +15,6 @@
     "database/init.js",
     "database/seed.js",
     "scripts/",
-    "data/knowledge-export.json",
     ".env.example"
   ],
   "scripts": {
