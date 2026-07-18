@@ -55,6 +55,7 @@ const MENU_ITEMS = [
   { key: 'mode', command: '/mode', label: '/mode', desc: '切换工作模式', shortcut: 'm', keywords: 'mode online offline auto 模式 离线 在线' },
   { key: 'status', command: '/status', label: '/status', desc: '查看系统状态', shortcut: 'i', keywords: 'status info state stat 状态 信息' },
   { key: 'health', command: '/health', label: '/health', desc: '健康检查', shortcut: 'h', keywords: 'health check monitor 健康 检查' },
+  { key: 'sustain', command: '/sustain', label: '/sustain', desc: 'AI自持引擎', shortcut: 't', keywords: 'sustain ai self-sustain auto 自持 自动' },
   { key: 'help', command: '/help', label: '/help', desc: '帮助文档', shortcut: '?', keywords: 'help manual usage guide 帮助 说明' },
   { key: 'clear', command: '/clear', label: '/clear', desc: '清空屏幕', shortcut: 'c', keywords: 'clear cls screen clean 清空 清理' },
   { key: 'exit', command: '/exit', label: '/exit', desc: '退出程序', shortcut: 'e', keywords: 'exit quit bye 离开 退出' }
@@ -2588,6 +2589,256 @@ async function showHealthHistory() {
   await waitEnter();
 }
 
+async function sustainMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' 🚀 AI自持引擎', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    const status = agent.getSustainStatus();
+    const statusText = status.isRunning ? c('● 运行中', 'green') : c('○ 已停止', 'red');
+    
+    console.log(c('  引擎状态: ' + statusText, 'white'));
+    console.log(c('  当前周期: ' + status.currentCycle, 'white'));
+    console.log(c('  历史周期: ' + status.totalCycles, 'white'));
+    console.log();
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) 查看仪表盘', 'white'));
+    console.log(c('    2) 启动自持引擎', 'white'));
+    console.log(c('    3) 停止自持引擎', 'white'));
+    console.log(c('    4) 触发AI分析', 'white'));
+    console.log(c('    5) 规则管理', 'white'));
+    console.log(c('    6) 遥测数据', 'white'));
+    console.log(c('    7) 验证统计', 'white'));
+    console.log(c('    0) 返回主菜单', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice === '0') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+        await showSustainDashboard();
+        break;
+      case '2':
+        agent.startSelfSustain();
+        console.log(c('  ✓ AI自持引擎已启动', 'green'));
+        await waitEnter();
+        break;
+      case '3':
+        agent.stopSelfSustain();
+        console.log(c('  ✓ AI自持引擎已停止', 'yellow'));
+        await waitEnter();
+        break;
+      case '4':
+        await triggerAnalysisMenu();
+        break;
+      case '5':
+        await rulesMenu();
+        break;
+      case '6':
+        await showTelemetry();
+        break;
+      case '7':
+        await showValidationStats();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
+  }
+}
+
+async function showSustainDashboard() {
+  console.log();
+  console.log(c('  📊 AI自持引擎仪表盘', 'bright cyan'));
+  console.log(c('  ─────────────────────────────────────────', 'dim'));
+  
+  const dashboard = await agent.getSustainDashboard();
+  
+  console.log(c('  引擎状态:', 'cyan'));
+  console.log(c('    运行中: ' + (dashboard.engineStatus.isRunning ? '是' : '否'), 'white'));
+  console.log(c('    当前周期: ' + dashboard.engineStatus.currentCycle, 'white'));
+  console.log(c('    周期间隔: ' + (dashboard.engineStatus.cycleInterval / 60000) + '分钟', 'white'));
+  console.log();
+  
+  console.log(c('  系统健康:', 'cyan'));
+  const health = dashboard.health;
+  if (health && health.overallStatus) {
+    const statusColor = health.overallStatus === 'healthy' ? 'green' : health.overallStatus === 'warning' ? 'yellow' : 'red';
+    console.log(c('    状态: ' + health.overallStatus, statusColor));
+  }
+  console.log();
+  
+  console.log(c('  统计数据:', 'cyan'));
+  const stats = dashboard.stats;
+  console.log(c('    运行时间: ' + Math.floor(stats.uptime / 60000) + '分钟', 'white'));
+  console.log(c('    规则数量: ' + stats.rules.totalRules, 'white'));
+  console.log(c('    分析次数: ' + (stats.analysis.total || 0), 'white'));
+  console.log(c('    验证总数: ' + (stats.validation.total || 0), 'white'));
+  console.log(c('    验证成功率: ' + (stats.validation.successRate || 0) + '%', 'white'));
+  console.log();
+  
+  console.log(c('  关键指标:', 'cyan'));
+  const m = stats.metrics;
+  console.log(c('    优化成功率: ' + (m.optimizationSuccessRate || 0) + '%', 'white'));
+  console.log(c('    知识命中率: ' + (m.knowledgeHitRate || 0) + '%', 'white'));
+  console.log(c('    提供商失败率: ' + (m.providerFailureRate || 0) + '%', 'white'));
+  console.log(c('    修复成功率: ' + (m.repairSuccessRate || 0) + '%', 'white'));
+  
+  await waitEnter();
+}
+
+async function triggerAnalysisMenu() {
+  console.log();
+  console.log(c('  🔍 触发AI分析', 'cyan'));
+  console.log(c('  分析焦点:', 'white'));
+  console.log(c('    1) 通用分析', 'white'));
+  console.log(c('    2) 优化质量', 'white'));
+  console.log(c('    3) 系统稳定性', 'white'));
+  console.log(c('    4) 性能分析', 'white'));
+  console.log(c('    5) 知识库分析', 'white'));
+  console.log(c('    6) 提供商可靠性', 'white'));
+  console.log();
+  
+  const choice = await ask('  请选择分析焦点: ');
+  const focusMap = {
+    '1': 'general',
+    '2': 'optimization_quality',
+    '3': 'system_stability',
+    '4': 'performance',
+    '5': 'knowledge_base',
+    '6': 'provider_reliability'
+  };
+  
+  const focus = focusMap[choice] || 'general';
+  console.log(c('  正在执行AI分析...', 'cyan'));
+  
+  try {
+    const result = await agent.triggerAIAnalysis(focus);
+    if (result.success) {
+      console.log(c('  ✓ AI分析完成', 'green'));
+      console.log(c('  摘要: ' + result.analysis.summary, 'white'));
+      if (result.analysis.issues && result.analysis.issues.length > 0) {
+        console.log(c('  发现问题:', 'yellow'));
+        result.analysis.issues.forEach((issue, i) => {
+          console.log(c('    ' + (i + 1) + '. [' + issue.severity + '] ' + issue.description, 'yellow'));
+        });
+      }
+      if (result.analysis.suggestions && result.analysis.suggestions.length > 0) {
+        console.log(c('  改进建议:', 'green'));
+        result.analysis.suggestions.forEach((s, i) => {
+          console.log(c('    ' + (i + 1) + '. [' + s.priority + '] ' + s.title, 'green'));
+        });
+      }
+    } else {
+      console.log(c('  ✗ AI分析失败: ' + result.error, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 执行失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
+}
+
+async function rulesMenu() {
+  while (true) {
+    console.log();
+    console.log(c('  📋 规则管理', 'cyan'));
+    const rules = agent.getRules();
+    console.log(c('  共 ' + rules.length + ' 条规则:', 'white'));
+    console.log();
+    
+    rules.forEach((rule, i) => {
+      const enabledText = rule.enabled !== false ? c('✓', 'green') : c('✗', 'red');
+      console.log(c('    ' + (i + 1) + '. ' + enabledText + ' [' + rule.priority + '] ' + rule.name, 'white'));
+      console.log(c('       ID: ' + rule.id, 'dim'));
+      console.log(c('       动作: ' + rule.action, 'dim'));
+    });
+    
+    console.log();
+    console.log(c('  操作: 1=查看历史 2=禁用规则 0=返回', 'dim'));
+    const choice = await ask('  请选择: ');
+    
+    if (choice === '0' || choice.toLowerCase() === 'q') break;
+    
+    if (choice === '1') {
+      const history = agent.getRuleHistory();
+      console.log(c('  规则执行历史 (最近10次):', 'cyan'));
+      const recent = history.slice(-10).reverse();
+      recent.forEach(h => {
+        const color = h.success ? 'green' : 'red';
+        const time = new Date(h.timestamp).toLocaleTimeString();
+        console.log(c('    ' + time + ' ' + h.ruleName + ' -> ' + (h.success ? '成功' : '失败'), color));
+      });
+      await waitEnter();
+    } else if (choice === '2') {
+      const ruleId = await ask('  输入要禁用的规则ID: ');
+      if (agent.removeRule(ruleId)) {
+        console.log(c('  ✓ 规则已禁用', 'green'));
+      } else {
+        console.log(c('  ✗ 规则不存在', 'red'));
+      }
+      await waitEnter();
+    }
+  }
+}
+
+async function showTelemetry() {
+  console.log();
+  console.log(c('  📈 遥测数据', 'cyan'));
+  console.log(c('  ─────────────────────────────────────────', 'dim'));
+  
+  const data = agent.getTelemetry();
+  
+  console.log(c('  系统信息:', 'cyan'));
+  console.log(c('    平台: ' + data.system.platform, 'white'));
+  console.log(c('    架构: ' + data.system.arch, 'white'));
+  console.log(c('    CPU核心: ' + data.system.cpuCount, 'white'));
+  console.log(c('    Node版本: ' + data.system.nodeVersion, 'white'));
+  console.log();
+  
+  console.log(c('  运行指标:', 'cyan'));
+  const m = data.metrics;
+  console.log(c('    运行时间: ' + Math.floor(data.uptime / 60000) + '分钟', 'white'));
+  console.log(c('    优化请求: ' + m.optimizationRequests, 'white'));
+  console.log(c('    优化成功: ' + m.optimizationSuccesses, 'white'));
+  console.log(c('    优化失败: ' + m.optimizationFailures, 'white'));
+  console.log(c('    优化成功率: ' + (m.optimizationSuccessRate || 0) + '%', 'white'));
+  console.log(c('    知识查询: ' + m.knowledgeQueries, 'white'));
+  console.log(c('    知识命中: ' + m.knowledgeHits, 'white'));
+  console.log(c('    知识命中率: ' + (m.knowledgeHitRate || 0) + '%', 'white'));
+  console.log(c('    提供商调用: ' + m.providerCalls, 'white'));
+  console.log(c('    提供商失败: ' + m.providerFailures, 'white'));
+  console.log(c('    修复尝试: ' + m.repairAttempts, 'white'));
+  console.log(c('    修复成功: ' + m.repairSuccesses, 'white'));
+  console.log(c('    更新尝试: ' + m.updateAttempts, 'white'));
+  console.log(c('    更新成功: ' + m.updateSuccesses, 'white'));
+  
+  await waitEnter();
+}
+
+async function showValidationStats() {
+  console.log();
+  console.log(c('  ✅ 验证统计', 'cyan'));
+  console.log(c('  ─────────────────────────────────────────', 'dim'));
+  
+  const stats = await agent.getValidationStats();
+  console.log(c('    验证总数: ' + stats.total, 'white'));
+  console.log(c('    成功数量: ' + stats.successful, 'white'));
+  console.log(c('    成功率: ' + stats.successRate + '%', 'white'));
+  console.log(c('    平均改进分数: ' + (stats.avgImprovement || 0).toFixed(2), 'white'));
+  
+  await waitEnter();
+}
+
 async function showHelp() {
   clearScreen();
   printBanner();
@@ -3543,6 +3794,9 @@ async function startCLI() {
         break;
       case 'health':
         await healthCheckMenu();
+        break;
+      case 'sustain':
+        await sustainMenu();
         break;
       case 'help':
         await showHelp();
