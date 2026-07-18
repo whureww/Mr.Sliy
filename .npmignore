@@ -9,7 +9,7 @@ temp/
 dist/
 coverage/
 database/*.db
-data/*.db
+data/
 wasm/
 backups/
 publish_temp/
