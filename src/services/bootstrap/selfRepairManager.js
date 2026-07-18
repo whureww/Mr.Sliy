@@ -427,7 +427,8 @@ class SelfRepairManager {
     try {
       switch (strategy) {
         case 'restart_service':
-          process.exit(0);
+          logger.warn('运行时错误修复: 需要重启服务');
+          return { success: false, error: '重启服务需要用户手动执行', requiresManualAction: true };
         case 'clear_cache': {
           const { providerManager } = require('../llm/providers');
           providerManager.providers.forEach(p => {

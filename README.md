@@ -254,9 +254,43 @@ src/
 2. MySQL 查询失败 → 记录日志并使用 SQLite
 3. MySQL 表初始化失败 → 使用 SQLite
 
-## 📝 更新日志
+### v2.9.2
+> 更新日期: 2026-07-18
 
-### v2.8.0
+- **🐛 规则引擎启动保护**：添加5分钟启动保护期，避免启动时因指标为0误触发更新；为所有指标规则添加最小样本数限制（优化成功率需10次请求、知识库命中率需20次查询、提供商失败率需5次调用），确保只有真正出现问题才触发自更新或自修复
+- **🐛 MySQL缺失表修复**：在 `mysql.js` 的 `initDatabase()` 中添加 `self_update_history`、`self_repair_history`、`confirmation_history` 表创建逻辑，以及缺失字段的 `ALTER TABLE` 语句，修复"更新记录失败: no such column: version_after"错误
+- **🐛 README更新修复**：修改 `updateReadme()` 函数的匹配逻辑，从匹配"## 📝 更新日志"标题改为直接匹配"### v[\d.]+"版本号格式，确保README更新正常工作
+- **🐛 process.stdout.flush错误修复**：在 `ask()` 和 `handleAIChat()` 函数中添加 `typeof process.stdout.flush === 'function'` 检查，避免在不支持该方法的终端环境下报错
+- **🐛 自修复重启策略修复**：修改 `repairRuntime` 的 `restart_service` 策略，不再直接调用 `process.exit(0)`，改为提示用户手动重启；在 `autoRepairHandler` 中添加无害运行时错误过滤（如 `process.stdout.flush is not a function`），避免小错误触发自动修复和智能体关闭
+- **🔧 验证器增强**：添加 `validateCycle()` 方法，为 cycle 类型验证提供更合适的验证策略（检查错误数量是否增加、系统是否稳定）
+- **🔧 规则自动升级**：启动时自动为数据库中已存在的旧规则添加 `minSamples` 参数
+
+### v2.9.1
+> 更新日期: 2026-07-18
+
+- **知识库更新**: AI生成的更新
+- 更新内容: {
+  "action": "expand",
+  "count": 500,
+  "topics": [
+    "健康检查",
+    "sustain cycle",
+    "常见问题诊断",...
+
+### v2.9.0
+> 更新日期: 2026-07-18
+
+- **知识库更新**: AI生成的更新
+- 更新内容: {
+  "action": "expand",
+  "count": 1000,
+  "topics": [
+    "常见问题解答",
+    "技术文档",
+    "最佳实践",
+    "用户...
+
+### v2.8.1
 > 更新日期: 2026-07-18
 
 - **🚀 AI自持引擎**：实现完整的AI自持闭环系统，支持自主监控、分析、决策、执行和验证

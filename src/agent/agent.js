@@ -1575,6 +1575,20 @@ async function autoRepairHandler(error) {
       logger.debug('代码分析问题，不触发自动修复:', error.message);
       return;
     }
+
+    const harmlessErrors = [
+      'process.stdout.flush is not a function',
+      'process.stderr.flush is not a function',
+      'stdout.flush is not a function',
+      'stderr.flush is not a function',
+      'Cannot read properties of undefined',
+      'Cannot read properties of null'
+    ];
+    
+    if (harmlessErrors.some(h => error.message.includes(h))) {
+      logger.debug('无害的运行时错误，不触发自动修复:', error.message);
+      return;
+    }
   }
 
   logger.warn(`检测到系统错误 [${errorType}]: ${error.message}`);
