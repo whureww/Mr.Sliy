@@ -233,7 +233,7 @@ class SystemMonitor {
         name: 'providers',
         status: 'warning',
         message: '未配置活跃的LLM提供商',
-        details: { activeProvider: null, availableProviders: providerManager.getProviders().length }
+        details: { activeProvider: null, availableProviders: providerManager.getAvailableProviders().length }
       };
     }
 

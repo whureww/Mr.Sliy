@@ -254,6 +254,11 @@ src/
 
 ## 📝 更新日志
 
+### v2.9.7
+> 更新日期: 2026-07-19
+
+- **🐛 providerManager.getProviders修复**：修复 `systemMonitor.js` 和 `ruleEngine.js` 中调用不存在的 `getProviders()` 方法，改为正确的 `getAvailableProviders()` 方法，解决全局安装后启动报错问题
+
 ### v2.9.6
 > 更新日期: 2026-07-19
 
