@@ -26,6 +26,8 @@ const colors = {
   cyan: '\x1b[36m',
   white: '\x1b[37m',
   gray: '\x1b[90m',
+  'bright cyan': '\x1b[96m',
+  'bright magenta': '\x1b[95m',
   bgGreen: '\x1b[42m',
   bgYellow: '\x1b[43m'
 };
@@ -312,84 +314,17 @@ async function showMenu() {
 
     function render() {
       clearScreen();
-      const pkg = require('../../package.json');
-      const version = pkg.version || '1.0.0';
+      printBanner();
+      printStatusBar();
+      printMenu();
 
       process.stdout.write('\n');
-      const outerWidth = 68;
-      const innerFrameWidth = outerWidth - 6;
-      const innerContentWidth = innerFrameWidth - 6;
-
-      const topBorder = c('╔', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╗', 'cyan');
-      const innerTop = c('║', 'cyan') + c('  ╭', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╮  ', 'cyan') + c('║', 'cyan');
-      const innerBottom = c('║', 'cyan') + c('  ╰', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╯  ', 'cyan') + c('║', 'cyan');
-      const middleBorder = c('╠', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╣', 'cyan');
-      const bottomBorder = c('╚', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╝', 'cyan');
-
-      const titleLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
-        padEndDisplay(c('Mr.Sliy', 'bright cyan') + c('  -  多语言代码优化智能体', 'white'), innerContentWidth) + 
-        c('  │  ', 'cyan') + c('║', 'cyan');
-
-      const versionLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
-        padEndDisplay(c('v' + version, 'dim') + c('  │  基于 Tree-sitter + RAG 的智能检测优化', 'gray'), innerContentWidth) + 
-        c('  │  ', 'cyan') + c('║', 'cyan');
-
-      const modeLine1 = c('║', 'cyan') + c('  ', 'cyan') + 
-        padEndDisplay(c('🟢 离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white'), outerWidth - 6) + 
-        c('  ', 'cyan') + c('║', 'cyan');
-
-      const modeLine2 = c('║', 'cyan') + c('  ', 'cyan') + 
-        padEndDisplay(c('🔵 在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white'), outerWidth - 6) + 
-        c('  ', 'cyan') + c('║', 'cyan');
-
-      const modeLine3 = c('║', 'cyan') + c('  ', 'cyan') + 
-        padEndDisplay(c('⚡ 自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'), outerWidth - 6) + 
-        c('  ', 'cyan') + c('║', 'cyan');
-
-      process.stdout.write(topBorder + '\n');
-      process.stdout.write(innerTop + '\n');
-      process.stdout.write(titleLine + '\n');
-      process.stdout.write(versionLine + '\n');
-      process.stdout.write(innerBottom + '\n');
-      process.stdout.write(middleBorder + '\n');
-      process.stdout.write(modeLine1 + '\n');
-      process.stdout.write(modeLine2 + '\n');
-      process.stdout.write(modeLine3 + '\n');
-      process.stdout.write(bottomBorder + '\n');
-      process.stdout.write('\n');
-
-      const status = agent.getStatus();
-      const mode = status.engine.actualMode;
-      const modeLabel = mode === 'online' ? 'ONLINE' : mode === 'offline' ? 'OFFLINE' : 'AUTO';
-      const providers = status.engine.providers.filter(p => p.available).length;
-      const kb = status.engine.knowledgeBase;
-      
-      let statusLine = '';
-      statusLine += c('  状态', 'dim') + ': ' + c(status.state, 'green') + '  ';
-      statusLine += c('模式', 'dim') + ': ' + c(modeLabel, 'white') + '  ';
-      statusLine += c('提供商', 'dim') + ': ' + c(providers, 'cyan') + '  ';
-      statusLine += c('知识库', 'dim') + ': ' + c(kb.totalEntries + '条', 'magenta');
-      process.stdout.write(statusLine + '\n');
-      process.stdout.write(c('─'.repeat(70), 'dim') + '\n');
-
-      process.stdout.write('\n');
-      process.stdout.write(c(' 📋  可用命令', 'bright cyan') + '\n');
-      process.stdout.write(c('─'.repeat(70), 'dim') + '\n');
-      
-      MENU_ITEMS.forEach(item => {
-        process.stdout.write('    ' + c(item.command, 'cyan') + c('  - ', 'white') + c(item.desc, 'gray') + '\n');
-      });
-      
-      process.stdout.write(c('─'.repeat(70), 'dim') + '\n');
-
-      process.stdout.write('\n');
-      process.stdout.write(c('─'.repeat(70), 'dim') + '\n');
 
       const input = menuState.input || '';
       const filtered = getFilteredCommands(input);
 
       if (input.startsWith('/') && filtered.length > 0) {
-        process.stdout.write(c('  📋 匹配命令:', 'cyan') + '\n');
+        process.stdout.write(c('  (✧∇✧)╯ 匹配命令:', 'cyan') + '\n');
 
         const maxDisplay = 5;
         const start = Math.max(0, Math.min(menuState.selectedIndex - Math.floor(maxDisplay / 2), filtered.length - maxDisplay));
@@ -408,16 +343,16 @@ async function showMenu() {
           process.stdout.write(c('    ... 共 ' + filtered.length + ' 条匹配', 'dim') + '\n');
         }
       } else if (input && !input.startsWith('/')) {
-        process.stdout.write(c('  💭 按 Enter 发送消息与AI聊天', 'gray') + '\n');
+        process.stdout.write(c("  (´･ω･`) 按 Enter 发送消息与AI聊天", 'gray') + '\n');
       } else {
         process.stdout.write(c('  输入 /command 执行功能，直接输入文字与AI聊天', 'gray') + '\n');
         process.stdout.write(c('  ↑↓ 选择命令  Enter 确认  Esc 取消', 'gray') + '\n');
       }
 
-      process.stdout.write(c('─'.repeat(70), 'dim') + '\n');
+      process.stdout.write(c('  ' + '─'.repeat(66), 'dim') + '\n');
       process.stdout.write('\n');
       
-      const promptLine = c(' 💬 ', 'green') + c('输入命令或与AI聊天: ', 'white') + input;
+      const promptLine = c(' (◕ᴗ◕✿) ', 'magenta') + c('输入命令或与AI聊天: ', 'white') + input;
       process.stdout.write(promptLine);
     }
 
@@ -573,13 +508,13 @@ function printChatPrompt() {
 async function chatWithAI() {
   clearScreen();
   printBanner();
-  console.log(c(' 💬 AI代码助手', 'bright cyan'));
+  console.log(c('  (◕ᴗ◕✿)  AI代码助手', 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，空行发送消息', 'dim'));
   console.log(c('  仅限代码相关内容，AI可帮您调用智能体功能', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
   console.log();
   
-  const firstMessage = await ask(c(' 💭 您: ', 'white'));
+  const firstMessage = await ask(c("  (´･ω･`) 您: ", 'white'));
   if (firstMessage === '__CANCEL__' || firstMessage.toLowerCase() === 'q' || firstMessage.toLowerCase() === 'quit') {
     return;
   }
@@ -594,9 +529,10 @@ function ask(prompt) {
   return new Promise((resolve) => {
     inputState.mode = 'input';
     inputState.inputBuffer = '';
-    inputState.promptText = prompt;
+    const kaomoji = '(◕ᴗ◕✿) ';
+    inputState.promptText = kaomoji + prompt;
     inputState.inputResolve = resolve;
-    process.stdout.write(c(prompt, 'white'));
+    process.stdout.write(c(kaomoji, 'magenta') + c(prompt, 'white'));
     if (typeof process.stdout.flush === 'function') {
       process.stdout.flush();
     }
@@ -616,51 +552,29 @@ function printBanner() {
   const pkg = require('../../package.json');
   const version = pkg.version || '1.0.0';
 
-  const outerWidth = 68;
-  const innerFrameWidth = outerWidth - 6;
-  const innerContentWidth = innerFrameWidth - 6;
-
-  const topBorder = c('╔', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╗', 'cyan');
-  const innerTop = c('║', 'cyan') + c('  ╭', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╮  ', 'cyan') + c('║', 'cyan');
-  const innerBottom = c('║', 'cyan') + c('  ╰', 'cyan') + c('─'.repeat(innerFrameWidth - 2), 'cyan') + c('╯  ', 'cyan') + c('║', 'cyan');
-  const middleBorder = c('╠', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╣', 'cyan');
-  const bottomBorder = c('╚', 'cyan') + c('═'.repeat(outerWidth - 2), 'cyan') + c('╝', 'cyan');
-
-  const titleLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
-    padEndDisplay(c('Mr.Sliy', 'bright cyan') + c('  -  多语言代码优化智能体', 'white'), innerContentWidth) + 
-    c('  │  ', 'cyan') + c('║', 'cyan');
-
-  const versionLine = c('║', 'cyan') + c('  │  ', 'cyan') + 
-    padEndDisplay(c('v' + version, 'dim') + c('  │  基于 Tree-sitter + RAG 的智能检测优化', 'gray'), innerContentWidth) + 
-    c('  │  ', 'cyan') + c('║', 'cyan');
-
-  const modeLine1 = c('║', 'cyan') + c('  ', 'cyan') + 
-    padEndDisplay(c('🟢 离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white'), outerWidth - 6) + 
-    c('  ', 'cyan') + c('║', 'cyan');
-
-  const modeLine2 = c('║', 'cyan') + c('  ', 'cyan') + 
-    padEndDisplay(c('🔵 在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white'), outerWidth - 6) + 
-    c('  ', 'cyan') + c('║', 'cyan');
-
-  const modeLine3 = c('║', 'cyan') + c('  ', 'cyan') + 
-    padEndDisplay(c('⚡ 自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'), outerWidth - 6) + 
-    c('  ', 'cyan') + c('║', 'cyan');
-
-  const lines = [
-    '',
-    topBorder,
-    innerTop,
-    titleLine,
-    versionLine,
-    innerBottom,
-    middleBorder,
-    modeLine1,
-    modeLine2,
-    modeLine3,
-    bottomBorder,
-    ''
+  // 像素艺术大标题 "MRSLIY"
+  const asciiArt = [
+    ' M   M RRRR      SSSS L     IIIII Y   Y ',
+    ' MM MM R   R    S     L       I    Y Y  ',
+    ' M M M RRRR      SSS  L       I     Y   ',
+    ' M   M R  R         S L       I     Y   ',
+    ' M   M R   R    SSSS  LLLLL IIIII   Y   '
   ];
-  lines.forEach(l => console.log(l));
+
+  console.log();
+  asciiArt.forEach(line => {
+    console.log(c(line, 'bright cyan'));
+  });
+
+  console.log();
+  console.log(c('  ~ 多语言代码优化智能体 ~', 'white'));
+  console.log(c('  v' + version, 'dim') + c('  ·  基于 Tree-sitter + RAG 的智能检测优化', 'gray'));
+  console.log();
+
+  console.log(c('  (´･ω･`) ', 'magenta') + c('离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white'));
+  console.log(c('  (≧∀≦)  ', 'magenta') + c('在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white'));
+  console.log(c('  (っ'-')╮  ', 'magenta') + c('自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'));
+  console.log();
 }
 
 function printStatusBar() {
@@ -669,27 +583,28 @@ function printStatusBar() {
   const modeLabel = mode === 'online' ? 'ONLINE' : mode === 'offline' ? 'OFFLINE' : 'AUTO';
   const providers = status.engine.providers.filter(p => p.available).length;
   const kb = status.engine.knowledgeBase;
-  
+
   let t = '';
-  t += c('  状态', 'dim') + ': ' + c(status.state, 'green') + '  ';
-  t += c('模式', 'dim') + ': ' + c(modeLabel, 'white') + '  ';
-  t += c('提供商', 'dim') + ': ' + c(providers, 'cyan') + '  ';
+  t += c('  (๑•̀ㅂ•́)و✧  ', 'magenta');
+  t += c('状态', 'dim') + ': ' + c(status.state, 'green') + '    ';
+  t += c('模式', 'dim') + ': ' + c(modeLabel, 'white') + '    ';
+  t += c('提供商', 'dim') + ': ' + c(providers, 'cyan') + '    ';
   t += c('知识库', 'dim') + ': ' + c(kb.totalEntries + '条', 'magenta');
-  
+
   console.log(t);
-  console.log(c('─'.repeat(70), 'dim'));
+  console.log(c('  ' + '─'.repeat(66), 'dim'));
 }
 
 function printMenu() {
   console.log();
-  console.log(c(' 📋  可用命令', 'bright cyan'));
-  console.log(c('─'.repeat(70), 'dim'));
-  
+  console.log(c('  (✧∇✧)╯  可用命令', 'bright cyan'));
+  console.log(c('  ' + '─'.repeat(66), 'dim'));
+
   MENU_ITEMS.forEach(item => {
     console.log('    ' + c(item.command, 'cyan') + c('  - ', 'white') + c(item.desc, 'gray'));
   });
-  
-  console.log(c('─'.repeat(70), 'dim'));
+
+  console.log(c('  ' + '─'.repeat(66), 'dim'));
 }
 
 async function handleAIChat(initialMessage) {
@@ -744,12 +659,12 @@ async function handleAIChat(initialMessage) {
       progressBar.stopAnimation();
 
       process.stdout.write('\n');
-      console.log(c(' 🤖 AI:', 'green'));
+      console.log(c(' (◕ᴗ◕✿) AI:', 'magenta'));
       console.log(c('    ' + result.content.replace(/\n/g, '\n    '), 'white'));
 
       if (result.toolCalls && result.toolCalls.length > 0) {
         console.log();
-        console.log(c('  🔧 已调用工具:', 'cyan'));
+        console.log(c("  (◕ᴗ◕✿) 已调用工具:", 'cyan'));
         result.toolCalls.forEach((call, i) => {
           console.log(c(`    ${i + 1}. ${call.function}`, 'white'));
           if (call.params && Object.keys(call.params).length > 0) {
@@ -768,7 +683,7 @@ async function handleAIChat(initialMessage) {
       if (typeof process.stdout.flush === 'function') {
         process.stdout.flush();
       }
-      const nextInput = await ask(c(' 💬 ', 'green') + c('继续对话或输入 q 返回: ', 'white'));
+      const nextInput = await ask(c('(◕ᴗ◕✿) ', 'magenta') + c('继续对话或输入 q 返回: ', 'white'));
       
       if (nextInput === '__CANCEL__' || nextInput.toLowerCase() === 'q' || nextInput.toLowerCase() === 'quit' || !nextInput.trim()) {
         agent.clearChatHistory();
@@ -850,12 +765,12 @@ async function executeFunctionCall(call) {
       }
       break;
     default:
-      console.log(c('    ⚠️ 未知功能: ' + call.function, 'yellow'));
+      console.log(c("    (´･ω･`) 未知功能: " + call.function, 'yellow'));
   }
 }
 
 async function optimizeCodeWithCode(code) {
-  console.log(c('  ✨ 代码优化结果', 'bright cyan'));
+  console.log(c('  (◕ᴗ◕✿) 代码优化结果', 'bright cyan'));
   console.log(c('─'.repeat(70), 'dim'));
   console.log();
 
@@ -899,7 +814,7 @@ async function optimizeCodeWithCode(code) {
 }
 
 async function searchKnowledge(query) {
-  console.log(c('  📚 知识库搜索结果', 'bright cyan'));
+  console.log(c('  (≧∀≦) 知识库搜索结果', 'bright cyan'));
   console.log(c('─'.repeat(70), 'dim'));
   console.log();
 
@@ -932,7 +847,7 @@ function reprintMenu() {
 async function analyzeFile() {
   clearScreen();
   printBanner();
-  console.log(c(' 🔍 文件分析', 'bright cyan'));
+  console.log(c(' (✧ω✧) 文件分析', 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，Esc 取消', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
   
@@ -1023,7 +938,7 @@ async function analyzeFile() {
         if (issue.optimization && issue.optimization.success) {
           const expl = (issue.optimization.explanation || '').substring(0, 80).replace(/参考知识[\s\S]*$/, '').trim();
           const mode = issue.optimization.mode === 'online' ? '🔵 大模型' : '🟢 本地';
-          if (expl) console.log(c('     💡 [' + mode + '] ' + expl, 'green'));
+          if (expl) console.log(c("     (´･ω･`) [" + mode + "] " + expl, 'green'));
         }
       });
       
@@ -1046,7 +961,7 @@ async function analyzeFile() {
 async function scanProject() {
   clearScreen();
   printBanner();
-  console.log(c(' 📁 项目扫描', 'bright cyan'));
+  console.log(c('  (✧ω✧)  项目扫描', 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，Esc 取消', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
   
@@ -1151,7 +1066,7 @@ async function scanProject() {
 async function optimizeCode() {
   clearScreen();
   printBanner();
-  console.log(c(' ✨ 交互式代码优化', 'bright cyan'));
+  console.log(c('  (◕ᴗ◕✿)  交互式代码优化', 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，空行结束输入', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
   console.log(c('  请输入代码片段（空行结束输入）:', 'white'));
@@ -1281,7 +1196,7 @@ async function providerMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c(' 🌐 大模型提供商管理', 'bright cyan'));
+    console.log(c("  (´･ω･`)  大模型提供商管理", 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -1393,7 +1308,7 @@ async function knowledgeMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c(' 📚 知识库管理', 'bright cyan'));
+    console.log(c('  (≧∀≦)  知识库管理', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -1465,7 +1380,7 @@ async function exportKnowledge() {
   try {
     console.log(c('  正在导出知识库...', 'cyan'));
     const result = agent.exportKnowledge(filePath || undefined);
-    console.log(c('  ✅ 导出成功！', 'green'));
+    console.log(c('  (◕ᴗ◕✿) 导出成功！', 'green'));
     console.log(c('    知识条目: ' + result.entryCount + ' 条', 'white'));
     console.log(c('    优化案例: ' + result.caseCount + ' 个', 'white'));
   } catch (error) {
@@ -1478,7 +1393,7 @@ async function exportKnowledge() {
 async function cloudSyncMenu() {
   while (true) {
     console.log();
-    console.log(c('  ☁️  云端同步', 'bright cyan'));
+    console.log(c("  (っ'-')╮  云端同步", 'bright cyan'));
     console.log(c('  输入 q 返回上一级', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -1535,7 +1450,7 @@ async function testCloudConnection() {
   try {
     const result = await agent.testCloudConnection();
     if (result.success) {
-      console.log(c('  ✅ ' + result.message, 'green'));
+      console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
     } else {
       console.log(c('  ✗ 连接失败: ' + result.message, 'red'));
       console.log(c('  提示: 请确保 MySQL 服务器已启动并开放 3306 端口', 'yellow'));
@@ -1587,7 +1502,7 @@ async function uploadToCloud() {
   try {
     const result = await agent.syncKnowledgeToCloud(mode);
     if (result.success) {
-      console.log(c('  ✅ ' + result.message, 'green'));
+      console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
       if (result.updatedEntries > 0 || result.updatedCases > 0) {
         console.log(c(`  📝 更新: ${result.updatedEntries} 条知识, ${result.updatedCases} 个案例`, 'yellow'));
       }
@@ -1617,7 +1532,7 @@ async function downloadFromCloud() {
   try {
     const result = await agent.syncKnowledgeFromCloud();
     if (result.success) {
-      console.log(c('  ✅ ' + result.message, 'green'));
+      console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
     } else {
       console.log(c('  ✗ 同步失败: ' + result.message, 'red'));
     }
@@ -1631,7 +1546,7 @@ async function downloadFromCloud() {
 async function manageDatabaseConnections() {
   while (true) {
     console.log();
-    console.log(c('  🗄️  数据库连接管理', 'bright cyan'));
+    console.log(c('  (๑•̀ㅂ•́)و✧  数据库连接管理', 'bright cyan'));
     console.log(c('  输入 q 返回上一级', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -1766,7 +1681,7 @@ async function addDatabaseConnection() {
   
   console.log();
   if (result.success) {
-    console.log(c('  ✅ ' + result.message, 'green'));
+    console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
     
     const confirmTest = await ask('  是否测试连接？(y/N): ');
     if (confirmTest === '__CANCEL__') {
@@ -1782,7 +1697,7 @@ async function addDatabaseConnection() {
           const testResult = await mysql.testConnectionWithConfig(conn);
           console.log();
           if (testResult.success) {
-            console.log(c('  ✅ ' + testResult.message, 'green'));
+            console.log(c('  (◕ᴗ◕✿) ' + testResult.message, 'green'));
           } else {
             console.log(c('  ✗ 测试连接失败: ' + testResult.message, 'red'));
           }
@@ -1875,7 +1790,7 @@ async function editDatabaseConnection() {
   
   console.log();
   if (result.success) {
-    console.log(c('  ✅ ' + result.message, 'green'));
+    console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
   } else {
     console.log(c('  ✗ ' + result.message, 'red'));
   }
@@ -1932,7 +1847,7 @@ async function deleteDatabaseConnection() {
   
   console.log();
   if (result.success) {
-    console.log(c('  ✅ ' + result.message, 'green'));
+    console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
   } else {
     console.log(c('  ✗ ' + result.message, 'red'));
   }
@@ -1978,7 +1893,7 @@ async function switchDefaultConnection() {
   
   console.log();
   if (result.success) {
-    console.log(c('  ✅ ' + result.message, 'green'));
+    console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
     
     const confirmTest = await ask('  是否测试新的默认连接？(y/N): ');
     if (confirmTest === '__CANCEL__') {
@@ -2035,7 +1950,7 @@ async function testSpecificConnection() {
     
     console.log();
     if (result.success) {
-      console.log(c('  ✅ ' + result.message, 'green'));
+      console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
     } else {
       console.log(c('  ✗ 连接失败: ' + result.message, 'red'));
       console.log(c('  提示: 请确保 MySQL 服务器已启动并开放对应端口', 'yellow'));
@@ -2267,7 +2182,7 @@ async function addKnowledge() {
 async function showKnowledgeStats() {
   const stats = agent.getStatus().engine.knowledgeBase;
   console.log();
-  console.log(c('  📊 知识库统计', 'cyan'));
+  console.log(c('  (๑•̀ㅂ•́)و✧ 知识库统计', 'cyan'));
   console.log(c('  总条目: ' + stats.totalEntries, 'white'));
   console.log(c('  总案例: ' + stats.totalCases, 'white'));
   
@@ -2291,19 +2206,19 @@ async function showKnowledgeStats() {
 
 async function checkDuplicateEntries() {
   console.log();
-  console.log(c('  🔍 检测重复知识条目', 'cyan'));
+  console.log(c('  (✧ω✧) 检测重复知识条目', 'cyan'));
   console.log(c('  ─────────────────────────────────────────', 'dim'));
   
   try {
     const result = await agent.findDuplicateEntries();
     
     if (result.entries.length === 0 && result.cases.length === 0) {
-      console.log(c('  ✅ 未发现重复条目', 'green'));
+      console.log(c('  (◕ᴗ◕✿) 未发现重复条目', 'green'));
       await waitEnter();
       return;
     }
     
-    console.log(c('  📋 发现重复条目:', 'yellow'));
+    console.log(c('  (✧∇✧)╯ 发现重复条目:', 'yellow'));
     
     if (result.entries.length > 0) {
       console.log(c(`  知识条目: ${result.entries.length} 组重复`, 'white'));
@@ -2333,7 +2248,7 @@ async function checkDuplicateEntries() {
       const removeResult = await agent.removeDuplicates();
       
       if (removeResult.success) {
-        console.log(c('  ✅ ' + removeResult.message, 'green'));
+        console.log(c('  (◕ᴗ◕✿) ' + removeResult.message, 'green'));
       } else {
         console.log(c('  ✗ 删除失败: ' + removeResult.message, 'red'));
       }
@@ -2351,7 +2266,7 @@ async function checkDuplicateEntries() {
 async function modeMenu() {
   clearScreen();
   printBanner();
-  console.log(c(' 🔄 切换工作模式', 'bright cyan'));
+  console.log(c("  (っ'-')╮  切换工作模式", 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
   
@@ -2392,7 +2307,7 @@ async function modeMenu() {
 async function showStatus() {
   clearScreen();
   printBanner();
-  console.log(c(' 📊 系统状态', 'bright cyan'));
+  console.log(c('  (๑•̀ㅂ•́)و✧  系统状态', 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
   
@@ -2458,7 +2373,7 @@ async function healthCheckMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c(' 🔍 健康检查', 'bright cyan'));
+    console.log(c('  (´･ω･`)  健康检查', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -2531,7 +2446,7 @@ async function runHealthCheck() {
     
     if (status.warnings && status.warnings.length > 0) {
       console.log();
-      console.log(c('  ⚠️ 警告:', 'yellow'));
+      console.log(c("  (´･ω･`) 警告:", 'yellow'));
       status.warnings.forEach((warning, index) => {
         console.log(c('    ' + (index + 1) + '. ' + warning, 'yellow'));
       });
@@ -2539,7 +2454,7 @@ async function runHealthCheck() {
     
     if (status.overallStatus === 'healthy') {
       console.log();
-      console.log(c('  ✅ 系统运行正常', 'green'));
+      console.log(c('  (◕ᴗ◕✿) 系统运行正常', 'green'));
     }
     
   } catch (error) {
@@ -2603,7 +2518,7 @@ async function sustainMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c(' 🚀 AI自持引擎', 'bright cyan'));
+    console.log(c('  (≧∀≦)  AI自持引擎', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -2668,7 +2583,7 @@ async function sustainMenu() {
 
 async function showSustainDashboard() {
   console.log();
-  console.log(c('  📊 AI自持引擎仪表盘', 'bright cyan'));
+  console.log(c('  (๑•̀ㅂ•́)و✧ AI自持引擎仪表盘', 'bright cyan'));
   console.log(c('  ─────────────────────────────────────────', 'dim'));
   
   const dashboard = await agent.getSustainDashboard();
@@ -2708,7 +2623,7 @@ async function showSustainDashboard() {
 
 async function triggerAnalysisMenu() {
   console.log();
-  console.log(c('  🔍 触发AI分析', 'cyan'));
+  console.log(c('  (✧ω✧) 触发AI分析', 'cyan'));
   console.log(c('  分析焦点:', 'white'));
   console.log(c('    1) 通用分析', 'white'));
   console.log(c('    2) 优化质量', 'white'));
@@ -2761,7 +2676,7 @@ async function triggerAnalysisMenu() {
 async function rulesMenu() {
   while (true) {
     console.log();
-    console.log(c('  📋 规则管理', 'cyan'));
+    console.log(c('  (✧∇✧)╯  规则管理', 'bright cyan'));
     const rules = agent.getRules();
     console.log(c('  共 ' + rules.length + ' 条规则:', 'white'));
     console.log();
@@ -2837,7 +2752,7 @@ async function showTelemetry() {
 
 async function showValidationStats() {
   console.log();
-  console.log(c('  ✅ 验证统计', 'cyan'));
+  console.log(c('  (◕ᴗ◕✿) 验证统计', 'cyan'));
   console.log(c('  ─────────────────────────────────────────', 'dim'));
   
   const stats = await agent.getValidationStats();
@@ -2852,10 +2767,10 @@ async function showValidationStats() {
 async function showHelp() {
   clearScreen();
   printBanner();
-  console.log(c(' ❓ 帮助文档', 'bright cyan'));
+  console.log(c('  (´･ω･`)  帮助文档', 'bright cyan'));
   console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
   console.log(c('─'.repeat(70), 'dim'));
-  
+
   console.log(c('  快捷键:', 'cyan'));
   console.log(c('    ↑↓        上下选择菜单项', 'white'));
   console.log(c('    Enter     执行选中的命令', 'white'));
@@ -2864,15 +2779,15 @@ async function showHelp() {
   console.log(c('    q         返回上级菜单', 'white'));
   console.log(c('    字母键    快捷键快速执行', 'white'));
   console.log();
-  
+
   console.log(c('  功能说明:', 'cyan'));
-  console.log(c('    🔍 文件分析   分析单个代码文件，检测缺陷并给出优化建议', 'white'));
-  console.log(c('    📁 项目扫描   扫描整个项目，批量分析所有代码文件', 'white'));
-  console.log(c('    ✨ 代码优化   交互式输入代码，获取优化建议', 'white'));
-  console.log(c('    🌐 提供商管理 配置云端大模型，支持多种API', 'white'));
-  console.log(c('    📚 知识库管理 搜索、导入、扩充本地RAG知识库', 'white'));
-  console.log(c('    🔄 模式切换   离线/在线/自动 三种工作模式', 'white'));
-  console.log(c('    📊 系统状态   查看系统运行状态和配置信息', 'white'));
+  console.log(c('    (✧ω✧) 文件分析   分析单个代码文件，检测缺陷并给出优化建议', 'white'));
+  console.log(c('    (✧ω✧) 项目扫描   扫描整个项目，批量分析所有代码文件', 'white'));
+  console.log(c('    (◕ᴗ◕✿) 代码优化   交互式输入代码，获取优化建议', 'white'));
+  console.log(c("    (´･ω･`) 提供商管理 配置云端大模型，支持多种API", 'white'));
+  console.log(c('    (≧∀≦) 知识库管理 搜索、导入、扩充本地RAG知识库', 'white'));
+  console.log(c("    (っ'-')╮ 模式切换   离线/在线/自动 三种工作模式", 'white'));
+  console.log(c('    (๑•̀ㅂ•́)و✧ 系统状态   查看系统运行状态和配置信息', 'white'));
   console.log();
   
   console.log(c('  工作模式:', 'cyan'));
@@ -2888,7 +2803,7 @@ async function updateMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c(' 🔄 自更新管理', 'bright cyan'));
+    console.log(c('  (✧∇✧)╯  自更新管理', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -3224,7 +3139,7 @@ async function listUpdates() {
     
     if (result.success && result.updates) {
       console.log();
-      console.log(c('  📋 更新记录', 'cyan'));
+      console.log(c('  (✧∇✧)╯ 更新记录', 'cyan'));
       console.log(c('─'.repeat(70), 'dim'));
       
       if (result.updates.length === 0) {
@@ -3359,7 +3274,7 @@ async function createBackup() {
     
     const requestPermission = async (permissionInfo) => {
       console.log();
-      console.log(c('  ⚠️ ' + permissionInfo.title, 'yellow'));
+      console.log(c("  (´･ω･`) " + permissionInfo.title, 'yellow'));
       console.log(c('    ' + permissionInfo.message, 'white'));
       
       if (permissionInfo.details) {
@@ -3479,14 +3394,14 @@ async function listBootstrapHistory() {
     
     if (result.success && result.records) {
       console.log();
-      console.log(c('  📋 更新与修复合并历史记录', 'cyan'));
+      console.log(c('  (✧∇✧)╯ 更新与修复合并历史记录', 'cyan'));
       console.log(c('─'.repeat(70), 'dim'));
       
       if (result.records.length === 0) {
         console.log(c('  暂无记录', 'yellow'));
       } else {
         result.records.forEach((record, i) => {
-          const typeLabel = record.type === 'update' ? '🔄 更新' : '🔧 修复';
+          const typeLabel = record.type === 'update' ? '(✧∇✧)╯ 更新' : '(◕ᴗ◕✿) 修复';
           const typeColor = record.type === 'update' ? 'blue' : 'magenta';
           
           let statusColor;
@@ -3543,7 +3458,7 @@ async function repairMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c(' 🔧 自修复管理', 'bright cyan'));
+    console.log(c('  (◕ᴗ◕✿)  自修复管理', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -3598,7 +3513,7 @@ async function aiRepair() {
   }
   
   console.log();
-  console.log(c('  🤖 AI正在分析错误并尝试修复...', 'cyan'));
+  console.log(c('  (◕ᴗ◕✿) AI正在分析错误并尝试修复...', 'cyan'));
   
   try {
     const result = await agent.executeTool('repair_from_ai', {
@@ -3678,7 +3593,7 @@ async function listRepairs() {
     
     if (result.success && result.repairs) {
       console.log();
-      console.log(c('  🔧 修复记录', 'cyan'));
+      console.log(c('  (◕ᴗ◕✿) 修复记录', 'cyan'));
       console.log(c('─'.repeat(70), 'dim'));
       
       if (result.repairs.length === 0) {
