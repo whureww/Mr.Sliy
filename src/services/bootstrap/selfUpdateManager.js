@@ -8,6 +8,7 @@ const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
 const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
 const { rollbackManager } = require('./rollback');
+const { notificationSystem } = require('../../utils/notificationSystem');
 
 class SelfUpdateManager {
   constructor() {
@@ -1050,12 +1051,12 @@ class SelfUpdateManager {
     const readmePath = path.join(__dirname, '../../../README.md');
     const readmeResult = updateReadme(readmePath, newVersion, changelogItems);
     if (readmeResult.success) {
-      logger.info(`README更新成功`);
+      logger.debug(`README更新成功`);
     } else {
       logger.warn(`README更新失败: ${readmeResult.error}`);
     }
 
-    logger.info(`版本迭代: ${oldVersion} -> ${newVersion}`);
+    logger.debug(`版本迭代: ${oldVersion} -> ${newVersion}`);
 
     return { oldVersion, newVersion };
   }
@@ -1067,10 +1068,20 @@ class SelfUpdateManager {
         `更新内容: ${this._getContentPreview(updateRecord.update_content)}`
       ];
       const versionResult = await this.bumpProjectVersion(changelogItems);
-      logger.info(`更新应用成功: ${updateId}，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
+      logger.debug(`更新应用成功: ${updateId}，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
 
       await this.updateUpdateRecord(updateId, {
         versionAfter: versionResult.newVersion
+      });
+
+      notificationSystem.addMessage({
+        type: 'update',
+        title: `更新完成: v${versionResult.oldVersion} -> v${versionResult.newVersion}`,
+        content: `类型: ${updateRecord.update_type}\n来源: ${updateRecord.update_source}`,
+        data: {
+          version: `${versionResult.oldVersion} -> ${versionResult.newVersion}`,
+          type: updateRecord.update_type
+        }
       });
 
       return versionResult;

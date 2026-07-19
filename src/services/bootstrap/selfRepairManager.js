@@ -7,6 +7,7 @@ const { confirmationGate } = require('./confirmationGate');
 const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
 const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
+const { notificationSystem } = require('../../utils/notificationSystem');
 
 class SelfRepairManager {
   constructor() {
@@ -608,7 +609,17 @@ class SelfRepairManager {
         `修复策略: ${strategyName}`
       ];
       const versionResult = await this.bumpProjectVersion(changelogItems);
-      logger.info(`修复成功，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
+      logger.debug(`修复成功，版本迭代: ${versionResult.oldVersion} -> ${versionResult.newVersion}`);
+
+      notificationSystem.addMessage({
+        type: 'repair',
+        title: `修复完成: v${versionResult.oldVersion} -> v${versionResult.newVersion}`,
+        content: `错误类型: ${errorType}\n修复策略: ${strategyName}`,
+        data: {
+          version: `${versionResult.oldVersion} -> ${versionResult.newVersion}`,
+          type: errorType
+        }
+      });
 
       return versionResult;
     } catch (error) {
