@@ -462,7 +462,7 @@ class RuleEngine {
   addRule(rule) {
     this.rules.set(rule.id, rule);
     this.saveRuleToDb(rule);
-    logger.info(`新增规则: ${rule.id} - ${rule.name}`);
+    logger.debug(`新增规则: ${rule.id} - ${rule.name}`);
   }
 
   removeRule(ruleId) {

@@ -97,7 +97,7 @@ class ConfirmationGate {
     await this.saveConfirmationRecord(confirmationRequest, result);
 
     if (result.confirmed) {
-      logger.info(`操作已确认: ${operationType} (步骤${stepNumber}/${totalSteps})`);
+      logger.debug(`操作已确认: ${operationType} (步骤${stepNumber}/${totalSteps})`);
     } else {
       logger.warn(`操作已拒绝: ${operationType} (步骤${stepNumber}/${totalSteps})`);
     }

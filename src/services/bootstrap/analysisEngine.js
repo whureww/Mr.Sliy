@@ -113,7 +113,7 @@ class AnalysisEngine {
         await this.processSuggestions(analysis.suggestions, focus);
       }
 
-      logger.info(`AI分析完成，生成 ${analysis.suggestions?.length || 0} 条建议`);
+      logger.debug(`AI分析完成，生成 ${analysis.suggestions?.length || 0} 条建议`);
       return { success: true, analysis };
     } catch (error) {
       logger.error(`AI分析失败: ${error.message}`);
@@ -239,7 +239,7 @@ ${JSON.stringify(data.recentEvents, null, 2)}
         if (shouldExecute && suggestion.expectedAction) {
           await this.executeSuggestion(suggestion, selfUpdateManager, ruleEngine);
         } else {
-          logger.info(`建议待确认: [${suggestion.priority}] ${suggestion.title}`);
+          logger.debug(`建议待确认: [${suggestion.priority}] ${suggestion.title}`);
         }
       } catch (error) {
         logger.error(`处理建议失败: ${error.message}`);

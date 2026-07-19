@@ -12,6 +12,7 @@ const { logger } = require('../utils/logger');
 const { ProgressBar, MultiStepProgress } = require('../utils/progress');
 const { padEndDisplay } = require('../utils/helpers');
 const mysql = require('../utils/mysql');
+const { notificationSystem } = require('../utils/notificationSystem');
 
 const colors = {
   reset: '\x1b[0m',
@@ -3650,6 +3651,79 @@ function waitEnter() {
   return ask(c('  按 Enter 或 q 返回...', 'dim'));
 }
 
+async function showNotification(message) {
+  return new Promise((resolve) => {
+    process.stdout.write('\n\n');
+    process.stdout.write(c('─'.repeat(60), 'bright magenta') + '\n');
+    
+    if (message.type === 'update') {
+      process.stdout.write(c('  (✧∇✧)╯  更新提示', 'bright cyan') + '\n');
+    } else if (message.type === 'repair') {
+      process.stdout.write(c('  (๑•̀ㅂ•́)و✧  修复提示', 'bright green') + '\n');
+    } else {
+      process.stdout.write(c('  (◕ᴗ◕✿)  系统提示', 'bright yellow') + '\n');
+    }
+    
+    process.stdout.write(c('─'.repeat(60), 'bright magenta') + '\n');
+    process.stdout.write('\n');
+    
+    if (message.title) {
+      process.stdout.write(c('  📌 ' + message.title, 'white') + '\n');
+    }
+    
+    if (message.content) {
+      const lines = message.content.split('\n');
+      lines.forEach(line => {
+        process.stdout.write(c('  ' + line, 'gray') + '\n');
+      });
+    }
+    
+    if (message.data) {
+      if (message.data.version) {
+        process.stdout.write(c('  📦 版本: ' + message.data.version, 'cyan') + '\n');
+      }
+      if (message.data.type) {
+        process.stdout.write(c('  🔧 类型: ' + message.data.type, 'cyan') + '\n');
+      }
+    }
+    
+    process.stdout.write('\n');
+    
+    if (message.type === 'update' || message.type === 'repair') {
+      process.stdout.write(c('  1) 立即执行', 'green') + '\n');
+      process.stdout.write(c('  2) 稍后处理', 'yellow') + '\n');
+      process.stdout.write(c('  0) 忽略', 'red') + '\n');
+      process.stdout.write('\n');
+      
+      const handleKey = (chunk, key) => {
+        process.stdin.removeListener('keypress', handleKey);
+        process.stdout.write('\n');
+        
+        if (chunk === '1') {
+          resolve({ confirmed: true, action: 'execute', message });
+        } else if (chunk === '2') {
+          resolve({ confirmed: false, action: 'later', message });
+        } else {
+          resolve({ confirmed: false, action: 'ignore', message });
+        }
+      };
+      
+      process.stdin.once('keypress', handleKey);
+      process.stdout.write(c('  请选择操作 (1/2/0): ', 'white'));
+    } else {
+      process.stdout.write(c('  按任意键继续...', 'dim') + '\n');
+      
+      const handleKey = () => {
+        process.stdin.removeListener('keypress', handleKey);
+        process.stdout.write('\n');
+        resolve({ confirmed: true, message });
+      };
+      
+      process.stdin.once('keypress', handleKey);
+    }
+  });
+}
+
 async function startCLI() {
   await agent.init();
   
@@ -3683,7 +3757,10 @@ async function startCLI() {
   
   initInput();
   
+  notificationSystem.start(showNotification);
+  
   while (true) {
+    notificationSystem.recordActivity();
     const choice = await showMenu();
     
     if (choice === '__BACK__') continue;

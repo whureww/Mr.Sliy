@@ -5,6 +5,7 @@ const { systemMonitor } = require('../../utils/systemMonitor');
 const { ruleEngine } = require('./ruleEngine');
 const { analysisEngine } = require('./analysisEngine');
 const { validator } = require('./validator');
+const { notificationSystem } = require('../../utils/notificationSystem');
 
 class SelfSustainEngine {
   constructor() {
@@ -160,7 +161,7 @@ class SelfSustainEngine {
     try {
       const result = await analysisEngine.runAnalysis(focus);
       if (result.success) {
-        logger.info(`AI分析完成: ${result.analysis.summary}`);
+        logger.debug(`AI分析完成: ${result.analysis.summary}`);
       }
       return result;
     } catch (error) {
