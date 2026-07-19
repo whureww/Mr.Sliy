@@ -359,7 +359,7 @@ class RuleEngine {
 
   async actionSwitchProvider(params) {
     const { providerManager } = require('../llm/providers');
-    const providers = providerManager.getProviders();
+    const providers = providerManager.getAvailableProviders();
     const activeProvider = providerManager.getActiveProvider();
 
     for (const provider of providers) {

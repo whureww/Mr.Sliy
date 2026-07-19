@@ -573,7 +573,7 @@ function printBanner() {
 
   console.log(c('  (´･ω･`) ', 'magenta') + c('离线模式: ', 'green') + c('AST检测 + 本地RAG知识库', 'white'));
   console.log(c('  (≧∀≦)  ', 'magenta') + c('在线模式: ', 'blue') + c('AST检测 + 云端大模型 + RAG增强', 'white'));
-  console.log(c('  (っ'-')╮  ', 'magenta') + c('自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'));
+  console.log(c("  (っ'-')╮  ", 'magenta') + c('自动模式: ', 'yellow') + c('智能判断，自动切换最优模式', 'white'));
   console.log();
 }
 
