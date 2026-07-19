@@ -53,7 +53,7 @@ class Validator {
 
   async validate(targetId, targetType, beforeState, afterState) {
     try {
-      logger.info(`开始验证 ${targetType}: ${targetId}`);
+      logger.debug(`开始验证 ${targetType}: ${targetId}`);
 
       const validation = {
         targetId,
@@ -96,7 +96,7 @@ class Validator {
       }
 
       if (validation.success) {
-        logger.info(`验证成功: ${targetType} (${targetId}) 改进分数: ${validation.improvementScore}`);
+        logger.debug(`验证成功: ${targetType} (${targetId}) 改进分数: ${validation.improvementScore}`);
       } else {
         logger.warn(`验证失败: ${targetType} (${targetId})`);
       }
