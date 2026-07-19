@@ -12,7 +12,9 @@ const colors = {
   bgGreen: '\x1b[42m',
   bgYellow: '\x1b[43m',
   bgBlue: '\x1b[44m',
-  bgRed: '\x1b[41m'
+  bgRed: '\x1b[41m',
+  brightCyan: '\x1b[96m',
+  brightMagenta: '\x1b[95m'
 };
 
 class ProgressBar {
@@ -29,14 +31,15 @@ class ProgressBar {
     this.showPercent = options.showPercent !== false;
     this.showCount = options.showCount !== false;
     this.showStatus = options.showStatus !== false;
-    this.color = options.color || 'green';
+    this.color = options.color || 'cyan';
     this.stream = options.stream || process.stdout;
     this._lastRender = '';
     this._lastStatus = '';
     this._animationIndex = 0;
-    this._animationChars = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    this._animationChars = ['(●' , '(◕', '(◔', '(◕', '(●'];
     this._animationTimer = null;
     this._isActive = false;
+    this._fillChars = ['░', '▒', '▓', '█'];
   }
 
   update(current, options = {}) {
@@ -99,15 +102,13 @@ class ProgressBar {
     const filledWidth = Math.round((this.width * percent) / 100);
     const emptyWidth = this.width - filledWidth;
 
-    const fillChar = '█';
-    const emptyChar = '░';
-
     let bar = '';
     for (let i = 0; i < filledWidth; i++) {
-      bar += fillChar;
+      const charIndex = Math.min(3, Math.floor((i / filledWidth) * 4));
+      bar += this._fillChars[charIndex];
     }
     for (let i = 0; i < emptyWidth; i++) {
-      bar += emptyChar;
+      bar += '░';
     }
 
     const elapsed = Date.now() - this.startTime;
@@ -120,10 +121,10 @@ class ProgressBar {
 
     if (this.description) {
       const desc = this.description.length > 20 ? this.description.substring(0, 19) + '…' : this.description;
-      line += colors.cyan + animationChar + ' ' + desc.padEnd(20) + colors.reset + ' ';
+      line += colors.brightCyan + animationChar + 'ω' + '`' + ') ' + desc.padEnd(20) + colors.reset + ' ';
     }
 
-    line += colors[this.color] + bar + colors.reset + ' ';
+    line += colors.brightMagenta + bar + colors.reset + ' ';
 
     if (this.showPercent) {
       line += colors.bright + percent.toString().padStart(3) + '%' + colors.reset + ' ';
@@ -135,11 +136,11 @@ class ProgressBar {
 
     if (this.showStatus && this.status) {
       const status = this.status.length > 25 ? this.status.substring(0, 24) + '…' : this.status;
-      line += colors.dim + '[' + status + ']' + colors.reset + ' ';
+      line += colors.dim + '(' + status + ')' + colors.reset + ' ';
     }
 
     if (this.showETA && eta > 0) {
-      line += colors.dim + 'ETA: ' + formatTime(eta) + colors.reset;
+      line += colors.dim + '⏳ ' + formatTime(eta) + colors.reset;
     }
 
     const clearPad = Math.max(0, (this._lastRender.length || 0) - line.length);

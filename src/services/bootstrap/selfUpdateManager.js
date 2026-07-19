@@ -47,7 +47,7 @@ class SelfUpdateManager {
     });
 
     eventBus.on(SYSTEM_EVENTS.SYSTEM_WARNING, async (warning) => {
-      logger.warn(`收到系统警告事件: ${warning.message}`);
+      logger.debug(`收到系统警告事件: ${warning.message}`);
       await this.handleSystemWarning(warning);
     });
 
@@ -62,7 +62,7 @@ class SelfUpdateManager {
         logger.info('知识库命中率偏低，建议扩充知识库');
         await this.suggestKnowledgeUpdate();
       } else if (warning.type === 'provider_failure') {
-        logger.info('提供商调用失败，建议检查配置或切换提供商');
+        logger.debug('提供商调用失败，建议检查配置或切换提供商');
       } else if (warning.type === 'performance_degradation') {
         logger.info('系统性能下降，建议检查资源使用情况');
       }

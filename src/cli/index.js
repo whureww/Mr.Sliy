@@ -514,7 +514,7 @@ async function chatWithAI() {
   console.log(c('─'.repeat(70), 'dim'));
   console.log();
   
-  const firstMessage = await ask(c("  (´･ω･`) 您: ", 'white'));
+  const firstMessage = await ask(c('(◕ᴗ◕✿) ', 'magenta') + c("您: ", 'white'));
   if (firstMessage === '__CANCEL__' || firstMessage.toLowerCase() === 'q' || firstMessage.toLowerCase() === 'quit') {
     return;
   }
@@ -529,10 +529,9 @@ function ask(prompt) {
   return new Promise((resolve) => {
     inputState.mode = 'input';
     inputState.inputBuffer = '';
-    const kaomoji = '(◕ᴗ◕✿) ';
-    inputState.promptText = kaomoji + prompt;
+    inputState.promptText = prompt;
     inputState.inputResolve = resolve;
-    process.stdout.write(c(kaomoji, 'magenta') + c(prompt, 'white'));
+    process.stdout.write(prompt);
     if (typeof process.stdout.flush === 'function') {
       process.stdout.flush();
     }
