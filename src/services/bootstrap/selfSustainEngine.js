@@ -47,8 +47,6 @@ class SelfSustainEngine {
     this.isRunning = true;
     logger.info('🚀 AI自持引擎已启动 - 进入自主运行模式');
 
-    this.runSustainCycle();
-
     this.sustainCycleTimer = setInterval(() => {
       this.runSustainCycle().catch(err => {
         logger.error(`自持周期执行失败: ${err.message}`);
