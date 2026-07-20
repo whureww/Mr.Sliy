@@ -230,31 +230,9 @@ class KnowledgeBase {
     const id = generateUUID();
     const vector = embedder.embed(content);
 
-    if (this.useMysql) {
-      try {
-        await mysql.execute(
-          `INSERT INTO kb_entries (id, content, content_type, language, tags, source, vector_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            content,
-            options.type || 'general',
-            options.language || null,
-            options.tags ? JSON.stringify(options.tags) : null,
-            options.source || null,
-            JSON.stringify(vector)
-          ]
-        );
-        logger.debug(`添加知识条目(MySQL): ${id}`);
-        return id;
-      } catch (e) {
-        logger.warn('MySQL写入失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    const { getSqliteDatabase } = require('../../utils/database');
-    const db = getSqliteDatabase();
+    const { getDatabase } = require('../../utils/database');
+    const db = getDatabase();
+    
     const stmt = db.prepare(`
       INSERT INTO kb_entries (id, content, content_type, language, tags, source, vector_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -268,7 +246,7 @@ class KnowledgeBase {
       options.source || null,
       JSON.stringify(vector)
     );
-    logger.debug(`添加知识条目(SQLite): ${id}`);
+    logger.debug(`添加知识条目: ${id}`);
     return id;
   }
 
@@ -278,31 +256,9 @@ class KnowledgeBase {
     const combinedText = `${originalCode} ${optimizedCode} ${explanation}`;
     const vector = embedder.embed(combinedText);
 
-    if (this.useMysql) {
-      try {
-        await mysql.execute(
-          `INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, vector_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            originalCode,
-            optimizedCode,
-            explanation,
-            options.language || null,
-            options.issueType || null,
-            JSON.stringify(vector)
-          ]
-        );
-        logger.debug(`添加优化案例(MySQL): ${id}`);
-        return id;
-      } catch (e) {
-        logger.warn('MySQL写入失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    const { getSqliteDatabase } = require('../../utils/database');
-    const db = getSqliteDatabase();
+    const { getDatabase } = require('../../utils/database');
+    const db = getDatabase();
+    
     const stmt = db.prepare(`
       INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, vector_json)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -316,7 +272,7 @@ class KnowledgeBase {
       options.issueType || null,
       JSON.stringify(vector)
     );
-    logger.debug(`添加优化案例(SQLite): ${id}`);
+    logger.debug(`添加优化案例: ${id}`);
     return id;
   }
 
@@ -785,86 +741,8 @@ class KnowledgeBase {
     let skippedEntries = 0;
     let skippedCases = 0;
 
-    if (this.useMysql) {
-      try {
-        if (!merge) {
-          await mysql.execute('DELETE FROM kb_entries');
-          await mysql.execute('DELETE FROM kb_cases');
-        }
-
-        for (const entry of data.entries || []) {
-          if (skipExisting) {
-            const existing = await mysql.query('SELECT id FROM kb_entries WHERE id = ?', [entry.id]);
-            if (existing.length > 0) {
-              skippedEntries++;
-              continue;
-            }
-          }
-          
-          const vector = entry.vector_json || JSON.stringify(embedder.embed(entry.content));
-          await mysql.execute(
-            `INSERT INTO kb_entries (id, content, content_type, language, tags, source, vector_json)
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            [
-              entry.id,
-              entry.content,
-              entry.content_type || 'general',
-              entry.language || null,
-              entry.tags ? JSON.stringify(entry.tags) : null,
-              entry.source || 'imported',
-              vector
-            ]
-          );
-          importedEntries++;
-        }
-        
-        for (const caseItem of data.cases || []) {
-          if (skipExisting) {
-            const existing = await mysql.query('SELECT id FROM kb_cases WHERE id = ?', [caseItem.id]);
-            if (existing.length > 0) {
-              skippedCases++;
-              continue;
-            }
-          }
-          
-          const combinedText = `${caseItem.original_code || ''} ${caseItem.optimized_code || ''} ${caseItem.explanation || ''}`;
-          const vector = caseItem.vector_json || JSON.stringify(embedder.embed(combinedText));
-          await mysql.execute(
-            `INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, vector_json, usage_count, rating)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [
-              caseItem.id,
-              caseItem.original_code,
-              caseItem.optimized_code,
-              caseItem.explanation || null,
-              caseItem.language || null,
-              caseItem.issue_type || null,
-              vector,
-              caseItem.usage_count || 0,
-              caseItem.rating || 0
-            ]
-          );
-          importedCases++;
-        }
-
-        await this.getStats();
-
-        return {
-          importedEntries,
-          importedCases,
-          skippedEntries,
-          skippedCases,
-          totalEntries: importedEntries + skippedEntries,
-          totalCases: importedCases + skippedCases
-        };
-      } catch (e) {
-        logger.warn('MySQL写入失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    const { getSqliteDatabase } = require('../../utils/database');
-    const db = getSqliteDatabase();
+    const { getDatabase } = require('../../utils/database');
+    const db = getDatabase();
     
     if (!merge) {
       db.prepare('DELETE FROM kb_entries').run();

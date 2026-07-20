@@ -371,7 +371,7 @@ function getDatabaseConnection(id) {
   return config.databases.connections[id] || null;
 }
 
-function setDefaultConnection(id) {
+async function setDefaultConnection(id) {
   if (!config.databases.connections[id]) {
     return { success: false, message: '连接不存在' };
   }
@@ -388,6 +388,44 @@ function setDefaultConnection(id) {
   config.mysql.connectionLimit = conn.connectionLimit;
   
   saveConnectionsToFile();
+  
+  if (conn.enabled) {
+    try {
+      const mysql = require('../utils/mysql');
+      const testResult = await mysql.testConnectionWithConfig(conn);
+      if (testResult.success) {
+        await mysql.switchConnection(conn);
+        await mysql.initDatabase();
+        
+        const { dbAdapter } = require('../utils/dbAdapter');
+        const syncResult = await dbAdapter.syncAllLocalToRemote();
+        
+        if (syncResult.success) {
+          return { 
+            success: true, 
+            message: `默认连接已切换到: ${conn.name}，数据同步完成，共 ${syncResult.totalRecords} 条记录` 
+          };
+        } else {
+          return { 
+            success: true, 
+            message: `默认连接已切换到: ${conn.name}，但数据同步失败: ${syncResult.message}` 
+          };
+        }
+      } else {
+        config.mysql.enabled = false;
+        return { 
+          success: false, 
+          message: `连接测试失败: ${testResult.message}` 
+        };
+      }
+    } catch (error) {
+      config.mysql.enabled = false;
+      return { 
+        success: false, 
+        message: `连接配置失败: ${error.message}` 
+      };
+    }
+  }
   
   return { success: true, message: '默认连接已切换到: ' + conn.name };
 }

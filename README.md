@@ -254,6 +254,23 @@ src/
 
 ## 📝 更新日志
 
+### v3.0.3
+> 更新日期: 2026-07-20
+
+- **✨ 数据库双写同步系统**：实现本地SQLite和云端MySQL的双向同步
+  - 统一适配器：新建 `dbAdapter.js`，提供完全同步的API，兼容原始SQLite操作
+  - 双写模式：写操作同时写入本地SQLite和云端MySQL（MySQL异步，不阻塞主流程）
+  - 读优先本地：读操作只从本地读取，保证响应速度
+  - 自动同步：配置云端数据库后自动触发全量同步，将本地数据上传到云端
+  - 离线支持：未配置云端时仅操作本地数据库，配置后自动启用双写
+  - 事务支持：支持事务跟踪，收集SQL操作并异步同步到MySQL
+- **✨ MySQL表结构完善**：补齐所有23张表的MySQL表结构，与SQLite完全一致
+- **✨ 配置自动同步**：修改 `setDefaultConnection()`，配置云端后自动测试连接并执行全量数据同步
+- **🐛 MySQL保留字修复**：修复 `sustain_rules` 表中 `condition` 和 `action` 字段为MySQL保留字导致的语法错误
+- **🐛 事务同步修复**：修复 `detector.js` 和 `knowledgeBase.js` 中绕过 `dbAdapter` 直接操作数据库导致的数据不同步问题
+- **🐛 TEXT主键同步修复**：修复 `adaptSqliteResultForMysql` 在TEXT/UUID主键表上无法正确获取插入行数据的问题
+- **🐛 batchExecute修复**：修复 `database.js` 中 `batchExecute` 方法绕过适配器导致的双写失效问题
+
 ### v3.0.2
 > 更新日期: 2026-07-19
 
