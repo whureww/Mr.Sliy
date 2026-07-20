@@ -1,111 +1,32 @@
 /**
  * 数据库连接模块
  * 支持 SQLite（本地）和 MySQL（云端）两种模式
+ * 使用统一适配器，实现双写同步
  */
 
-const Database = require('better-sqlite3');
-const path = require('path');
-const fs = require('fs');
-const { config } = require('../config');
+const { dbAdapter } = require('./dbAdapter');
 const { logger } = require('./logger');
-const mysql = require('./mysql');
-
-let dbInstance = null;
 
 /**
  * 获取数据库实例（单例模式）
- * 支持 SQLite 和 MySQL 两种模式
+ * 返回统一的数据库适配器，支持双写同步
  */
 function getDatabase() {
-  const mysqlEnabled = config.mysql?.enabled;
-
-  if (!mysqlEnabled) {
-    if (!dbInstance) {
-      let dbPath = config.database.path;
-
-      if (!path.isAbsolute(dbPath)) {
-        dbPath = path.resolve(path.join(__dirname, '../../', dbPath));
-      }
-
-      const dbDir = path.dirname(dbPath);
-      if (!fs.existsSync(dbDir)) {
-        fs.mkdirSync(dbDir, { recursive: true });
-      }
-
-      dbInstance = new Database(dbPath);
-
-      dbInstance.pragma('foreign_keys = ON');
-      dbInstance.pragma('journal_mode = WAL');
-
-      ensureSqliteTables();
-    }
-
-    return dbInstance;
-  }
-
-  try {
-    const pool = mysql.getPool();
-    if (pool) {
-      return pool;
-    }
-  } catch (e) {
-    logger.debug('获取MySQL连接池失败，回退到SQLite:', e.message);
-  }
-
-  if (!dbInstance) {
-    let dbPath = config.database.path;
-
-    if (!path.isAbsolute(dbPath)) {
-      dbPath = path.resolve(path.join(__dirname, '../../', dbPath));
-    }
-
-    const dbDir = path.dirname(dbPath);
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-
-    dbInstance = new Database(dbPath);
-
-    dbInstance.pragma('foreign_keys = ON');
-    dbInstance.pragma('journal_mode = WAL');
-
-    ensureSqliteTables();
-  }
-
-  return dbInstance;
+  return dbAdapter;
 }
 
 /**
  * 获取 SQLite 数据库实例（始终返回 SQLite）
  */
 function getSqliteDatabase() {
-  if (!dbInstance) {
-    let dbPath = config.database.path;
-
-    if (!path.isAbsolute(dbPath)) {
-      dbPath = path.resolve(path.join(__dirname, '../../', dbPath));
-    }
-
-    const dbDir = path.dirname(dbPath);
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-
-    dbInstance = new Database(dbPath);
-
-    dbInstance.pragma('foreign_keys = ON');
-    dbInstance.pragma('journal_mode = WAL');
-
-    ensureSqliteTables();
-  }
-
-  return dbInstance;
+  return dbAdapter.getSqlite();
 }
 
 /**
  * 获取 MySQL 连接池
  */
 async function getMySqlPool() {
+  const mysql = require('./mysql');
   const pool = mysql.getPool();
   if (!pool) {
     throw new Error('MySQL连接池未创建');
@@ -117,137 +38,63 @@ async function getMySqlPool() {
  * 判断当前是否使用 MySQL
  */
 function isUsingMySql() {
-  if (config.mysql?.enabled !== true) {
-    return false;
-  }
-  
-  try {
-    const pool = mysql.getPool();
-    return pool !== null && pool !== undefined;
-  } catch (e) {
-    return false;
-  }
+  return dbAdapter.isMysqlEnabled();
 }
 
 /**
  * 关闭数据库连接
  */
 async function closeDatabase() {
-  if (dbInstance) {
-    dbInstance.close();
-    dbInstance = null;
-  }
+  dbAdapter.close();
 }
 
 /**
  * 执行查询（返回所有结果）
  */
 async function query(sql, params = []) {
-  if (isUsingMySql()) {
-    try {
-      const pool = await getMySqlPool();
-      const [rows] = await pool.execute(sql, params);
-      return rows;
-    } catch (error) {
-      logger.debug('MySQL查询失败，回退到SQLite:', error.message);
-    }
-  }
-
-  const db = getSqliteDatabase();
-  try {
-    const stmt = db.prepare(sql);
-    return stmt.all(...params);
-  } catch (error) {
-    throw error;
-  }
+  return dbAdapter.all(sql, params);
 }
 
 /**
  * 执行查询（返回单条结果）
  */
 async function queryOne(sql, params = []) {
-  if (isUsingMySql()) {
-    try {
-      const pool = await getMySqlPool();
-      const [rows] = await pool.execute(sql, params);
-      return rows[0] || null;
-    } catch (error) {
-      logger.debug('MySQL查询失败，回退到SQLite:', error.message);
-    }
-  }
-
-  const db = getSqliteDatabase();
-  try {
-    const stmt = db.prepare(sql);
-    return stmt.get(...params);
-  } catch (error) {
-    throw error;
-  }
+  return dbAdapter.get(sql, params);
 }
 
 /**
  * 执行插入/更新/删除操作
  */
 async function execute(sql, params = []) {
-  if (isUsingMySql()) {
-    try {
-      const pool = await getMySqlPool();
-      const [result] = await pool.execute(sql, params);
-      return {
-        success: true,
-        changes: result.affectedRows,
-        lastInsertRowid: result.insertId
-      };
-    } catch (error) {
-      logger.debug('MySQL执行失败，回退到SQLite:', error.message);
-    }
-  }
-
-  const db = getSqliteDatabase();
-  try {
-    const stmt = db.prepare(sql);
-    const result = stmt.run(...params);
-    return {
-      success: true,
-      changes: result.changes,
-      lastInsertRowid: result.lastInsertRowid
-    };
-  } catch (error) {
-    throw error;
-  }
+  const result = await dbAdapter.run(sql, params);
+  return {
+    success: true,
+    changes: result.changes || 0,
+    lastInsertRowid: result.lastInsertRowid || 0
+  };
 }
 
 /**
- * 执行事务（仅 SQLite）
+ * 执行事务
  */
-function transaction(callback) {
-  if (isUsingMySql()) {
-    throw new Error('MySQL 模式不支持 transaction，请使用连接池手动事务');
-  }
-
-  const db = getSqliteDatabase();
-  const txn = db.transaction(callback);
-  return txn();
+async function transaction(callback) {
+  return dbAdapter.transaction(callback);
 }
 
 /**
- * 批量执行（仅 SQLite）
+ * 批量执行
  */
-function batchExecute(sqlArray, paramsArray) {
-  if (isUsingMySql()) {
-    throw new Error('MySQL 模式不支持 batchExecute，请使用连接池');
-  }
-
-  const db = getSqliteDatabase();
-  const stmt = db.prepare(sqlArray);
-
-  const insertMany = db.transaction((items) => {
+async function batchExecute(sql, paramsArray) {
+  const stmt = dbAdapter.prepare(sql);
+  
+  const insertMany = dbAdapter.transaction((items) => {
     for (const params of items) {
-      stmt.run(...params);
+      stmt.run(Array.isArray(params) ? params : [params]);
     }
   });
-
-  return insertMany(paramsArray);
+  
+  const result = insertMany(paramsArray);
+  return result;
 }
 
 const allTablesSqlite = [
@@ -518,6 +365,203 @@ const allTablesSqlite = [
     status VARCHAR(20) DEFAULT 'pending',
     reason VARCHAR(200),
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS api_request_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id INTEGER,
+    provider_name VARCHAR(50),
+    endpoint VARCHAR(255),
+    request_method VARCHAR(10),
+    request_headers TEXT,
+    request_body TEXT,
+    response_status INTEGER,
+    response_body TEXT,
+    response_headers TEXT,
+    tokens_used INTEGER,
+    latency_ms INTEGER,
+    error_message TEXT,
+    is_success BOOLEAN DEFAULT 1,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS code_analysis_record (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER,
+    task_id INTEGER,
+    file_path VARCHAR(500) NOT NULL,
+    file_name VARCHAR(255),
+    language VARCHAR(50),
+    file_size INTEGER,
+    line_count INTEGER,
+    complexity_score REAL,
+    maintainability_index REAL,
+    analysis_start_at DATETIME,
+    analysis_end_at DATETIME,
+    duration_ms INTEGER,
+    status VARCHAR(20) DEFAULT 'completed',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS analysis_result (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_id TEXT NOT NULL,
+    project_id INTEGER,
+    task_id INTEGER,
+    result_type VARCHAR(50) NOT NULL,
+    result_data TEXT,
+    confidence REAL DEFAULT 0,
+    source VARCHAR(100),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS notification (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER,
+    message_type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    data_json TEXT,
+    is_read BOOLEAN DEFAULT 0,
+    is_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    action VARCHAR(50),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS system_monitor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_type VARCHAR(50) NOT NULL,
+    metric_name VARCHAR(100) NOT NULL,
+    metric_value REAL NOT NULL,
+    threshold REAL,
+    is_alert BOOLEAN DEFAULT 0,
+    component VARCHAR(100),
+    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS backup_history (
+    id TEXT PRIMARY KEY,
+    backup_type VARCHAR(50) NOT NULL,
+    backup_path VARCHAR(500),
+    backup_size INTEGER,
+    backup_count INTEGER,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message TEXT,
+    started_at DATETIME,
+    completed_at DATETIME,
+    duration_ms INTEGER,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS kb_import_history (
+    id TEXT PRIMARY KEY,
+    source_type VARCHAR(50) NOT NULL,
+    source_path VARCHAR(500),
+    file_count INTEGER DEFAULT 0,
+    imported_count INTEGER DEFAULT 0,
+    skipped_count INTEGER DEFAULT 0,
+    duplicate_count INTEGER DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message TEXT,
+    started_at DATETIME,
+    completed_at DATETIME,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS dependency_version (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_name VARCHAR(255) NOT NULL,
+    current_version VARCHAR(50),
+    latest_version VARCHAR(50),
+    is_outdated BOOLEAN DEFAULT 0,
+    update_priority VARCHAR(20) DEFAULT 'low',
+    last_check_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS project_analysis_summary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    analysis_date DATETIME NOT NULL,
+    total_files INTEGER DEFAULT 0,
+    total_issues INTEGER DEFAULT 0,
+    critical_count INTEGER DEFAULT 0,
+    high_count INTEGER DEFAULT 0,
+    medium_count INTEGER DEFAULT 0,
+    low_count INTEGER DEFAULT 0,
+    fixed_count INTEGER DEFAULT 0,
+    avg_complexity REAL DEFAULT 0,
+    avg_maintainability REAL DEFAULT 0,
+    summary TEXT,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS kb_metadata (
+    meta_key VARCHAR(100) PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS telemetry_events (
+    id TEXT PRIMARY KEY,
+    event_type VARCHAR(100) NOT NULL,
+    event_data TEXT,
+    component VARCHAR(100),
+    level VARCHAR(20) DEFAULT 'info',
+    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS sustain_rules (
+    id TEXT PRIMARY KEY,
+    rule_name VARCHAR(100) NOT NULL,
+    rule_type VARCHAR(50) NOT NULL,
+    condition TEXT NOT NULL,
+    action TEXT NOT NULL,
+    priority INTEGER DEFAULT 0,
+    min_samples INTEGER DEFAULT 0,
+    enabled BOOLEAN DEFAULT 1,
+    description TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS rule_execution_log (
+    id TEXT PRIMARY KEY,
+    rule_id TEXT NOT NULL,
+    rule_name VARCHAR(100),
+    execution_result TEXT,
+    is_triggered BOOLEAN DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS ai_analysis_records (
+    id TEXT PRIMARY KEY,
+    analysis_type VARCHAR(50) NOT NULL,
+    input_data TEXT,
+    output_data TEXT,
+    ai_model VARCHAR(100),
+    tokens_used INTEGER,
+    duration_ms INTEGER,
+    success BOOLEAN DEFAULT 1,
+    error_message TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS validation_records (
+    id TEXT PRIMARY KEY,
+    cycle_id VARCHAR(100) NOT NULL,
+    validation_type VARCHAR(50) NOT NULL,
+    result TEXT,
+    score REAL,
+    passed BOOLEAN DEFAULT 0,
+    details TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
   )`
 ];
 
@@ -567,7 +611,37 @@ const allIndexesSqlite = [
   'CREATE INDEX IF NOT EXISTS idx_confirmation_operation ON confirmation_history(operation_type)',
   'CREATE INDEX IF NOT EXISTS idx_confirmation_risk_level ON confirmation_history(risk_level)',
   'CREATE INDEX IF NOT EXISTS idx_confirmation_status ON confirmation_history(status)',
-  'CREATE INDEX IF NOT EXISTS idx_confirmation_created_at ON confirmation_history(created_at)'
+  'CREATE INDEX IF NOT EXISTS idx_confirmation_created_at ON confirmation_history(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_api_request_provider ON api_request_log(provider_name)',
+  'CREATE INDEX IF NOT EXISTS idx_api_request_endpoint ON api_request_log(endpoint)',
+  'CREATE INDEX IF NOT EXISTS idx_api_request_user ON api_request_log(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_api_request_created_at ON api_request_log(created_at)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_project_id ON code_analysis_record(project_id)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_task_id ON code_analysis_record(task_id)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_file_path ON code_analysis_record(file_path)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_language ON code_analysis_record(language)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_result_id ON analysis_result(analysis_id)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_result_project ON analysis_result(project_id)',
+  'CREATE INDEX IF NOT EXISTS idx_analysis_result_type ON analysis_result(result_type)',
+  'CREATE INDEX IF NOT EXISTS idx_notification_user_id ON notification(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_notification_type ON notification(message_type)',
+  'CREATE INDEX IF NOT EXISTS idx_notification_is_read ON notification(is_read)',
+  'CREATE INDEX IF NOT EXISTS idx_notification_is_confirmed ON notification(is_confirmed)',
+  'CREATE INDEX IF NOT EXISTS idx_monitor_metric_type ON system_monitor(metric_type)',
+  'CREATE INDEX IF NOT EXISTS idx_monitor_metric_name ON system_monitor(metric_name)',
+  'CREATE INDEX IF NOT EXISTS idx_monitor_component ON system_monitor(component)',
+  'CREATE INDEX IF NOT EXISTS idx_monitor_timestamp ON system_monitor(timestamp)',
+  'CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_history(backup_type)',
+  'CREATE INDEX IF NOT EXISTS idx_backup_status ON backup_history(status)',
+  'CREATE INDEX IF NOT EXISTS idx_backup_user_id ON backup_history(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_kb_import_source ON kb_import_history(source_type)',
+  'CREATE INDEX IF NOT EXISTS idx_kb_import_status ON kb_import_history(status)',
+  'CREATE INDEX IF NOT EXISTS idx_kb_import_user_id ON kb_import_history(user_id)',
+  'CREATE INDEX IF NOT EXISTS idx_dependency_package ON dependency_version(package_name)',
+  'CREATE INDEX IF NOT EXISTS idx_dependency_outdated ON dependency_version(is_outdated)',
+  'CREATE INDEX IF NOT EXISTS idx_summary_project_id ON project_analysis_summary(project_id)',
+  'CREATE INDEX IF NOT EXISTS idx_summary_date ON project_analysis_summary(analysis_date)',
+  'CREATE INDEX IF NOT EXISTS idx_summary_user_id ON project_analysis_summary(user_id)'
 ];
 
 let sqliteInitialized = false;
@@ -594,216 +668,6 @@ function ensureSqliteTables() {
       logger.debug(`创建索引失败: ${e.message}`);
     }
   }
-
-  try {
-    db.exec(`
-      ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS rejected_step VARCHAR(100);
-      ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS rolled_back_reason VARCHAR(200);
-      ALTER TABLE IF EXISTS self_update_history ADD COLUMN IF NOT EXISTS version_after VARCHAR(20);
-      ALTER TABLE IF EXISTS self_repair_history ADD COLUMN IF NOT EXISTS rolled_back_reason VARCHAR(200);
-    `);
-    logger.debug('已检查并添加缺失字段');
-  } catch (e) {
-    logger.debug('检查缺失字段失败:', e.message);
-  }
-  
-  logger.debug('SQLite 表结构检查完成');
-}
-
-/**
- * 初始化 MySQL 数据库表
- */
-async function initMySqlTables() {
-  const pool = await getMySqlPool();
-
-  const tables = [
-    // 知识条目表（字段名与SQLite统一）
-    `CREATE TABLE IF NOT EXISTS kb_entries (
-      id VARCHAR(36) PRIMARY KEY,
-      content TEXT NOT NULL,
-      content_type VARCHAR(50) NOT NULL,
-      language VARCHAR(20),
-      tags TEXT,
-      source TEXT,
-      vector_json TEXT,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_content_type (content_type),
-      INDEX idx_language (language)
-    )`,
-
-    // 优化案例表（字段名与SQLite统一）
-    `CREATE TABLE IF NOT EXISTS kb_cases (
-      id VARCHAR(36) PRIMARY KEY,
-      original_code TEXT NOT NULL,
-      optimized_code TEXT NOT NULL,
-      explanation TEXT,
-      language VARCHAR(20),
-      issue_type VARCHAR(50),
-      vector_json TEXT,
-      usage_count INT DEFAULT 0,
-      rating DECIMAL(3,2) DEFAULT 0.00,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_language (language),
-      INDEX idx_issue_type (issue_type),
-      INDEX idx_usage (usage_count DESC)
-    )`,
-
-    // 代码规范表
-    `CREATE TABLE IF NOT EXISTS code_standards (
-      id VARCHAR(36) PRIMARY KEY,
-      rule_name VARCHAR(100) NOT NULL,
-      rule_description TEXT NOT NULL,
-      bad_example TEXT,
-      good_example TEXT,
-      language VARCHAR(20),
-      severity VARCHAR(20),
-      is_active BOOLEAN DEFAULT TRUE,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_language (language),
-      INDEX idx_severity (severity)
-    )`,
-
-    // 用户配置表
-    `CREATE TABLE IF NOT EXISTS user_preferences (
-      id VARCHAR(36) PRIMARY KEY,
-      config_key VARCHAR(100) UNIQUE NOT NULL,
-      config_value TEXT,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-    )`,
-
-    // LLM API密钥表
-    `CREATE TABLE IF NOT EXISTS llm_api_keys (
-      id INT PRIMARY KEY AUTO_INCREMENT,
-      provider_name VARCHAR(50) NOT NULL,
-      api_key TEXT NOT NULL,
-      api_url TEXT,
-      model_name VARCHAR(100),
-      is_active BOOLEAN DEFAULT TRUE,
-      priority INT DEFAULT 0,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_llm_provider (provider_name),
-      INDEX idx_llm_active (is_active)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-
-    // API访问密钥表
-    `CREATE TABLE IF NOT EXISTS api_access_keys (
-      id INT PRIMARY KEY AUTO_INCREMENT,
-      access_key VARCHAR(100) NOT NULL UNIQUE,
-      key_name VARCHAR(100),
-      permissions TEXT,
-      rate_limit INT DEFAULT 100,
-      usage_count INT DEFAULT 0,
-      is_active BOOLEAN DEFAULT TRUE,
-      expires_at TIMESTAMP NULL,
-      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-      INDEX idx_access_key (access_key),
-      INDEX idx_access_active (is_active)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-
-    // 自更新历史表
-    `CREATE TABLE IF NOT EXISTS self_update_history (
-      id VARCHAR(36) PRIMARY KEY,
-      update_type VARCHAR(50) NOT NULL,
-      target_version VARCHAR(20),
-      current_version VARCHAR(20),
-      version_after VARCHAR(20),
-      update_source VARCHAR(100),
-      update_content TEXT,
-      status VARCHAR(20) DEFAULT 'pending',
-      user_confirmed BOOLEAN DEFAULT 0,
-      confirmed_at DATETIME,
-      rejected_step VARCHAR(100),
-      sandbox_result TEXT,
-      applied_at DATETIME,
-      rollback_version VARCHAR(20),
-      rollback_at DATETIME,
-      rolled_back_reason VARCHAR(200),
-      error_message TEXT,
-      duration_ms INT,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_update_type (update_type),
-      INDEX idx_update_status (status),
-      INDEX idx_update_created_at (created_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-
-    // 自修复历史表
-    `CREATE TABLE IF NOT EXISTS self_repair_history (
-      id VARCHAR(36) PRIMARY KEY,
-      error_type VARCHAR(100) NOT NULL,
-      error_message TEXT,
-      error_stack TEXT,
-      affected_component VARCHAR(100),
-      repair_strategy VARCHAR(100),
-      repair_content TEXT,
-      status VARCHAR(20) DEFAULT 'pending',
-      user_confirmed BOOLEAN DEFAULT 0,
-      confirmed_at DATETIME,
-      sandbox_result TEXT,
-      applied_at DATETIME,
-      rollback_at DATETIME,
-      rolled_back_reason VARCHAR(200),
-      error_count INT DEFAULT 1,
-      last_error_at DATETIME,
-      duration_ms INT,
-      error_message_detail TEXT,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_repair_error_type (error_type),
-      INDEX idx_repair_status (status),
-      INDEX idx_repair_created_at (created_at),
-      INDEX idx_repair_component (affected_component)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`,
-
-    // 确认历史表
-    `CREATE TABLE IF NOT EXISTS confirmation_history (
-      id VARCHAR(36) PRIMARY KEY,
-      operation_type VARCHAR(100) NOT NULL,
-      risk_level VARCHAR(20) NOT NULL,
-      step_name VARCHAR(100),
-      step_number INT DEFAULT 0,
-      total_steps INT DEFAULT 0,
-      description TEXT NOT NULL,
-      impact VARCHAR(500),
-      files_affected TEXT,
-      backup_available BOOLEAN DEFAULT 0,
-      rollback_possible BOOLEAN DEFAULT 0,
-      status VARCHAR(20) DEFAULT 'pending',
-      reason VARCHAR(200),
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      INDEX idx_confirmation_operation (operation_type),
-      INDEX idx_confirmation_risk_level (risk_level),
-      INDEX idx_confirmation_status (status),
-      INDEX idx_confirmation_created_at (created_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
-  ];
-
-  for (const sql of tables) {
-    await pool.execute(sql);
-  }
-
-  const alterStatements = [
-    'ALTER TABLE self_update_history ADD COLUMN version_after VARCHAR(20)',
-    'ALTER TABLE self_update_history ADD COLUMN rejected_step VARCHAR(100)',
-    'ALTER TABLE self_update_history ADD COLUMN rolled_back_reason VARCHAR(200)',
-    'ALTER TABLE self_repair_history ADD COLUMN rolled_back_reason VARCHAR(200)'
-  ];
-
-  for (const sql of alterStatements) {
-    try {
-      await pool.execute(sql);
-    } catch (e) {
-      if (e.message.includes('Duplicate column name')) {
-        logger.debug(`字段已存在，跳过: ${e.message}`);
-      } else {
-        logger.warn(`ALTER TABLE执行失败: ${e.message}`);
-      }
-    }
-  }
-
-  console.log('MySQL 数据库表初始化完成');
 }
 
 module.exports = {
@@ -817,6 +681,5 @@ module.exports = {
   execute,
   transaction,
   batchExecute,
-  initMySqlTables,
   ensureSqliteTables
 };
