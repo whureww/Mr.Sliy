@@ -254,6 +254,62 @@ src/
 
 ## 📝 更新日志
 
+### v3.1.2
+> 更新日期: 2026-07-21
+
+- **✨ 门控制任务队列机制**：实现完整的任务暂存和延迟执行功能
+  - **超时自动加入队列**：3分钟无操作后自动将请求加入待处理队列
+  - **暂存选项**：新增选项5，用户可主动将请求暂存到队列
+  - **任务回调**：支持传入任务执行器，用户确认后自动执行保存的任务
+  - **状态处理**：调用者（selfUpdateManager）现在正确处理 `queued` 状态
+  - **超时提示**：门控制界面显示超时倒计时提示
+
+### v3.1.1
+> 更新日期: 2026-07-21
+
+- **✨ 门控制操作队列机制**：实现待处理确认请求队列功能
+  - **移除超时限制**：取消三分钟无操作自动取消的机制
+  - **队列管理**：用户按 `q` 或无操作时，请求自动加入待处理队列
+  - **新命令**：添加 `/pending` 命令查看和处理队列中的请求
+  - **操作方式**：输入序号确认执行，输入 `序号+n` 拒绝执行
+  - **状态提示**：确认操作后自动提示有待处理请求
+
+### v3.1.0
+> 更新日期: 2026-07-21
+
+- **🐛 ai_analysis_records 表结构修复**：修复该表结构与业务代码不匹配的问题
+  - 将 `id` 从 `VARCHAR(36)` 改为 `INT AUTO_INCREMENT`
+  - 添加 `focus`、`analysis_result`、`suggestions`、`confidence`、`executed`、`timestamp(BIGINT)` 字段
+  - 添加自动迁移逻辑
+- **🐛 重复主键处理**：同步队列中遇到重复主键时自动跳过，不再重试
+- **📝 日志级别优化**：将同步队列相关的日志级别从 `warn` 降为 `debug`，减少控制台噪音
+
+### v3.0.9
+> 更新日期: 2026-07-21
+
+- **🐛 时间戳类型不匹配修复**：修复 `telemetry_events` 和 `validation_records` 表的时间戳字段同步问题
+  - **字段类型差异**：这两个表的 `timestamp` 字段在 SQLite 和 MySQL 中都是 `BIGINT`（存储 Unix 毫秒时间戳），不需要转换为 DATETIME
+  - **新增表名识别**：添加 `extractTableName` 函数从 SQL 语句中提取表名
+  - **条件转换**：修改 `convertTimestampParams` 和 `escapeValue` 函数，根据表名决定是否转换时间戳
+  - **事务支持**：事务拦截逻辑现在记录表名，确保事务中的时间戳也能正确处理
+
+### v3.0.8
+> 更新日期: 2026-07-21
+
+- **🐛 表结构不兼容修复**：修复 `telemetry_events` 和 `validation_records` 表结构与业务代码不匹配的问题
+  - **telemetry_events**：将 `id` 从 `VARCHAR(36)` 改为 `INT AUTO_INCREMENT`，添加 `event_category`、`severity`、`created_at` 字段，`timestamp` 字段类型改为 `BIGINT`
+  - **validation_records**：将 `id` 从 `VARCHAR(36)` 改为 `INT AUTO_INCREMENT`，添加 `target_id`、`target_type`、`before_state`、`after_state`、`metrics_before`、`metrics_after`、`success`、`improvement_score` 字段，`timestamp` 字段类型改为 `BIGINT`
+  - **自动迁移**：添加表结构自动迁移逻辑，检测旧表结构并自动重建为正确的结构
+
+### v3.0.7
+> 更新日期: 2026-07-21
+
+- **🐛 时间戳同步修复**：修复所有MySQL同步路径中的时间戳格式问题
+  - **新增 `convertTimestampParams` 函数**：自动检测并转换 Unix 毫秒时间戳（大于 1000000000000）为 MySQL DATETIME 格式（`YYYY-MM-DD HH:MM:SS`）
+  - **修复实时同步**：`executeMysqlAsync` 和 `executeMysqlInsertAsync` 函数现在会转换参数中的时间戳
+  - **修复重试队列**：`processSyncQueue` 函数在重试时也会转换时间戳参数
+  - **修复事务同步**：`transaction` 和 `insertMany` 方法中的事务操作也会转换时间戳
+
 ### v3.0.6
 > 更新日期: 2026-07-21
 

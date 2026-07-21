@@ -59,6 +59,7 @@ const MENU_ITEMS = [
   { key: 'status', command: '/status', label: '/status', desc: '查看系统状态', shortcut: 'i', keywords: 'status info state stat 状态 信息' },
   { key: 'health', command: '/health', label: '/health', desc: '健康检查', shortcut: 'h', keywords: 'health check monitor 健康 检查' },
   { key: 'sustain', command: '/sustain', label: '/sustain', desc: 'AI自持引擎', shortcut: 't', keywords: 'sustain ai self-sustain auto 自持 自动' },
+  { key: 'pending', command: '/pending', label: '/pending', desc: '待处理确认队列', shortcut: 'd', keywords: 'pending queue confirmation 待处理 队列' },
   { key: 'help', command: '/help', label: '/help', desc: '帮助文档', shortcut: '?', keywords: 'help manual usage guide 帮助 说明' },
   { key: 'clear', command: '/clear', label: '/clear', desc: '清空屏幕', shortcut: 'c', keywords: 'clear cls screen clean 清空 清理' },
   { key: 'exit', command: '/exit', label: '/exit', desc: '退出程序', shortcut: 'e', keywords: 'exit quit bye 离开 退出' }
@@ -2378,6 +2379,92 @@ async function showStatus() {
   await waitEnter();
 }
 
+async function pendingMenu() {
+  const { confirmationGate } = require('../services/bootstrap/confirmationGate');
+  
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c('  (📋) 待处理确认队列', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    const queuedRequests = confirmationGate.getQueuedRequests();
+    
+    if (queuedRequests.length === 0) {
+      console.log(c('\n  🎉 暂无待处理的确认请求', 'green'));
+      console.log(c('\n  按 Enter 返回', 'dim'));
+      await waitEnter();
+      break;
+    }
+    
+    console.log(c(`\n  待处理请求: ${queuedRequests.length} 条`, 'yellow'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    queuedRequests.forEach((req, index) => {
+      const timeAgo = Math.floor((Date.now() - req.createdAt) / 1000 / 60);
+      const riskColors = {
+        high: 'red',
+        medium: 'yellow',
+        low: 'green'
+      };
+      const riskLabels = {
+        high: '🔴 高风险',
+        medium: '🟡 中风险',
+        low: '🟢 低风险'
+      };
+      
+      console.log(c(`\n  ${index + 1}. [${riskLabels[req.riskLevel]}] ${req.operationType}`, riskColors[req.riskLevel]));
+      console.log(c(`     描述: ${req.description}`, 'white'));
+      console.log(c(`     创建时间: ${timeAgo} 分钟前`, 'dim'));
+      if (req.stepNumber > 0 && req.totalSteps > 0) {
+        console.log(c(`     步骤: ${req.stepNumber}/${req.totalSteps} - ${req.stepName}`, 'dim'));
+      }
+    });
+    
+    console.log(c('\n' + '─'.repeat(70), 'dim'));
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    输入序号确认执行', 'white'));
+    console.log(c('    输入 序号+n 拒绝执行 (如 1+n)', 'white'));
+    console.log(c('    q - 返回主菜单', 'white'));
+    
+    const input = await getInput('  请选择操作: ');
+    
+    if (!input || input.toLowerCase() === 'q') {
+      break;
+    }
+    
+    const parts = input.split('+');
+    const index = parseInt(parts[0]) - 1;
+    const action = parts[1] || 'confirm';
+    
+    if (index >= 0 && index < queuedRequests.length) {
+      const req = queuedRequests[index];
+      
+      if (action.toLowerCase() === 'n' || action.toLowerCase() === 'reject') {
+        const result = await confirmationGate.rejectRequest(req.id);
+        if (result.success) {
+          console.log(c(`\n  ✅ 请求已拒绝: ${req.operationType}`, 'green'));
+        } else {
+          console.log(c(`\n  ❌ 操作失败: ${result.error}`, 'red'));
+        }
+      } else {
+        const result = await confirmationGate.confirmRequest(req.id);
+        if (result.success) {
+          console.log(c(`\n  ✅ 请求已确认: ${req.operationType}`, 'green'));
+        } else {
+          console.log(c(`\n  ❌ 操作失败: ${result.error}`, 'red'));
+        }
+      }
+      
+      await waitEnter();
+    } else {
+      console.log(c('\n  ❌ 无效输入', 'red'));
+      await waitEnter();
+    }
+  }
+}
+
 async function healthCheckMenu() {
   while (true) {
     clearScreen();
@@ -3801,6 +3888,9 @@ async function startCLI() {
         break;
       case 'status':
         await showStatus();
+        break;
+      case 'pending':
+        await pendingMenu();
         break;
       case 'health':
         await healthCheckMenu();

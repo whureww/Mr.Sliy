@@ -415,12 +415,13 @@ async function initDatabase() {
 
     await query(`
       CREATE TABLE IF NOT EXISTS telemetry_events (
-        id VARCHAR(36) PRIMARY KEY,
+        id INT PRIMARY KEY AUTO_INCREMENT,
         event_type VARCHAR(100) NOT NULL,
+        event_category VARCHAR(100) NOT NULL,
         event_data TEXT,
-        component VARCHAR(100),
-        level VARCHAR(20) DEFAULT 'info',
-        timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        severity VARCHAR(20) DEFAULT 'info',
+        timestamp BIGINT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
@@ -453,9 +454,15 @@ async function initDatabase() {
 
     await query(`
       CREATE TABLE IF NOT EXISTS ai_analysis_records (
-        id VARCHAR(36) PRIMARY KEY,
+        id INT PRIMARY KEY AUTO_INCREMENT,
         analysis_type VARCHAR(50) NOT NULL,
+        focus VARCHAR(100) DEFAULT 'general',
         input_data TEXT,
+        analysis_result TEXT,
+        suggestions TEXT,
+        confidence DECIMAL(5,2) DEFAULT 0,
+        executed BOOLEAN DEFAULT FALSE,
+        timestamp BIGINT NOT NULL,
         output_data TEXT,
         ai_model VARCHAR(100),
         tokens_used INT,
@@ -468,9 +475,18 @@ async function initDatabase() {
 
     await query(`
       CREATE TABLE IF NOT EXISTS validation_records (
-        id VARCHAR(36) PRIMARY KEY,
-        cycle_id VARCHAR(100) NOT NULL,
+        id INT PRIMARY KEY AUTO_INCREMENT,
         validation_type VARCHAR(50) NOT NULL,
+        target_id VARCHAR(255),
+        target_type VARCHAR(50),
+        before_state TEXT,
+        after_state TEXT,
+        metrics_before TEXT,
+        metrics_after TEXT,
+        success INT DEFAULT 0,
+        improvement_score DECIMAL(10,2) DEFAULT 0,
+        timestamp BIGINT NOT NULL,
+        cycle_id VARCHAR(100),
         result TEXT,
         score DECIMAL(5,2),
         passed BOOLEAN DEFAULT FALSE,
@@ -587,7 +603,7 @@ async function initDatabase() {
     await query(`CREATE INDEX idx_kb_cases_issue_type ON kb_cases(issue_type)`).catch(() => {});
     await query(`CREATE INDEX idx_standards_language ON code_standards(language)`).catch(() => {});
     await query(`CREATE INDEX idx_monitor_type ON telemetry_events(event_type)`).catch(() => {});
-    await query(`CREATE INDEX idx_monitor_component ON telemetry_events(component)`).catch(() => {});
+    await query(`CREATE INDEX idx_monitor_component ON telemetry_events(event_category)`).catch(() => {});
     await query(`CREATE INDEX idx_update_type ON self_update_history(update_type)`).catch(() => {});
     await query(`CREATE INDEX idx_update_status ON self_update_history(status)`).catch(() => {});
     await query(`CREATE INDEX idx_repair_error_type ON self_repair_history(error_type)`).catch(() => {});
@@ -595,11 +611,147 @@ async function initDatabase() {
     await query(`CREATE INDEX idx_confirmation_operation ON confirmation_history(operation_type)`).catch(() => {});
     await query(`CREATE INDEX idx_confirmation_status ON confirmation_history(status)`).catch(() => {});
     
+    await migrateTableStructure();
+    
     logger.info('MySQL数据库表初始化完成（23张表）');
     return true;
   } catch (error) {
     logger.warn(`MySQL数据库表初始化失败: ${error.message}`);
     return false;
+  }
+}
+
+/**
+ * 迁移表结构以兼容业务代码
+ */
+async function migrateTableStructure() {
+  try {
+    await migrateTelemetryEvents();
+    await migrateValidationRecords();
+    await migrateAiAnalysisRecords();
+    
+    logger.debug('MySQL表结构迁移完成');
+  } catch (error) {
+    logger.debug(`MySQL表结构迁移部分失败: ${error.message}`);
+  }
+}
+
+async function migrateTelemetryEvents() {
+  try {
+    const columns = await query(`SHOW COLUMNS FROM telemetry_events`);
+    const idColumn = columns.find(col => col.Field === 'id');
+    
+    if (idColumn && idColumn.Type === 'varchar(36)') {
+      await query(`CREATE TABLE IF NOT EXISTS telemetry_events_new (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        event_type VARCHAR(100) NOT NULL,
+        event_category VARCHAR(100) NOT NULL,
+        event_data TEXT,
+        severity VARCHAR(20) DEFAULT 'info',
+        timestamp BIGINT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      
+      await query(`INSERT INTO telemetry_events_new (event_type, event_category, event_data, severity, timestamp, created_at)
+        SELECT event_type, COALESCE(event_category, '') as event_category, event_data, COALESCE(severity, 'info') as severity, 
+               COALESCE(timestamp, 0) as timestamp, COALESCE(created_at, NOW()) as created_at
+        FROM telemetry_events`).catch(() => {});
+      
+      await query(`DROP TABLE telemetry_events`);
+      await query(`RENAME TABLE telemetry_events_new TO telemetry_events`);
+      
+      logger.info('telemetry_events表结构迁移完成');
+    }
+  } catch (error) {
+    logger.debug(`telemetry_events迁移失败: ${error.message}`);
+  }
+}
+
+async function migrateValidationRecords() {
+  try {
+    const columns = await query(`SHOW COLUMNS FROM validation_records`);
+    const idColumn = columns.find(col => col.Field === 'id');
+    
+    if (idColumn && idColumn.Type === 'varchar(36)') {
+      await query(`CREATE TABLE IF NOT EXISTS validation_records_new (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        validation_type VARCHAR(50) NOT NULL,
+        target_id VARCHAR(255),
+        target_type VARCHAR(50),
+        before_state TEXT,
+        after_state TEXT,
+        metrics_before TEXT,
+        metrics_after TEXT,
+        success INT DEFAULT 0,
+        improvement_score DECIMAL(10,2) DEFAULT 0,
+        timestamp BIGINT NOT NULL,
+        cycle_id VARCHAR(100),
+        result TEXT,
+        score DECIMAL(5,2),
+        passed BOOLEAN DEFAULT FALSE,
+        details TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      
+      await query(`INSERT INTO validation_records_new (validation_type, target_id, target_type, before_state, after_state, 
+        metrics_before, metrics_after, success, improvement_score, timestamp, cycle_id, result, score, passed, details, created_at)
+        SELECT validation_type, target_id, target_type, before_state, after_state, metrics_before, metrics_after, 
+               COALESCE(success, 0) as success, COALESCE(improvement_score, 0) as improvement_score, 
+               COALESCE(timestamp, 0) as timestamp, cycle_id, result, score, passed, details, COALESCE(created_at, NOW()) as created_at
+        FROM validation_records`).catch(() => {});
+      
+      await query(`DROP TABLE validation_records`);
+      await query(`RENAME TABLE validation_records_new TO validation_records`);
+      
+      logger.info('validation_records表结构迁移完成');
+    }
+  } catch (error) {
+    logger.debug(`validation_records迁移失败: ${error.message}`);
+  }
+}
+
+async function migrateAiAnalysisRecords() {
+  try {
+    const columns = await query(`SHOW COLUMNS FROM ai_analysis_records`);
+    const idColumn = columns.find(col => col.Field === 'id');
+    
+    if (idColumn && idColumn.Type === 'varchar(36)') {
+      await query(`CREATE TABLE IF NOT EXISTS ai_analysis_records_new (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        analysis_type VARCHAR(50) NOT NULL,
+        focus VARCHAR(100) DEFAULT 'general',
+        input_data TEXT,
+        analysis_result TEXT,
+        suggestions TEXT,
+        confidence DECIMAL(5,2) DEFAULT 0,
+        executed BOOLEAN DEFAULT FALSE,
+        timestamp BIGINT NOT NULL,
+        output_data TEXT,
+        ai_model VARCHAR(100),
+        tokens_used INT,
+        duration_ms INT,
+        success BOOLEAN DEFAULT TRUE,
+        error_message TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+      
+      await query(`INSERT INTO ai_analysis_records_new (analysis_type, focus, input_data, analysis_result, 
+        suggestions, confidence, executed, timestamp, output_data, ai_model, tokens_used, duration_ms, 
+        success, error_message, created_at)
+        SELECT analysis_type, COALESCE(focus, 'general') as focus, input_data, 
+               COALESCE(analysis_result, '') as analysis_result, COALESCE(suggestions, '') as suggestions, 
+               COALESCE(confidence, 0) as confidence, COALESCE(executed, 0) as executed, 
+               COALESCE(timestamp, 0) as timestamp, output_data, ai_model, tokens_used, duration_ms, 
+               COALESCE(success, 1) as success, error_message, COALESCE(created_at, NOW()) as created_at
+        FROM ai_analysis_records`).catch(() => {});
+      
+      await query(`DROP TABLE ai_analysis_records`);
+      await query(`RENAME TABLE ai_analysis_records_new TO ai_analysis_records`);
+      
+      logger.info('ai_analysis_records表结构迁移完成');
+    }
+  } catch (error) {
+    logger.debug(`ai_analysis_records迁移失败: ${error.message}`);
   }
 }
 

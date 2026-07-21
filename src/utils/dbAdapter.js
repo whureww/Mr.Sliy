@@ -80,20 +80,27 @@ async function processSyncQueue() {
     for (const op of pendingOperations) {
       try {
         const params = op.params ? JSON.parse(op.params) : [];
-        await mysql.execute(op.sql, params);
+        const convertedParams = convertTimestampParams(params, op.table_name);
+        await mysql.execute(op.sql, convertedParams);
         
         sqliteDb.prepare('DELETE FROM sync_queue WHERE id = ?').run(op.id);
         logger.debug(`同步队列操作成功 [${op.table_name}]: ${op.operation_type}`);
       } catch (error) {
+        if (error.message.includes('Duplicate entry')) {
+          sqliteDb.prepare('DELETE FROM sync_queue WHERE id = ?').run(op.id);
+          logger.debug(`同步队列操作跳过（重复主键）[${op.table_name}]`);
+          continue;
+        }
+        
         sqliteDb.prepare(`
           UPDATE sync_queue 
           SET retry_count = retry_count + 1, last_retry_at = CURRENT_TIMESTAMP
           WHERE id = ?
         `).run(op.id);
-        logger.warn(`同步队列操作重试失败 [${op.table_name}]: ${error.message}, 重试次数: ${op.retry_count + 1}`);
+        logger.debug(`同步队列操作重试失败 [${op.table_name}]: ${error.message}, 重试次数: ${op.retry_count + 1}`);
         
         if (op.retry_count + 1 >= MAX_RETRY_COUNT) {
-          logger.error(`同步队列操作达到最大重试次数，已放弃 [${op.table_name}]: ${op.sql}`);
+          logger.debug(`同步队列操作达到最大重试次数，已放弃 [${op.table_name}]: ${op.sql}`);
         }
       }
     }
@@ -110,11 +117,11 @@ function startRetryTimer() {
   mysql.startHealthCheckTimer();
 }
 
-function escapeValue(value) {
+function escapeValue(value, convertTimestamp = true) {
   if (value === null || value === undefined) return 'NULL';
   if (typeof value === 'boolean') return value ? '1' : '0';
   if (typeof value === 'number') {
-    if (value > 1000000000000) {
+    if (convertTimestamp && value > 1000000000000) {
       return "'" + new Date(value).toISOString().slice(0, 19).replace('T', ' ') + "'";
     }
     return value.toString();
@@ -125,14 +132,38 @@ function escapeValue(value) {
   return "'" + value.toString().replace(/'/g, "''") + "'";
 }
 
+function convertTimestampParams(params, tableName = '') {
+  const noTimestampTables = ['telemetry_events', 'validation_records'];
+  const shouldConvert = !noTimestampTables.includes(tableName);
+  
+  return params.map(param => {
+    if (shouldConvert && typeof param === 'number' && param > 1000000000000) {
+      return new Date(param).toISOString().slice(0, 19).replace('T', ' ');
+    }
+    if (shouldConvert && param instanceof Date) {
+      return param.toISOString().slice(0, 19).replace('T', ' ');
+    }
+    return param;
+  });
+}
+
+function extractTableName(sql) {
+  const match = sql.match(/^(INSERT|UPDATE|DELETE)\s+(INTO|FROM)\s+(\w+)/i);
+  if (match && match[3]) {
+    return match[3];
+  }
+  return '';
+}
+
 function executeMysqlAsync(sql, params, tableName = null) {
   if (!mysql.isEnabled()) return;
   
   setImmediate(async () => {
     try {
-      await mysql.execute(sql, params);
+      const convertedParams = convertTimestampParams(params, tableName);
+      await mysql.execute(sql, convertedParams);
     } catch (error) {
-      logger.warn(`MySQL操作失败，加入重试队列: ${error.message}`);
+      logger.debug(`MySQL操作失败，加入重试队列: ${error.message}`);
       if (tableName) {
         enqueueSyncOperation(tableName, sql, params, 'execute');
       }
@@ -150,11 +181,11 @@ function executeMysqlInsertAsync(tableName, rows) {
       const sql = `INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES (${placeholders})`;
       
       for (const row of rows) {
-        const params = columns.map(col => row[col]);
+        const params = convertTimestampParams(columns.map(col => row[col]), tableName);
         await mysql.execute(sql, params);
       }
     } catch (error) {
-      logger.warn(`MySQL批量插入失败，加入重试队列 [${tableName}]: ${error.message}`);
+      logger.debug(`MySQL批量插入失败，加入重试队列 [${tableName}]: ${error.message}`);
       const columns = Object.keys(rows[0]);
       const placeholders = columns.map((_, i) => `?`).join(', ');
       const sql = `INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES (${placeholders})`;
@@ -337,12 +368,13 @@ class DbAdapter {
               for (const op of sqlOperations) {
                 const mysqlSql = convertSqlForMysql(op.sql);
                 const params = Array.isArray(op.params[0]) ? op.params[0] : [];
-                await connection.execute(mysqlSql, params);
+                const convertedParams = convertTimestampParams(params, tableName);
+                await connection.execute(mysqlSql, convertedParams);
               }
               await connection.commit();
             } catch (error) {
               await connection.rollback();
-              logger.warn(`MySQL批量插入失败: ${error.message}`);
+              logger.debug(`MySQL批量插入失败: ${error.message}`);
               for (const op of sqlOperations) {
                 enqueueSyncOperation(tableName, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
               }
@@ -405,7 +437,8 @@ class DbAdapter {
         const stmt = originalPrepare(sql);
         const originalRun = stmt.run.bind(stmt);
         stmt.run = (...args) => {
-          sqlOperations.push({ sql, params: args });
+          const tableName = extractTableName(sql);
+          sqlOperations.push({ sql, params: args, tableName });
           return originalRun(...args);
         };
         return stmt;
@@ -427,7 +460,8 @@ class DbAdapter {
               for (const op of sqlOperations) {
                 const mysqlSql = convertSqlForMysql(op.sql);
                 const params = Array.isArray(op.params[0]) ? op.params[0] : [];
-                await connection.execute(mysqlSql, params);
+                const convertedParams = convertTimestampParams(params, op.tableName);
+                await connection.execute(mysqlSql, convertedParams);
               }
               await connection.commit();
             } catch (error) {
@@ -476,10 +510,13 @@ class DbAdapter {
         await connection.execute(`CREATE TABLE \`${tempTable}\` LIKE \`${tableName}\``);
         
         const columns = Object.keys(rows[0]);
+        const noTimestampTables = ['telemetry_events', 'validation_records'];
+        const convertTimestamp = !noTimestampTables.includes(tableName);
+        
         for (let i = 0; i < rows.length; i += 50) {
           const batch = rows.slice(i, i + 50);
           const values = batch.map(row => {
-            return '(' + columns.map(col => escapeValue(row[col])).join(', ') + ')';
+            return '(' + columns.map(col => escapeValue(row[col], convertTimestamp)).join(', ') + ')';
           }).join(',\n');
           await connection.execute(`INSERT INTO \`${tempTable}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
         }
