@@ -921,6 +921,18 @@ class KnowledgeBase {
       const entries = await mysql.query('SELECT * FROM kb_entries');
       const cases = await mysql.query('SELECT * FROM kb_cases');
       
+      const parseTags = (tags) => {
+        if (!tags) return [];
+        try {
+          return JSON.parse(tags);
+        } catch {
+          if (typeof tags === 'string') {
+            return tags.split(',').map(t => t.trim()).filter(t => t.length > 0);
+          }
+          return [];
+        }
+      };
+      
       const importData = {
         version: '1.0',
         exportedAt: new Date().toISOString(),
@@ -929,7 +941,7 @@ class KnowledgeBase {
           content: e.content,
           content_type: e.content_type,
           language: e.language,
-          tags: e.tags ? JSON.parse(e.tags) : [],
+          tags: parseTags(e.tags),
           source: e.source || 'cloud'
         })),
         cases: cases.map(c => ({
