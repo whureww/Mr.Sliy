@@ -741,8 +741,6 @@ async function switchConnection(connectionConfig) {
     await closePool();
   }
 
-  currentConnectionConfig = connectionConfig;
-  
   const mysqlConfig = getConnectionConfigFromCustom(connectionConfig);
   if (!mysqlConfig || !mysqlConfig.host) {
     return { success: false, message: '无效的连接配置' };
@@ -765,11 +763,15 @@ async function switchConnection(connectionConfig) {
     await connection.ping();
     connection.release();
 
+    currentConnectionConfig = `${mysqlConfig.host}:${mysqlConfig.port}:${mysqlConfig.database}:${mysqlConfig.user}`;
+    connectionHealthy = true;
+
     logger.info(`已切换到数据库连接: ${connectionConfig.name || connectionConfig.id}`);
     return { success: true, message: '数据库连接切换成功' };
   } catch (error) {
     pool = null;
     currentConnectionConfig = null;
+    connectionHealthy = false;
     return { success: false, message: error.message };
   }
 }

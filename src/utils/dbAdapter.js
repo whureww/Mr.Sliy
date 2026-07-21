@@ -113,7 +113,15 @@ function startRetryTimer() {
 function escapeValue(value) {
   if (value === null || value === undefined) return 'NULL';
   if (typeof value === 'boolean') return value ? '1' : '0';
-  if (typeof value === 'number') return value.toString();
+  if (typeof value === 'number') {
+    if (value > 1000000000000) {
+      return "'" + new Date(value).toISOString().slice(0, 19).replace('T', ' ') + "'";
+    }
+    return value.toString();
+  }
+  if (typeof value === 'object') {
+    return "'" + JSON.stringify(value).replace(/'/g, "''") + "'";
+  }
   return "'" + value.toString().replace(/'/g, "''") + "'";
 }
 
