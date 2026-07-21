@@ -6,6 +6,9 @@ const { logger } = require('./logger');
 const mysql = require('./mysql');
 
 let sqliteDb = null;
+let retryTimer = null;
+const MAX_RETRY_COUNT = 5;
+const RETRY_INTERVAL = 30000;
 
 function getSqliteDatabase() {
   if (!sqliteDb) {
@@ -20,8 +23,91 @@ function getSqliteDatabase() {
     sqliteDb = new Database(dbPath);
     sqliteDb.pragma('foreign_keys = ON');
     sqliteDb.pragma('journal_mode = WAL');
+    initSyncQueueTable();
+    startRetryTimer();
   }
   return sqliteDb;
+}
+
+function initSyncQueueTable() {
+  try {
+    sqliteDb.exec(`
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        id TEXT PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        sql TEXT NOT NULL,
+        params TEXT,
+        operation_type TEXT NOT NULL,
+        retry_count INTEGER DEFAULT 0,
+        last_retry_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+  } catch (e) {
+    logger.debug(`初始化同步队列表失败: ${e.message}`);
+  }
+}
+
+function enqueueSyncOperation(tableName, sql, params, operationType) {
+  try {
+    const id = require('./helpers').generateUUID();
+    sqliteDb.prepare(`
+      INSERT INTO sync_queue (id, table_name, sql, params, operation_type)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, tableName, sql, JSON.stringify(params), operationType);
+    logger.debug(`操作已加入同步队列 [${tableName}]: ${operationType}`);
+  } catch (e) {
+    logger.warn(`加入同步队列失败: ${e.message}`);
+  }
+}
+
+async function processSyncQueue() {
+  if (!mysql.isEnabled()) return;
+  
+  try {
+    const pendingOperations = sqliteDb.prepare(`
+      SELECT * FROM sync_queue 
+      WHERE retry_count < ? 
+      ORDER BY created_at ASC
+      LIMIT 100
+    `).all(MAX_RETRY_COUNT);
+    
+    if (pendingOperations.length === 0) return;
+    
+    const pool = mysql.getPool();
+    if (!pool) return;
+    
+    for (const op of pendingOperations) {
+      try {
+        const params = op.params ? JSON.parse(op.params) : [];
+        await mysql.execute(op.sql, params);
+        
+        sqliteDb.prepare('DELETE FROM sync_queue WHERE id = ?').run(op.id);
+        logger.debug(`同步队列操作成功 [${op.table_name}]: ${op.operation_type}`);
+      } catch (error) {
+        sqliteDb.prepare(`
+          UPDATE sync_queue 
+          SET retry_count = retry_count + 1, last_retry_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).run(op.id);
+        logger.warn(`同步队列操作重试失败 [${op.table_name}]: ${error.message}, 重试次数: ${op.retry_count + 1}`);
+        
+        if (op.retry_count + 1 >= MAX_RETRY_COUNT) {
+          logger.error(`同步队列操作达到最大重试次数，已放弃 [${op.table_name}]: ${op.sql}`);
+        }
+      }
+    }
+  } catch (e) {
+    logger.debug(`处理同步队列失败: ${e.message}`);
+  }
+}
+
+function startRetryTimer() {
+  if (retryTimer) clearInterval(retryTimer);
+  retryTimer = setInterval(processSyncQueue, RETRY_INTERVAL);
+  logger.debug('同步队列重试定时器已启动');
+  
+  mysql.startHealthCheckTimer();
 }
 
 function escapeValue(value) {
@@ -31,14 +117,17 @@ function escapeValue(value) {
   return "'" + value.toString().replace(/'/g, "''") + "'";
 }
 
-function executeMysqlAsync(sql, params) {
+function executeMysqlAsync(sql, params, tableName = null) {
   if (!mysql.isEnabled()) return;
   
   setImmediate(async () => {
     try {
       await mysql.execute(sql, params);
     } catch (error) {
-      logger.warn(`MySQL操作失败: ${error.message}`);
+      logger.warn(`MySQL操作失败，加入重试队列: ${error.message}`);
+      if (tableName) {
+        enqueueSyncOperation(tableName, sql, params, 'execute');
+      }
     }
   });
 }
@@ -49,15 +138,22 @@ function executeMysqlInsertAsync(tableName, rows) {
   setImmediate(async () => {
     try {
       const columns = Object.keys(rows[0]);
-      for (let i = 0; i < rows.length; i += 50) {
-        const batch = rows.slice(i, i + 50);
-        const values = batch.map(row => {
-          return '(' + columns.map(col => escapeValue(row[col])).join(', ') + ')';
-        }).join(',\n');
-        await mysql.execute(`INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
+      const placeholders = columns.map((_, i) => `?`).join(', ');
+      const sql = `INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES (${placeholders})`;
+      
+      for (const row of rows) {
+        const params = columns.map(col => row[col]);
+        await mysql.execute(sql, params);
       }
     } catch (error) {
-      logger.warn(`MySQL批量插入失败 [${tableName}]: ${error.message}`);
+      logger.warn(`MySQL批量插入失败，加入重试队列 [${tableName}]: ${error.message}`);
+      const columns = Object.keys(rows[0]);
+      const placeholders = columns.map((_, i) => `?`).join(', ');
+      const sql = `INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES (${placeholders})`;
+      
+      for (const row of rows) {
+        enqueueSyncOperation(tableName, sql, columns.map(col => row[col]), 'insert');
+      }
     }
   });
 }
@@ -90,6 +186,14 @@ function adaptSqliteResultForMysql(tableName, result, params) {
     }
   }
   
+  if (!row && result.changes > 0) {
+    try {
+      row = sqlite.prepare(`SELECT * FROM ${tableName} ORDER BY id DESC LIMIT 1`).get();
+    } catch (e) {
+      logger.debug(`查询最新插入行失败: ${e.message}`);
+    }
+  }
+  
   if (row) {
     executeMysqlInsertAsync(tableName, [row]);
   }
@@ -108,6 +212,14 @@ class DbAdapter {
     return mysql.isEnabled();
   }
 
+  getSyncQueueCount() {
+    try {
+      return this._sqlite.prepare('SELECT COUNT(*) as count FROM sync_queue').get().count;
+    } catch (e) {
+      return 0;
+    }
+  }
+
   pragma(...args) {
     return this._sqlite.pragma(...args);
   }
@@ -121,19 +233,19 @@ class DbAdapter {
     const tableName = extractTableName(sql);
     
     return {
-      get: (params) => stmt.get(params),
-      all: (params) => stmt.all(params),
-      run: (params) => {
-        const result = stmt.run(params);
+      get: (...args) => stmt.get(...args),
+      all: (...args) => stmt.all(...args),
+      run: (...args) => {
+        const result = stmt.run(...args);
+        const params = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
         
         if (mysql.isEnabled() && tableName) {
-          const paramArray = Array.isArray(params) ? params : [];
           const mysqlSql = convertSqlForMysql(sql);
           
           if (sql.toUpperCase().startsWith('INSERT')) {
-            adaptSqliteResultForMysql(tableName, result, paramArray);
+            adaptSqliteResultForMysql(tableName, result, params);
           } else {
-            executeMysqlAsync(mysqlSql, paramArray);
+            executeMysqlAsync(mysqlSql, params, tableName);
           }
         }
         
@@ -152,19 +264,19 @@ class DbAdapter {
     return this._sqlite.prepare(sql).all(params);
   }
 
-  run(sql, params = []) {
+  run(sql, ...args) {
     const tableName = extractTableName(sql);
     const stmt = this._sqlite.prepare(sql);
-    const result = stmt.run(params);
+    const result = stmt.run(...args);
+    const params = args.length === 1 && Array.isArray(args[0]) ? args[0] : args;
     
     if (mysql.isEnabled() && tableName) {
-      const paramArray = Array.isArray(params) ? params : [];
       const mysqlSql = convertSqlForMysql(sql);
       
       if (sql.toUpperCase().startsWith('INSERT')) {
-        adaptSqliteResultForMysql(tableName, result, paramArray);
+        adaptSqliteResultForMysql(tableName, result, params);
       } else {
-        executeMysqlAsync(mysqlSql, paramArray);
+        executeMysqlAsync(mysqlSql, params, tableName);
       }
     }
     
@@ -191,17 +303,52 @@ class DbAdapter {
     
     const columns = Object.keys(rows[0]);
     const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+    const sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
     
-    const stmt = this._sqlite.prepare(`INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`);
-    const insertMany = this._sqlite.transaction((items) => {
+    const sqlOperations = [];
+    
+    const insertManyTx = this._sqlite.transaction((items) => {
+      const stmt = this._sqlite.prepare(sql);
       for (const item of items) {
-        stmt.run(columns.map(col => item[col]));
+        const params = columns.map(col => item[col]);
+        sqlOperations.push({ sql, params: [params] });
+        stmt.run(params);
       }
     });
-    insertMany(rows);
+    
+    insertManyTx(rows);
     
     if (mysql.isEnabled()) {
-      executeMysqlInsertAsync(tableName, rows);
+      setImmediate(async () => {
+        try {
+          const pool = mysql.getPool();
+          if (pool) {
+            const connection = await pool.getConnection();
+            await connection.beginTransaction();
+            try {
+              for (const op of sqlOperations) {
+                const mysqlSql = convertSqlForMysql(op.sql);
+                const params = Array.isArray(op.params[0]) ? op.params[0] : [];
+                await connection.execute(mysqlSql, params);
+              }
+              await connection.commit();
+            } catch (error) {
+              await connection.rollback();
+              logger.warn(`MySQL批量插入失败: ${error.message}`);
+              for (const op of sqlOperations) {
+                enqueueSyncOperation(tableName, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
+              }
+            } finally {
+              connection.release();
+            }
+          }
+        } catch (error) {
+          logger.warn(`MySQL批量插入初始化失败: ${error.message}`);
+          for (const op of sqlOperations) {
+            enqueueSyncOperation(tableName, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
+          }
+        }
+      });
     }
   }
 
@@ -243,9 +390,9 @@ class DbAdapter {
   transaction(fn) {
     let result;
     const sqlOperations = [];
+    const originalPrepare = this._sqlite.prepare.bind(this._sqlite);
     
-    const trackFn = () => {
-      const originalPrepare = this._sqlite.prepare.bind(this._sqlite);
+    try {
       this._sqlite.prepare = (sql) => {
         const stmt = originalPrepare(sql);
         const originalRun = stmt.run.bind(stmt);
@@ -255,11 +402,11 @@ class DbAdapter {
         };
         return stmt;
       };
-      result = fn();
+      
+      result = this._sqlite.transaction(fn)();
+    } finally {
       this._sqlite.prepare = originalPrepare;
-    };
-    
-    this._sqlite.transaction(trackFn)();
+    }
     
     if (mysql.isEnabled() && sqlOperations.length > 0) {
       setImmediate(async () => {
@@ -304,19 +451,45 @@ class DbAdapter {
         return { success: true, count: 0, table: tableName };
       }
       
-      await mysql.execute(`TRUNCATE TABLE \`${tableName}\``);
-      
-      const columns = Object.keys(rows[0]);
-      for (let i = 0; i < rows.length; i += 50) {
-        const batch = rows.slice(i, i + 50);
-        const values = batch.map(row => {
-          return '(' + columns.map(col => escapeValue(row[col])).join(', ') + ')';
-        }).join(',\n');
-        await mysql.execute(`INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
+      const pool = mysql.getPool();
+      if (!pool) {
+        return { success: false, message: 'MySQL连接池不可用', table: tableName };
       }
       
-      logger.info(`同步 ${tableName}: ${rows.length} 条记录`);
-      return { success: true, count: rows.length, table: tableName };
+      const connection = await pool.getConnection();
+      
+      try {
+        await connection.beginTransaction();
+        
+        const tempTable = `${tableName}_sync_temp`;
+        const backupTable = `${tableName}_sync_backup`;
+        
+        await connection.execute(`DROP TABLE IF EXISTS \`${tempTable}\``);
+        await connection.execute(`CREATE TABLE \`${tempTable}\` LIKE \`${tableName}\``);
+        
+        const columns = Object.keys(rows[0]);
+        for (let i = 0; i < rows.length; i += 50) {
+          const batch = rows.slice(i, i + 50);
+          const values = batch.map(row => {
+            return '(' + columns.map(col => escapeValue(row[col])).join(', ') + ')';
+          }).join(',\n');
+          await connection.execute(`INSERT INTO \`${tempTable}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
+        }
+        
+        await connection.execute(`RENAME TABLE \`${tableName}\` TO \`${backupTable}\`, \`${tempTable}\` TO \`${tableName}\``);
+        await connection.execute(`DROP TABLE IF EXISTS \`${backupTable}\``);
+        
+        await connection.commit();
+        
+        logger.info(`同步 ${tableName}: ${rows.length} 条记录`);
+        return { success: true, count: rows.length, table: tableName };
+      } catch (error) {
+        await connection.rollback();
+        logger.error(`同步 ${tableName} 失败，已回滚: ${error.message}`);
+        return { success: false, message: error.message, table: tableName };
+      } finally {
+        connection.release();
+      }
     } catch (error) {
       logger.error(`同步 ${tableName} 失败: ${error.message}`);
       return { success: false, message: error.message, table: tableName };

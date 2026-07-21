@@ -1503,8 +1503,8 @@ ${toolsList}
    */
   saveTaskResult(task, result) {
     try {
-      const { getSqliteDatabase } = require('../utils/database');
-      const db = getSqliteDatabase();
+      const { getDatabase } = require('../utils/database');
+      const db = getDatabase();
       
       // 创建扫描任务记录
       const taskStmt = db.prepare(`

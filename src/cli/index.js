@@ -2335,6 +2335,15 @@ async function showStatus() {
   console.log(c('    案例数: ' + kb.totalCases, 'white'));
   console.log();
   
+  console.log(c('  数据库同步:', 'cyan'));
+  const sync = status.engine.databaseSync;
+  if (sync) {
+    console.log(c('    MySQL启用: ' + (sync.mysqlEnabled ? '是' : '否'), sync.mysqlEnabled ? 'green' : 'yellow'));
+    console.log(c('    MySQL健康: ' + (sync.mysqlHealthy ? '正常' : '异常'), sync.mysqlHealthy ? 'green' : 'red'));
+    console.log(c('    待同步队列: ' + sync.syncQueuePending + ' 条', sync.syncQueuePending > 0 ? 'yellow' : 'white'));
+  }
+  console.log();
+  
   console.log(c('  系统健康:', 'cyan'));
   const health = status.health;
   if (health) {

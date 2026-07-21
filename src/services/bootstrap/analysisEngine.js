@@ -2,7 +2,7 @@ const { logger } = require('../../utils/logger');
 const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
 const { telemetry } = require('../../utils/telemetry');
 const { providerManager } = require('../llm/providers');
-const { getSqliteDatabase } = require('../../utils/database');
+const { getDatabase } = require('../../utils/database');
 
 class AnalysisEngine {
   constructor() {
@@ -17,7 +17,7 @@ class AnalysisEngine {
 
   init() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.exec(`
         CREATE TABLE IF NOT EXISTS ai_analysis_records (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -291,7 +291,7 @@ ${JSON.stringify(data.recentEvents, null, 2)}
 
   async saveAnalysis(analysis) {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.prepare(`
         INSERT INTO ai_analysis_records 
         (analysis_type, focus, input_data, analysis_result, suggestions, confidence, executed, timestamp)
@@ -321,7 +321,7 @@ ${JSON.stringify(data.recentEvents, null, 2)}
 
   async getAnalysisStats() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       const total = db.prepare('SELECT COUNT(*) as count FROM ai_analysis_records').get();
       const byType = db.prepare('SELECT analysis_type, COUNT(*) as count FROM ai_analysis_records GROUP BY analysis_type').all();
       const recentExecuted = db.prepare('SELECT COUNT(*) as count FROM ai_analysis_records WHERE executed = 1 AND timestamp >= ?').get(Date.now() - 24 * 60 * 60 * 1000);

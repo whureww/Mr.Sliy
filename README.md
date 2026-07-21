@@ -254,8 +254,30 @@ src/
 
 ## 📝 更新日志
 
+### v3.0.4
+> 更新日期: 2026-07-21
+
+- **✨ 数据库双写架构统一**：完成所有业务代码的数据库调用统一，确保配置MySQL后所有操作自动同步到云端
+  - **knowledgeBase.js重构**：移除所有 `useMysql` 二选一逻辑，统一使用 `getDatabase()` 获取适配器，修复 `searchEntries`、`searchCases`、`getStats`、`exportToJSON`、`updateCaseUsage`、`findDuplicateEntries`、`removeDuplicates`、`syncToCloud`、`syncFromCloud` 等方法
+  - **全局数据库调用统一**：将以下文件中的 `getSqliteDatabase()` 全部替换为 `getDatabase()`：
+    - `agent.js` - 任务结果保存
+    - `routes/userRoutes.js` - 用户管理
+    - `routes/issueRoutes.js` - 缺陷管理
+    - `routes/configRoutes.js` - 配置管理
+    - `routes/projectRoutes.js` - 项目管理
+    - `routes/reportRoutes.js` - 报告管理
+    - `routes/scanRoutes.js` - 扫描路由
+    - `utils/telemetry.js` - 遥测数据收集
+    - `utils/logger.js` - 操作日志记录
+    - `utils/systemMonitor.js` - 系统监控
+    - `services/bootstrap/analysisEngine.js` - AI分析引擎
+    - `services/bootstrap/ruleEngine.js` - 规则引擎
+    - `services/bootstrap/validator.js` - 效果验证器
+    - `services/rag/agent.js` - RAG优化记录
+- **🐛 双写同步完整性修复**：确保所有数据库写操作（插入、更新、删除、事务）都通过统一适配器执行，配置MySQL后自动实现本地与云端数据双向同步
+
 ### v3.0.3
-> 更新日期: 2026-07-20
+> 更新日期: 2026-07-21
 
 - **✨ 数据库双写同步系统**：实现本地SQLite和云端MySQL的双向同步
   - 统一适配器：新建 `dbAdapter.js`，提供完全同步的API，兼容原始SQLite操作
@@ -266,10 +288,17 @@ src/
   - 事务支持：支持事务跟踪，收集SQL操作并异步同步到MySQL
 - **✨ MySQL表结构完善**：补齐所有23张表的MySQL表结构，与SQLite完全一致
 - **✨ 配置自动同步**：修改 `setDefaultConnection()`，配置云端后自动测试连接并执行全量数据同步
+- **✨ 失败操作重试队列**：MySQL写入失败时自动加入持久化重试队列，最多重试5次，间隔30秒
+- **✨ 连接健康监控**：定期检查MySQL连接状态（60秒间隔），连接失效时自动禁用同步
+- **✨ 同步状态可视化**：`/status` 命令显示MySQL启用状态、健康状态、待同步队列数量
 - **🐛 MySQL保留字修复**：修复 `sustain_rules` 表中 `condition` 和 `action` 字段为MySQL保留字导致的语法错误
 - **🐛 事务同步修复**：修复 `detector.js` 和 `knowledgeBase.js` 中绕过 `dbAdapter` 直接操作数据库导致的数据不同步问题
 - **🐛 TEXT主键同步修复**：修复 `adaptSqliteResultForMysql` 在TEXT/UUID主键表上无法正确获取插入行数据的问题
 - **🐛 batchExecute修复**：修复 `database.js` 中 `batchExecute` 方法绕过适配器导致的双写失效问题
+- **🐛 事务异常保护**：修复 `transaction()` 方法缺少 try/finally 导致 prepare 方法永久污染的问题
+- **🐛 全量同步原子替换**：修复 `syncLocalToRemote` 使用 TRUNCATE 导致同步失败时数据丢失的问题
+- **🐛 参数兼容性修复**：修复 `prepare()` 不支持展开参数调用方式的问题
+- **🐛 参数化查询修复**：修复 `executeMysqlInsertAsync` 使用手动转义的安全隐患
 
 ### v3.0.2
 > 更新日期: 2026-07-19

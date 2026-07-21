@@ -641,6 +641,11 @@ class DualModeEngine {
     const kbStats = knowledgeBase.getCachedStats();
     const networkStatus = getNetworkStatus();
     
+    const mysql = require('../utils/mysql');
+    const dbAdapter = require('../utils/dbAdapter').dbAdapter;
+    
+    const syncQueueCount = dbAdapter.getSyncQueueCount();
+    
     return {
       mode: this.mode,
       actualMode,
@@ -652,7 +657,12 @@ class DualModeEngine {
         available: p.available,
         model: p.model
       })),
-      knowledgeBase: kbStats
+      knowledgeBase: kbStats,
+      databaseSync: {
+        mysqlEnabled: mysql.isEnabled(),
+        mysqlHealthy: mysql.isConnectionHealthy(),
+        syncQueuePending: syncQueueCount
+      }
     };
   }
 }

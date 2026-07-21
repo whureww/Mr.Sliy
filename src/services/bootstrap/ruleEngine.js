@@ -1,7 +1,7 @@
 const { logger } = require('../../utils/logger');
 const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
 const { telemetry } = require('../../utils/telemetry');
-const { getSqliteDatabase } = require('../../utils/database');
+const { getDatabase } = require('../../utils/database');
 
 class RuleEngine {
   constructor() {
@@ -15,7 +15,7 @@ class RuleEngine {
 
   init() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.exec(`
         CREATE TABLE IF NOT EXISTS sustain_rules (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -55,7 +55,7 @@ class RuleEngine {
 
   loadRulesFromDb() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       const rules = db.prepare('SELECT * FROM sustain_rules WHERE enabled = 1 ORDER BY priority DESC').all();
       for (const rule of rules) {
         this.rules.set(rule.rule_id, {
@@ -144,7 +144,7 @@ class RuleEngine {
 
   saveRuleToDb(rule) {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.prepare(`
         INSERT OR REPLACE INTO sustain_rules 
         (rule_id, name, description, condition, action, action_params, priority, enabled, updated_at)
@@ -441,7 +441,7 @@ class RuleEngine {
     }
 
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.prepare(`
         INSERT INTO rule_execution_log (rule_id, rule_name, context, action_taken, result, success, timestamp)
         VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -469,7 +469,7 @@ class RuleEngine {
     if (this.rules.has(ruleId)) {
       this.rules.delete(ruleId);
       try {
-        const db = getSqliteDatabase();
+        const db = getDatabase();
         db.prepare('UPDATE sustain_rules SET enabled = 0 WHERE rule_id = ?').run(ruleId);
       } catch (error) {
         logger.debug(`禁用规则失败: ${error.message}`);

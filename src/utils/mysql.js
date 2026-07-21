@@ -12,6 +12,9 @@ const { logger } = require('./logger');
 
 let pool = null;
 let currentConnectionConfig = null;
+let connectionHealthy = false;
+let healthCheckTimer = null;
+const HEALTH_CHECK_INTERVAL = 60000;
 
 /**
  * 获取MySQL连接池配置
@@ -612,10 +615,63 @@ async function closePool() {
 }
 
 /**
- * 检查MySQL是否可用
+ * 检查MySQL连接健康状态
+ */
+async function checkConnectionHealth() {
+  if (!config.mysql.enabled) {
+    connectionHealthy = false;
+    return;
+  }
+  
+  const pool = getPool();
+  if (!pool) {
+    connectionHealthy = false;
+    return;
+  }
+  
+  try {
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+    connectionHealthy = true;
+    logger.debug('MySQL连接健康检查通过');
+  } catch (error) {
+    connectionHealthy = false;
+    logger.warn(`MySQL连接健康检查失败: ${error.message}`);
+  }
+}
+
+/**
+ * 启动健康检查定时器
+ */
+function startHealthCheckTimer() {
+  if (healthCheckTimer) clearInterval(healthCheckTimer);
+  healthCheckTimer = setInterval(checkConnectionHealth, HEALTH_CHECK_INTERVAL);
+  logger.debug('MySQL健康检查定时器已启动');
+}
+
+/**
+ * 停止健康检查定时器
+ */
+function stopHealthCheckTimer() {
+  if (healthCheckTimer) {
+    clearInterval(healthCheckTimer);
+    healthCheckTimer = null;
+  }
+}
+
+/**
+ * 获取连接健康状态
+ */
+function isConnectionHealthy() {
+  return connectionHealthy;
+}
+
+/**
+ * 检查MySQL是否可用（包含健康检查）
  */
 function isEnabled() {
-  return config.mysql.enabled && getPool() !== null;
+  return config.mysql.enabled && getPool() !== null && connectionHealthy;
 }
 
 /**
@@ -736,5 +792,9 @@ module.exports = {
   createPoolWithConfig,
   testConnectionWithConfig,
   switchConnection,
-  getCurrentConnectionConfig
+  getCurrentConnectionConfig,
+  checkConnectionHealth,
+  startHealthCheckTimer,
+  stopHealthCheckTimer,
+  isConnectionHealthy
 };
