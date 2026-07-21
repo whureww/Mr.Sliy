@@ -7,7 +7,7 @@ const express = require('express');
 const router = express.Router();
 const { detectIssues, batchDetect, saveDetectionResults } = require('../services/detection/detector');
 const { optimizeWithRAG } = require('../services/rag/agent');
-const { getSqliteDatabase } = require('../utils/database');
+const { getDatabase } = require('../utils/database');
 const { success, error } = require('../utils/response');
 const { logger } = require('../utils/logger');
 const { generateUUID, getFileLanguage } = require('../utils/helpers');
@@ -204,7 +204,7 @@ function collectFiles(projectPath, extensions = ['.js', '.ts', '.jsx', '.tsx', '
  * 创建项目记录
  */
 async function createProjectRecord(projectPath) {
-  const db = getSqliteDatabase();
+  const db = getDatabase();
   const projectName = path.basename(projectPath);
   
   const stmt = db.prepare(`
@@ -220,7 +220,7 @@ async function createProjectRecord(projectPath) {
  * 创建任务记录
  */
 async function createTaskRecord(taskId, projectId, data) {
-  const db = getSqliteDatabase();
+  const db = getDatabase();
   
   const stmt = db.prepare(`
     INSERT INTO scan_task (id, project_id, scan_mode, scan_type, target_path, 

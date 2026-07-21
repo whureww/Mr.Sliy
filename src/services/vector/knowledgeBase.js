@@ -1,14 +1,12 @@
 /**
  * 知识库模块
- * 默认从云端MySQL读取，MySQL不可用时自动回退到本地SQLite
+ * 使用统一数据库适配器，自动支持本地SQLite和云端MySQL双写同步
  * 存储代码优化案例、最佳实践、编码规范等知识
  */
 
 const { getDatabase } = require('../../utils/database');
 const { logger } = require('../../utils/logger');
 const { generateUUID } = require('../../utils/helpers');
-const mysql = require('../../utils/mysql');
-const { config } = require('../../config');
 
 class SimpleEmbedding {
   constructor() {
@@ -66,9 +64,6 @@ const embedder = new SimpleEmbedding();
 class KnowledgeBase {
   constructor() {
     this.initialized = false;
-    this.useMysql = false;
-    this.mysqlAvailable = false;
-    this.currentConnectionId = null;
     this.cachedStats = {
       totalEntries: 0,
       totalCases: 0,
@@ -81,81 +76,13 @@ class KnowledgeBase {
   async init() {
     if (this.initialized) return;
 
-    this.useMysql = false;
-    this.mysqlAvailable = false;
-
-    let activeConn = null;
-    let activeConnId = null;
-
-    const defaultConnId = config.databases.defaultConnection;
-    const defaultConn = config.databases.connections[defaultConnId];
-
-    if (defaultConn && defaultConn.enabled && defaultConn.host) {
-      activeConn = defaultConn;
-      activeConnId = defaultConnId;
+    this._initSqlite();
+    
+    const db = getDatabase();
+    const mysql = require('../../utils/mysql');
+    if (mysql.isEnabled()) {
+      logger.info('知识库使用本地SQLite，数据自动同步到云端MySQL');
     } else {
-      for (const [id, conn] of Object.entries(config.databases.connections)) {
-        if (conn.enabled && conn.host) {
-          activeConn = conn;
-          activeConnId = id;
-          break;
-        }
-      }
-    }
-
-    if (activeConn) {
-      try {
-        config.mysql.enabled = true;
-        config.mysql.host = activeConn.host;
-        config.mysql.port = activeConn.port;
-        config.mysql.user = activeConn.user;
-        config.mysql.password = activeConn.password;
-        config.mysql.database = activeConn.database;
-        config.mysql.connectionLimit = activeConn.connectionLimit;
-
-        const testResult = await mysql.testConnection();
-        if (!testResult.success) {
-          throw new Error(testResult.message);
-        }
-
-        const initResult = await mysql.initDatabase();
-        if (!initResult) {
-          throw new Error('MySQL数据库表初始化失败');
-        }
-
-        this.useMysql = true;
-        this.mysqlAvailable = true;
-        this.currentConnectionId = activeConnId;
-        logger.info(`知识库使用云端MySQL (${activeConn.name})`);
-      } catch (e) {
-        logger.warn('云端MySQL连接失败，回退到本地SQLite:', e.message);
-        this.useMysql = false;
-        this.mysqlAvailable = false;
-        config.mysql.enabled = false;
-      }
-    } else if (config.mysql && config.mysql.enabled && config.mysql.host) {
-      try {
-        const testResult = await mysql.testConnection();
-        if (!testResult.success) {
-          throw new Error(testResult.message);
-        }
-        const initResult = await mysql.initDatabase();
-        if (!initResult) {
-          throw new Error('MySQL数据库表初始化失败');
-        }
-        this.useMysql = true;
-        this.mysqlAvailable = true;
-        logger.info('知识库使用云端MySQL');
-      } catch (e) {
-        logger.warn('云端MySQL连接失败，回退到本地SQLite:', e.message);
-        this.useMysql = false;
-        this.mysqlAvailable = false;
-        config.mysql.enabled = false;
-      }
-    }
-
-    if (!this.useMysql) {
-      this._initSqlite();
       logger.info('知识库使用本地SQLite');
     }
 
@@ -164,8 +91,8 @@ class KnowledgeBase {
   }
 
   _initSqlite() {
-    const { getSqliteDatabase } = require('../../utils/database');
-    const db = getSqliteDatabase();
+    const { getDatabase } = require('../../utils/database');
+    const db = getDatabase();
     
     db.exec(`
       CREATE TABLE IF NOT EXISTS kb_entries (
@@ -283,57 +210,25 @@ class KnowledgeBase {
     const type = options.type;
     const language = options.language;
 
-    let entries = [];
+    const db = getDatabase();
+    let sql = 'SELECT id, content, content_type, language, tags, source, vector_json FROM kb_entries';
+    const conditions = [];
+    const params = [];
 
-    if (this.useMysql) {
-      try {
-        let sql = 'SELECT id, content, content_type, language, tags, source, vector_json FROM kb_entries';
-        const conditions = [];
-        const params = [];
-
-        if (type) {
-          conditions.push('content_type = ?');
-          params.push(type);
-        }
-        if (language) {
-          conditions.push('language = ?');
-          params.push(language);
-        }
-
-        if (conditions.length > 0) {
-          sql += ' WHERE ' + conditions.join(' AND ');
-        }
-
-        entries = await mysql.query(sql, params);
-      } catch (e) {
-        logger.warn('MySQL读取失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
+    if (type) {
+      conditions.push('content_type = ?');
+      params.push(type);
+    }
+    if (language) {
+      conditions.push('language = ?');
+      params.push(language);
     }
 
-    if (!this.useMysql) {
-      const { getSqliteDatabase } = require('../../utils/database');
-      const db = getSqliteDatabase();
-      let sql = 'SELECT id, content, content_type, language, tags, source, vector_json FROM kb_entries';
-      const conditions = [];
-      const params = [];
-
-      if (type) {
-        conditions.push('content_type = ?');
-        params.push(type);
-      }
-      if (language) {
-        conditions.push('language = ?');
-        params.push(language);
-      }
-
-      if (conditions.length > 0) {
-        sql += ' WHERE ' + conditions.join(' AND ');
-      }
-
-      const stmt = db.prepare(sql);
-      entries = stmt.all(...params);
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
     }
+
+    const entries = db.prepare(sql).all(...params);
 
     const results = entries.map(entry => {
       const entryVector = JSON.parse(entry.vector_json || '{}');
@@ -360,57 +255,25 @@ class KnowledgeBase {
     const language = options.language;
     const issueType = options.issueType;
 
-    let cases = [];
+    const db = getDatabase();
+    let sql = 'SELECT id, original_code, optimized_code, explanation, language, issue_type, vector_json, usage_count, rating FROM kb_cases';
+    const conditions = [];
+    const params = [];
 
-    if (this.useMysql) {
-      try {
-        let sql = 'SELECT id, original_code, optimized_code, explanation, language, issue_type, vector_json, usage_count, rating FROM kb_cases';
-        const conditions = [];
-        const params = [];
-
-        if (language) {
-          conditions.push('language = ?');
-          params.push(language);
-        }
-        if (issueType) {
-          conditions.push('issue_type = ?');
-          params.push(issueType);
-        }
-
-        if (conditions.length > 0) {
-          sql += ' WHERE ' + conditions.join(' AND ');
-        }
-
-        cases = await mysql.query(sql, params);
-      } catch (e) {
-        logger.warn('MySQL读取失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
+    if (language) {
+      conditions.push('language = ?');
+      params.push(language);
+    }
+    if (issueType) {
+      conditions.push('issue_type = ?');
+      params.push(issueType);
     }
 
-    if (!this.useMysql) {
-      const { getSqliteDatabase } = require('../../utils/database');
-      const db = getSqliteDatabase();
-      let sql = 'SELECT id, original_code, optimized_code, explanation, language, issue_type, vector_json, usage_count, rating FROM kb_cases';
-      const conditions = [];
-      const params = [];
-
-      if (language) {
-        conditions.push('language = ?');
-        params.push(language);
-      }
-      if (issueType) {
-        conditions.push('issue_type = ?');
-        params.push(issueType);
-      }
-
-      if (conditions.length > 0) {
-        sql += ' WHERE ' + conditions.join(' AND ');
-      }
-
-      const stmt = db.prepare(sql);
-      cases = stmt.all(...params);
+    if (conditions.length > 0) {
+      sql += ' WHERE ' + conditions.join(' AND ');
     }
+
+    const cases = db.prepare(sql).all(...params);
 
     const results = cases.map(c => {
       const caseVector = JSON.parse(c.vector_json || '{}');
@@ -618,30 +481,7 @@ class KnowledgeBase {
   async getStats() {
     await this.init();
 
-    if (this.useMysql) {
-      try {
-        const entryResult = await mysql.query('SELECT COUNT(*) as count FROM kb_entries');
-        const caseResult = await mysql.query('SELECT COUNT(*) as count FROM kb_cases');
-        const typeStats = await mysql.query('SELECT content_type, COUNT(*) as count FROM kb_entries GROUP BY content_type');
-        const languageStats = await mysql.query('SELECT language, COUNT(*) as count FROM kb_entries WHERE language IS NOT NULL GROUP BY language');
-
-        const stats = {
-          totalEntries: entryResult[0].count,
-          totalCases: caseResult[0].count,
-          typeStats,
-          languageStats,
-          storage: 'mysql'
-        };
-        this.cachedStats = stats;
-        return stats;
-      } catch (e) {
-        logger.warn('MySQL读取失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    const { getSqliteDatabase } = require('../../utils/database');
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     const entryCount = db.prepare('SELECT COUNT(*) as count FROM kb_entries').get().count;
     const caseCount = db.prepare('SELECT COUNT(*) as count FROM kb_cases').get().count;
 
@@ -653,12 +493,13 @@ class KnowledgeBase {
       SELECT language, COUNT(*) as count FROM kb_entries WHERE language IS NOT NULL GROUP BY language
     `).all();
 
+    const mysql = require('../../utils/mysql');
     const stats = {
       totalEntries: entryCount,
       totalCases: caseCount,
       typeStats,
       languageStats,
-      storage: 'sqlite'
+      storage: mysql.isEnabled() ? 'sqlite+mysql' : 'sqlite'
     };
     this.cachedStats = stats;
     return stats;
@@ -671,25 +512,9 @@ class KnowledgeBase {
   async exportToJSON(options = {}) {
     await this.init();
     
-    let entries = [];
-    let cases = [];
-
-    if (this.useMysql) {
-      try {
-        entries = await mysql.query('SELECT * FROM kb_entries');
-        cases = await mysql.query('SELECT * FROM kb_cases');
-      } catch (e) {
-        logger.warn('MySQL读取失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    if (!this.useMysql) {
-      const { getSqliteDatabase } = require('../../utils/database');
-      const db = getSqliteDatabase();
-      entries = db.prepare('SELECT * FROM kb_entries').all();
-      cases = db.prepare('SELECT * FROM kb_cases').all();
-    }
+    const db = getDatabase();
+    const entries = db.prepare('SELECT * FROM kb_entries').all();
+    const cases = db.prepare('SELECT * FROM kb_cases').all();
     
     const exportData = {
       version: '1.0',
@@ -987,24 +812,7 @@ class KnowledgeBase {
   async updateCaseUsage(caseId, rating) {
     await this.init();
 
-    if (this.useMysql) {
-      try {
-        await mysql.execute(
-          `UPDATE kb_cases 
-           SET usage_count = usage_count + 1, 
-               rating = (rating * usage_count + ?) / (usage_count + 1)
-           WHERE id = ?`,
-          [rating || 5, caseId]
-        );
-        return;
-      } catch (e) {
-        logger.warn('MySQL写入失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    const { getSqliteDatabase } = require('../../utils/database');
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     const stmt = db.prepare(`
       UPDATE kb_cases 
       SET usage_count = usage_count + 1, 
@@ -1017,47 +825,21 @@ class KnowledgeBase {
   async findDuplicateEntries() {
     await this.init();
     
+    const db = getDatabase();
     const duplicates = {
-      entries: [],
-      cases: []
-    };
-
-    if (this.useMysql) {
-      try {
-        duplicates.entries = await mysql.query(`
-          SELECT id, content, COUNT(*) as count 
-          FROM kb_entries 
-          GROUP BY content 
-          HAVING COUNT(*) > 1
-        `);
-        duplicates.cases = await mysql.query(`
-          SELECT id, original_code, COUNT(*) as count 
-          FROM kb_cases 
-          GROUP BY original_code 
-          HAVING COUNT(*) > 1
-        `);
-      } catch (e) {
-        logger.warn('MySQL查询重复失败，回退到SQLite:', e.message);
-        this.useMysql = false;
-      }
-    }
-
-    if (!this.useMysql) {
-      const { getSqliteDatabase } = require('../../utils/database');
-      const db = getSqliteDatabase();
-      duplicates.entries = db.prepare(`
+      entries: db.prepare(`
         SELECT id, content, COUNT(*) as count 
         FROM kb_entries 
         GROUP BY content 
         HAVING COUNT(*) > 1
-      `).all();
-      duplicates.cases = db.prepare(`
+      `).all(),
+      cases: db.prepare(`
         SELECT id, original_code, COUNT(*) as count 
         FROM kb_cases 
         GROUP BY original_code 
         HAVING COUNT(*) > 1
-      `).all();
-    }
+      `).all()
+    };
 
     return duplicates;
   }
@@ -1065,88 +847,41 @@ class KnowledgeBase {
   async removeDuplicates() {
     await this.init();
     
+    const db = getDatabase();
     let removedEntries = 0;
     let removedCases = 0;
 
-    if (this.useMysql) {
-      try {
-        const duplicates = await mysql.query(`
-          SELECT content 
-          FROM kb_entries 
-          GROUP BY content 
-          HAVING COUNT(*) > 1
-        `);
-        
-        for (const item of duplicates) {
-          const entries = await mysql.query('SELECT id FROM kb_entries WHERE content = ?', [item.content]);
-          const idsToKeep = [entries[0].id];
-          const idsToRemove = entries.slice(1).map(e => e.id);
-          
-          for (const id of idsToRemove) {
-            await mysql.execute('DELETE FROM kb_entries WHERE id = ?', [id]);
-            removedEntries++;
-          }
-        }
-
-        const caseDuplicates = await mysql.query(`
-          SELECT original_code 
-          FROM kb_cases 
-          GROUP BY original_code 
-          HAVING COUNT(*) > 1
-        `);
-        
-        for (const item of caseDuplicates) {
-          const cases = await mysql.query('SELECT id FROM kb_cases WHERE original_code = ?', [item.original_code]);
-          const idsToKeep = [cases[0].id];
-          const idsToRemove = cases.slice(1).map(e => e.id);
-          
-          for (const id of idsToRemove) {
-            await mysql.execute('DELETE FROM kb_cases WHERE id = ?', [id]);
-            removedCases++;
-          }
-        }
-      } catch (e) {
-        logger.warn('MySQL删除重复失败，回退到SQLite:', e.message);
-        this.useMysql = false;
+    const duplicates = db.prepare(`
+      SELECT content 
+      FROM kb_entries 
+      GROUP BY content 
+      HAVING COUNT(*) > 1
+    `).all();
+    
+    for (const item of duplicates) {
+      const entries = db.prepare('SELECT id FROM kb_entries WHERE content = ?').all(item.content);
+      const idsToRemove = entries.slice(1).map(e => e.id);
+      
+      for (const id of idsToRemove) {
+        db.prepare('DELETE FROM kb_entries WHERE id = ?').run(id);
+        removedEntries++;
       }
     }
 
-    if (!this.useMysql) {
-      const { getSqliteDatabase } = require('../../utils/database');
-      const db = getSqliteDatabase();
+    const caseDuplicates = db.prepare(`
+      SELECT original_code 
+      FROM kb_cases 
+      GROUP BY original_code 
+      HAVING COUNT(*) > 1
+    `).all();
+    
+    for (const item of caseDuplicates) {
+      const cases = db.prepare('SELECT id FROM kb_cases WHERE original_code = ?').all(item.original_code);
+      const idsToRemove = cases.slice(1).map(e => e.id);
       
-      const duplicates = db.prepare(`
-        SELECT content 
-        FROM kb_entries 
-        GROUP BY content 
-        HAVING COUNT(*) > 1
-      `).all();
-      
-      for (const item of duplicates) {
-        const entries = db.prepare('SELECT id FROM kb_entries WHERE content = ?').all(item.content);
-        const idsToRemove = entries.slice(1).map(e => e.id);
-        
-        for (const id of idsToRemove) {
-          db.prepare('DELETE FROM kb_entries WHERE id = ?').run(id);
-          removedEntries++;
-        }
-      }
-
-      const caseDuplicates = db.prepare(`
-        SELECT original_code 
-        FROM kb_cases 
-        GROUP BY original_code 
-        HAVING COUNT(*) > 1
-      `).all();
-      
-      for (const item of caseDuplicates) {
-        const cases = db.prepare('SELECT id FROM kb_cases WHERE original_code = ?').all(item.original_code);
-        const idsToRemove = cases.slice(1).map(e => e.id);
-        
-        for (const id of idsToRemove) {
-          db.prepare('DELETE FROM kb_cases WHERE id = ?').run(id);
-          removedCases++;
-        }
+      for (const id of idsToRemove) {
+        db.prepare('DELETE FROM kb_cases WHERE id = ?').run(id);
+        removedCases++;
       }
     }
 
@@ -1159,147 +894,30 @@ class KnowledgeBase {
   }
 
   async syncToCloud(mode = 'merge') {
-    if (!this.mysqlAvailable) {
-      return { success: false, message: 'MySQL不可用' };
+    const mysql = require('../../utils/mysql');
+    if (!mysql.isEnabled()) {
+      return { success: false, message: 'MySQL未配置' };
     }
     
-    try {
-      const data = await this.exportToJSON({ includeVectors: false });
-      let syncedEntries = 0;
-      let syncedCases = 0;
-      let updatedEntries = 0;
-      let updatedCases = 0;
-      
-      if (mode === 'overwrite') {
-        await mysql.execute('DELETE FROM kb_entries');
-        await mysql.execute('DELETE FROM kb_cases');
-      }
-      
-      for (const entry of data.entries) {
-        if (mode !== 'overwrite') {
-          const existing = await mysql.query(
-            'SELECT id FROM kb_entries WHERE id = ?',
-            [entry.id]
-          );
-          
-          if (existing.length > 0) {
-            if (mode === 'merge') {
-              await mysql.execute(
-                `UPDATE kb_entries SET content = ?, content_type = ?, language = ?, tags = ?, source = ? WHERE id = ?`,
-                [
-                  entry.content,
-                  entry.content_type,
-                  entry.language,
-                  entry.tags ? JSON.stringify(entry.tags) : null,
-                  entry.source,
-                  entry.id
-                ]
-              );
-              updatedEntries++;
-            }
-            continue;
-          }
-        }
-        
-        await mysql.execute(
-          `INSERT INTO kb_entries (id, content, content_type, language, tags, source) VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            entry.id,
-            entry.content,
-            entry.content_type,
-            entry.language,
-            entry.tags ? JSON.stringify(entry.tags) : null,
-            entry.source
-          ]
-        );
-        syncedEntries++;
-      }
-      
-      for (const caseItem of data.cases) {
-        if (mode !== 'overwrite') {
-          const existing = await mysql.query(
-            'SELECT id FROM kb_cases WHERE id = ?',
-            [caseItem.id]
-          );
-          
-          if (existing.length > 0) {
-            if (mode === 'merge') {
-              await mysql.execute(
-                `UPDATE kb_cases SET original_code = ?, optimized_code = ?, explanation = ?, language = ?, issue_type = ?, usage_count = ?, rating = ? WHERE id = ?`,
-                [
-                  caseItem.original_code,
-                  caseItem.optimized_code,
-                  caseItem.explanation,
-                  caseItem.language,
-                  caseItem.issue_type || 'general',
-                  caseItem.usage_count || 0,
-                  caseItem.rating || 0,
-                  caseItem.id
-                ]
-              );
-              updatedCases++;
-            }
-            continue;
-          }
-        }
-        
-        await mysql.execute(
-          `INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, usage_count, rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-          [
-            caseItem.id,
-            caseItem.original_code,
-            caseItem.optimized_code,
-            caseItem.explanation,
-            caseItem.language,
-            caseItem.issue_type || 'general',
-            caseItem.usage_count || 0,
-            caseItem.rating || 0
-          ]
-        );
-        syncedCases++;
-      }
-      
-      const os = require('os');
-      const crypto = require('crypto');
-      const machineId = crypto.createHash('md5')
-        .update(`${os.hostname()}-${os.userInfo().username}-${os.platform()}`)
-        .digest('hex')
-        .substring(0, 8);
-      
-      await mysql.execute(
-        `INSERT INTO sync_metadata (table_name, last_sync_at, record_count, machine_id) VALUES (?, NOW(), ?, ?) ON DUPLICATE KEY UPDATE last_sync_at = NOW(), record_count = ?`,
-        ['kb_entries', syncedEntries, machineId, syncedEntries]
-      );
-      
-      await mysql.execute(
-        `INSERT INTO sync_metadata (table_name, last_sync_at, record_count, machine_id) VALUES (?, NOW(), ?, ?) ON DUPLICATE KEY UPDATE last_sync_at = NOW(), record_count = ?`,
-        ['kb_cases', syncedCases, machineId, syncedCases]
-      );
-      
-      return {
-        success: true,
-        syncedEntries,
-        syncedCases,
-        updatedEntries,
-        updatedCases,
-        mode,
-        message: mode === 'overwrite' 
-          ? `覆盖成功: ${syncedEntries} 条知识, ${syncedCases} 个案例`
-          : mode === 'append'
-            ? `追加成功: ${syncedEntries} 条知识, ${syncedCases} 个案例`
-            : `同步成功: ${syncedEntries} 条新增, ${updatedEntries} 条更新知识; ${syncedCases} 个新增, ${updatedCases} 个更新案例`
-      };
-    } catch (error) {
-      return { success: false, message: error.message };
-    }
+    logger.info('手动触发知识库全量同步到云端...');
+    const { dbAdapter } = require('../../utils/dbAdapter');
+    await dbAdapter.syncLocalToRemote('kb_entries');
+    await dbAdapter.syncLocalToRemote('kb_cases');
+    
+    return {
+      success: true,
+      message: '知识库全量同步完成'
+    };
   }
 
   async syncFromCloud() {
-    if (!this.mysqlAvailable) {
-      return { success: false, message: 'MySQL不可用' };
+    const mysql = require('../../utils/mysql');
+    if (!mysql.isEnabled()) {
+      return { success: false, message: 'MySQL未配置' };
     }
     
     try {
+      const db = getDatabase();
       const entries = await mysql.query('SELECT * FROM kb_entries');
       const cases = await mysql.query('SELECT * FROM kb_cases');
       
@@ -1326,12 +944,7 @@ class KnowledgeBase {
         }))
       };
       
-      const originalUseMysql = this.useMysql;
-      this.useMysql = false;
-      
       const result = await this.importFromJSON(importData, { merge: false, skipExisting: false });
-      
-      this.useMysql = originalUseMysql;
       
       return {
         success: true,
@@ -1344,22 +957,15 @@ class KnowledgeBase {
   }
 
   async testCloudConnection() {
-    const result = await mysql.testConnection();
-    if (result.success) {
-      this.mysqlAvailable = true;
-    } else {
-      this.mysqlAvailable = false;
-    }
-    return result;
+    const mysql = require('../../utils/mysql');
+    return await mysql.testConnection();
   }
 
   async switchDatabaseConnection(connectionConfig) {
+    const mysql = require('../../utils/mysql');
     const result = await mysql.switchConnection(connectionConfig);
     
     if (result.success) {
-      this.currentConnectionId = connectionConfig.id;
-      this.useMysql = true;
-      this.mysqlAvailable = true;
       this.initialized = false;
       await this.init();
     }
@@ -1368,11 +974,12 @@ class KnowledgeBase {
   }
 
   async testConnectionWithConfig(connectionConfig) {
+    const mysql = require('../../utils/mysql');
     return await mysql.testConnectionWithConfig(connectionConfig);
   }
 
   getCurrentConnectionId() {
-    return this.currentConnectionId;
+    return null;
   }
 }
 

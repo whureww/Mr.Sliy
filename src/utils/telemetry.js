@@ -1,6 +1,6 @@
 const os = require('os');
 const { logger } = require('./logger');
-const { getSqliteDatabase } = require('./database');
+const { getDatabase } = require('./database');
 
 class Telemetry {
   constructor() {
@@ -27,7 +27,7 @@ class Telemetry {
 
   init() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.exec(`
         CREATE TABLE IF NOT EXISTS telemetry_events (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -65,7 +65,7 @@ class Telemetry {
     this.updateMetrics(eventType, category, data, severity);
 
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.prepare(`
         INSERT INTO telemetry_events (event_type, event_category, event_data, severity, timestamp)
         VALUES (?, ?, ?, ?, ?)
@@ -173,7 +173,7 @@ class Telemetry {
 
   async getHistoricalData(hours = 24) {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       const since = Date.now() - (hours * 60 * 60 * 1000);
       const events = db.prepare(`
         SELECT event_type, event_category, event_data, severity, timestamp

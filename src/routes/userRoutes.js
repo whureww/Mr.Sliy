@@ -4,12 +4,12 @@
 
 const express = require('express');
 const router = express.Router();
-const { getSqliteDatabase } = require('../utils/database');
+const { getDatabase } = require('../utils/database');
 const { success, error, paginate } = require('../utils/response');
 
 router.get('/', (req, res) => {
   try {
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
     
@@ -28,7 +28,7 @@ router.get('/', (req, res) => {
 
 router.post('/login', (req, res) => {
   try {
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     const { username, password } = req.body;
     
     const stmt = db.prepare('SELECT * FROM sys_user WHERE username = ? AND password_hash = ?');

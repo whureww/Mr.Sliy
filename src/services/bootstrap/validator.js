@@ -1,6 +1,6 @@
 const { logger } = require('../../utils/logger');
 const { telemetry } = require('../../utils/telemetry');
-const { getSqliteDatabase } = require('../../utils/database');
+const { getDatabase } = require('../../utils/database');
 
 class Validator {
   constructor() {
@@ -11,7 +11,7 @@ class Validator {
 
   init() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.exec(`
         CREATE TABLE IF NOT EXISTS validation_records (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -205,7 +205,7 @@ class Validator {
 
   saveValidation(validation) {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       db.prepare(`
         INSERT INTO validation_records 
         (validation_type, target_id, target_type, before_state, after_state, metrics_before, metrics_after, success, improvement_score, timestamp)
@@ -233,7 +233,7 @@ class Validator {
 
   async getValidationStats() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       const total = db.prepare('SELECT COUNT(*) as count FROM validation_records').get();
       const successful = db.prepare('SELECT COUNT(*) as count FROM validation_records WHERE success = 1').get();
       const avgImprovement = db.prepare('SELECT AVG(improvement_score) as avg FROM validation_records').get();

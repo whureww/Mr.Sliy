@@ -5,7 +5,7 @@
 
 const express = require('express');
 const router = express.Router();
-const { getSqliteDatabase } = require('../utils/database');
+const { getDatabase } = require('../utils/database');
 const { success, error, paginate } = require('../utils/response');
 const { logger } = require('../utils/logger');
 
@@ -14,7 +14,7 @@ const { logger } = require('../utils/logger');
  */
 router.get('/', (req, res) => {
   try {
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
@@ -80,7 +80,7 @@ router.get('/', (req, res) => {
  */
 router.get('/:id', (req, res) => {
   try {
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     const { id } = req.params;
     
     const stmt = db.prepare('SELECT * FROM code_issue WHERE id = ?');
@@ -109,7 +109,7 @@ router.get('/:id', (req, res) => {
  */
 router.put('/:id/fix', (req, res) => {
   try {
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     const { id } = req.params;
     const { userId } = req.body;
     
@@ -142,7 +142,7 @@ router.put('/:id/fix', (req, res) => {
  */
 router.get('/stats', (req, res) => {
   try {
-    const db = getSqliteDatabase();
+    const db = getDatabase();
     
     // 按类型统计
     const typeStmt = db.prepare(`

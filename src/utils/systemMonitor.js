@@ -3,7 +3,7 @@ const http = require('http');
 const https = require('https');
 const { logger } = require('./logger');
 const { eventBus, SYSTEM_EVENTS } = require('./eventBus');
-const { getSqliteDatabase } = require('./database');
+const { getDatabase } = require('./database');
 const { providerManager } = require('../services/llm/providers');
 
 class SystemMonitor {
@@ -115,7 +115,7 @@ class SystemMonitor {
 
   async checkDatabase() {
     try {
-      const db = getSqliteDatabase();
+      const db = getDatabase();
       const result = db.prepare('SELECT 1 AS test').get();
       if (result && result.test === 1) {
         return {
