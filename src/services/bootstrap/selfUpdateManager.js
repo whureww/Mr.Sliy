@@ -325,7 +325,7 @@ class SelfUpdateManager {
           skipPrompt: options.autoConfirm
         });
 
-        if (!backupConfirmation.confirmed) {
+        if (!backupConfirmation.confirmed && backupConfirmation.reason !== 'timeout' && backupConfirmation.reason !== 'queue') {
           await this.updateUpdateRecord(updateId, {
             status: 'rejected',
             userConfirmed: 0,
@@ -340,6 +340,17 @@ class SelfUpdateManager {
             });
           }
           return { success: false, error: '用户拒绝确认备份', rejectedStep: 'backup_confirmation' };
+        }
+        
+        if (backupConfirmation.reason === 'timeout' || backupConfirmation.reason === 'queue') {
+          if (onProgress) {
+            onProgress({ 
+              progress: Math.round((30 / totalWeight) * 100), 
+              description: '操作已暂存到队列', 
+              status: 'queued' 
+            });
+          }
+          return { success: false, error: '操作已暂存到队列', status: 'queued' };
         }
 
         updateRecord.userConfirmed = 1;
@@ -382,7 +393,7 @@ class SelfUpdateManager {
           skipPrompt: options.autoConfirm
         });
 
-        if (!applyConfirmation.confirmed) {
+        if (!applyConfirmation.confirmed && applyConfirmation.reason !== 'timeout' && applyConfirmation.reason !== 'queue') {
           await this.updateUpdateRecord(updateId, {
             status: 'rejected',
             userConfirmed: 0,
@@ -397,6 +408,17 @@ class SelfUpdateManager {
             });
           }
           return { success: false, error: '用户拒绝确认应用更新', rejectedStep: 'apply_confirmation' };
+        }
+        
+        if (applyConfirmation.reason === 'timeout' || applyConfirmation.reason === 'queue') {
+          if (onProgress) {
+            onProgress({ 
+              progress: Math.round((45 / totalWeight) * 100), 
+              description: '操作已暂存到队列', 
+              status: 'queued' 
+            });
+          }
+          return { success: false, error: '操作已暂存到队列', status: 'queued' };
         }
       }
 
@@ -441,7 +463,7 @@ class SelfUpdateManager {
             skipPrompt: options.autoConfirm
           });
 
-          if (!verifyConfirmation.confirmed) {
+          if (!verifyConfirmation.confirmed && verifyConfirmation.reason !== 'timeout' && verifyConfirmation.reason !== 'queue') {
             logger.warn('用户拒绝确认更新完成，执行回滚');
             
             reportProgress(6, '执行回滚', { type: updateRecord.update_type });
@@ -463,6 +485,17 @@ class SelfUpdateManager {
               });
             }
             return { success: false, error: '用户拒绝确认，已回滚', rolledBack: true };
+          }
+          
+          if (verifyConfirmation.reason === 'timeout' || verifyConfirmation.reason === 'queue') {
+            if (onProgress) {
+              onProgress({ 
+                progress: Math.round((85 / totalWeight) * 100), 
+                description: '操作已暂存到队列', 
+                status: 'queued' 
+              });
+            }
+            return { success: false, error: '操作已暂存到队列', status: 'queued' };
           }
         }
 

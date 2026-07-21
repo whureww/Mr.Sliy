@@ -509,12 +509,13 @@ const allTablesSqlite = [
   )`,
 
   `CREATE TABLE IF NOT EXISTS telemetry_events (
-    id TEXT PRIMARY KEY,
-    event_type VARCHAR(100) NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    event_category TEXT NOT NULL,
     event_data TEXT,
-    component VARCHAR(100),
-    level VARCHAR(20) DEFAULT 'info',
-    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    severity TEXT DEFAULT 'info',
+    timestamp INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )`,
 
   `CREATE TABLE IF NOT EXISTS sustain_rules (
@@ -541,11 +542,17 @@ const allTablesSqlite = [
   )`,
 
   `CREATE TABLE IF NOT EXISTS ai_analysis_records (
-    id TEXT PRIMARY KEY,
-    analysis_type VARCHAR(50) NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_type TEXT NOT NULL,
+    focus TEXT DEFAULT 'general',
     input_data TEXT,
+    analysis_result TEXT,
+    suggestions TEXT,
+    confidence REAL DEFAULT 0,
+    executed BOOLEAN DEFAULT 0,
+    timestamp INTEGER NOT NULL,
     output_data TEXT,
-    ai_model VARCHAR(100),
+    ai_model TEXT,
     tokens_used INTEGER,
     duration_ms INTEGER,
     success BOOLEAN DEFAULT 1,
@@ -554,9 +561,18 @@ const allTablesSqlite = [
   )`,
 
   `CREATE TABLE IF NOT EXISTS validation_records (
-    id TEXT PRIMARY KEY,
-    cycle_id VARCHAR(100) NOT NULL,
-    validation_type VARCHAR(50) NOT NULL,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    validation_type TEXT NOT NULL,
+    target_id TEXT,
+    target_type TEXT,
+    before_state TEXT,
+    after_state TEXT,
+    metrics_before TEXT,
+    metrics_after TEXT,
+    success INTEGER DEFAULT 0,
+    improvement_score REAL DEFAULT 0,
+    timestamp INTEGER NOT NULL,
+    cycle_id VARCHAR(100),
     result TEXT,
     score REAL,
     passed BOOLEAN DEFAULT 0,

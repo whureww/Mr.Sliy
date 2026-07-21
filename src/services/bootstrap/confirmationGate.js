@@ -11,7 +11,9 @@ const { execute, query } = require('../../utils/database');
 class ConfirmationGate {
   constructor() {
     this.pendingRequests = new Map();
-    this.autoConfirmThreshold = 60000;
+    this.confirmationCallbacks = new Map();
+    this.autoConfirmThreshold = 180000;
+    this.taskExecutors = new Map();
     this.highRiskOperations = [
       'update_code',
       'update_dependency',
@@ -55,7 +57,9 @@ class ConfirmationGate {
       impact = '',
       filesAffected = [],
       backupAvailable = false,
-      rollbackPossible = false
+      rollbackPossible = false,
+      taskExecutor = null,
+      taskContext = null
     } = request;
     
     if (this.autoConfirmOperations.includes(operationType)) {
@@ -83,26 +87,64 @@ class ConfirmationGate {
       backupAvailable,
       rollbackPossible,
       createdAt: Date.now(),
-      status: 'pending'
+      status: 'pending',
+      taskContext
     };
 
     this.pendingRequests.set(requestId, confirmationRequest);
+    
+    if (taskExecutor) {
+      this.taskExecutors.set(requestId, taskExecutor);
+    }
 
     const result = await this.promptUser(confirmationRequest);
 
-    confirmationRequest.status = result.confirmed ? 'confirmed' : 'rejected';
-    confirmationRequest.confirmedAt = Date.now();
-    confirmationRequest.reason = result.reason;
-
-    await this.saveConfirmationRecord(confirmationRequest, result);
-
     if (result.confirmed) {
+      confirmationRequest.status = 'confirmed';
+      confirmationRequest.confirmedAt = Date.now();
+      confirmationRequest.reason = result.reason;
+      await this.saveConfirmationRecord(confirmationRequest, result);
       logger.debug(`操作已确认: ${operationType} (步骤${stepNumber}/${totalSteps})`);
+      
+      if (taskExecutor) {
+        await this.executeTask(requestId);
+      }
+      
+      this.notifyPendingRequests();
+    } else if (result.reason === 'timeout' || result.reason === 'queue') {
+      confirmationRequest.status = 'queued';
+      logger.info(`操作已加入待处理队列: ${operationType} (请求ID: ${requestId})`);
     } else {
+      confirmationRequest.status = 'rejected';
+      confirmationRequest.confirmedAt = Date.now();
+      confirmationRequest.reason = result.reason;
+      await this.saveConfirmationRecord(confirmationRequest, result);
       logger.warn(`操作已拒绝: ${operationType} (步骤${stepNumber}/${totalSteps})`);
+      
+      this.taskExecutors.delete(requestId);
     }
 
     return result;
+  }
+
+  async executeTask(requestId) {
+    const executor = this.taskExecutors.get(requestId);
+    const request = this.pendingRequests.get(requestId);
+    
+    if (!executor) {
+      logger.debug(`没有任务执行器: ${requestId}`);
+      return;
+    }
+
+    try {
+      logger.info(`开始执行任务: ${request.operationType} (请求ID: ${requestId})`);
+      await executor();
+      logger.info(`任务执行完成: ${request.operationType} (请求ID: ${requestId})`);
+    } catch (error) {
+      logger.error(`任务执行失败: ${request.operationType} (请求ID: ${requestId}): ${error.message}`);
+    } finally {
+      this.taskExecutors.delete(requestId);
+    }
   }
 
   async promptUser(request) {
@@ -170,26 +212,35 @@ class ConfirmationGate {
       }
     }
 
+    const timeoutMinutes = Math.floor(this.autoConfirmThreshold / 1000 / 60);
+    
     console.log('\n───────────────────────────────────────────────────────────────────────');
-    console.log('请确认是否执行此操作?');
+    console.log(`请确认是否执行此操作? (${timeoutMinutes}分钟超时自动加入队列)`);
     console.log('');
     console.log('  1. ✅ 确认执行');
     console.log('  2. ❌ 拒绝执行');
     console.log('  3. 📖 查看完整详情');
     console.log('  4. 🔄 请求修改方案');
+    console.log('  5. 📥 暂存到队列（稍后处理）');
     console.log('');
 
     return new Promise((resolve) => {
-      const timeoutId = setTimeout(() => {
-        console.log('\n⏰ [超时] 自动拒绝操作');
-        process.stdin.removeListener('data', handleInput);
-        resolve({ confirmed: false, reason: 'timeout' });
-      }, this.autoConfirmThreshold);
+      let timeoutId = null;
+      
+      if (this.autoConfirmThreshold > 0) {
+        timeoutId = setTimeout(() => {
+          process.stdin.removeListener('data', handleInput);
+          console.log(`\n⏰ 超时(${timeoutMinutes}分钟)，操作已加入待处理队列，您可以稍后使用 /pending 命令处理`);
+          resolve({ confirmed: false, reason: 'timeout' });
+        }, this.autoConfirmThreshold);
+      }
 
       const handleInput = (data) => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
         const input = data.toString().trim();
         
-        clearTimeout(timeoutId);
         process.stdin.removeListener('data', handleInput);
 
         switch (input) {
@@ -220,8 +271,21 @@ class ConfirmationGate {
               resolve({ confirmed: false, reason: 'request_modification', modification });
             });
             break;
+          case '5':
+          case '暂存':
+          case '队列':
+            console.log('\n📥 操作已暂存到待处理队列，您可以稍后使用 /pending 命令处理');
+            resolve({ confirmed: false, reason: 'queue' });
+            break;
+          case 'q':
+          case 'quit':
+          case 'exit':
+          case '返回':
+            console.log('\n📥 操作已暂存到待处理队列，您可以稍后使用 /pending 命令处理');
+            resolve({ confirmed: false, reason: 'queue' });
+            break;
           default:
-            console.log('\n❌ 无效输入，请输入 1、2、3 或 4');
+            console.log('\n❌ 无效输入，请输入 1、2、3、4、5 或 q(暂存)');
             process.stdin.once('data', handleInput);
             break;
         }
@@ -269,6 +333,14 @@ class ConfirmationGate {
     return Array.from(this.pendingRequests.values()).filter(r => r.status === 'pending');
   }
 
+  getQueuedRequests() {
+    return Array.from(this.pendingRequests.values()).filter(r => r.status === 'queued');
+  }
+
+  getAllPendingAndQueued() {
+    return Array.from(this.pendingRequests.values()).filter(r => r.status === 'pending' || r.status === 'queued');
+  }
+
   getRequestStatus(requestId) {
     return this.pendingRequests.get(requestId);
   }
@@ -279,14 +351,25 @@ class ConfirmationGate {
       return { success: false, error: '请求不存在' };
     }
 
-    if (request.status !== 'pending') {
+    if (request.status !== 'pending' && request.status !== 'queued') {
       return { success: false, error: `请求状态已为: ${request.status}` };
     }
 
     request.status = 'confirmed';
     request.confirmedAt = Date.now();
     
+    await this.saveConfirmationRecord(request, { confirmed: true, reason: 'user_confirm' });
+    
     logger.info(`请求已确认: ${requestId}`);
+    
+    const callback = this.confirmationCallbacks.get(requestId);
+    if (callback) {
+      callback({ confirmed: true, reason: 'user_confirm' });
+      this.confirmationCallbacks.delete(requestId);
+    }
+    
+    await this.executeTask(requestId);
+    
     return { success: true, request };
   }
 
@@ -296,15 +379,41 @@ class ConfirmationGate {
       return { success: false, error: '请求不存在' };
     }
 
-    if (request.status !== 'pending') {
+    if (request.status !== 'pending' && request.status !== 'queued') {
       return { success: false, error: `请求状态已为: ${request.status}` };
     }
 
     request.status = 'rejected';
     request.confirmedAt = Date.now();
     
+    await this.saveConfirmationRecord(request, { confirmed: false, reason: 'user_reject' });
+    
     logger.info(`请求已拒绝: ${requestId}`);
+    
+    const callback = this.confirmationCallbacks.get(requestId);
+    if (callback) {
+      callback({ confirmed: false, reason: 'user_reject' });
+      this.confirmationCallbacks.delete(requestId);
+    }
+    
+    this.taskExecutors.delete(requestId);
+    
     return { success: true, request };
+  }
+
+  addConfirmationCallback(requestId, callback) {
+    this.confirmationCallbacks.set(requestId, callback);
+  }
+
+  removeConfirmationCallback(requestId) {
+    this.confirmationCallbacks.delete(requestId);
+  }
+
+  notifyPendingRequests() {
+    const queuedRequests = this.getQueuedRequests();
+    if (queuedRequests.length > 0) {
+      console.log(`\n📋 有待处理的确认请求 (${queuedRequests.length} 条)，使用 /pending 命令查看`);
+    }
   }
 
   async saveConfirmationRecord(request, result) {
