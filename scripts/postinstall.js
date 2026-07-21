@@ -105,13 +105,29 @@ async function downloadWasmFiles() {
   log('   请确保已安装依赖: npm install', 'yellow');
 }
 
+function isGlobalInstall() {
+  const npmPrefix = process.env.npm_config_prefix;
+  if (!npmPrefix) return false;
+  
+  const globalPrefix = require('path').resolve(npmPrefix);
+  const currentDir = process.cwd();
+  
+  return !currentDir.startsWith(globalPrefix);
+}
+
 async function main() {
   log('\n🔧 Mr.Sliy 安装后配置...\n', 'bright');
 
   try {
-    checkAndCreateEnvFile();
-    await initializeDatabase();
-    await downloadWasmFiles();
+    if (isGlobalInstall()) {
+      log('🌐 检测到全局安装模式，跳过数据库初始化（首次运行时自动初始化）', 'yellow');
+      checkAndCreateEnvFile();
+      await downloadWasmFiles();
+    } else {
+      checkAndCreateEnvFile();
+      await initializeDatabase();
+      await downloadWasmFiles();
+    }
 
     log('\n🎉 安装完成！', 'green');
     log('\n🚀 快速开始:', 'green');
@@ -127,7 +143,7 @@ async function main() {
     log('\n');
   } catch (error) {
     log(`\n❌ 安装后配置失败: ${error.message}`, 'red');
-    process.exit(1);
+    log('   可忽略此错误，运行 mr-sliy 时会自动修复', 'yellow');
   }
 }
 
