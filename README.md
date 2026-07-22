@@ -254,6 +254,20 @@ src/
 
 ## 📝 更新日志
 
+### v3.1.4
+> 更新日期: 2026-07-22
+
+- **🐛 数据库同步修复**：修复MySQL同步过程中的表结构不一致问题
+  - **ai_analysis_records 表修复**：添加缺失的 `execution_result` 字段，修复同步失败问题
+  - **新增9张缺失表**：添加 `api_request_log`、`code_analysis_record`、`analysis_result`、`notification`、`system_monitor`、`backup_history`、`kb_import_history`、`dependency_version`、`project_analysis_summary` 表
+  - **同步表列表更新**：从23张表增加到32张表，确保所有业务表都能同步到云端
+  - **字段自动检测**：更新迁移逻辑，检测到缺少字段时自动重建表结构
+
+### v3.1.3
+> 更新日期: 2026-07-22
+
+- **📝 日志级别优化**：将同步队列相关的日志级别从 warn 降为 debug，减少控制台噪音
+
 ### v3.1.2
 > 更新日期: 2026-07-21
 

@@ -556,7 +556,10 @@ class DbAdapter {
       'confirmation_history', 'kb_entries', 'kb_cases',
       'code_standards', 'user_preferences', 'kb_metadata',
       'telemetry_events', 'sustain_rules', 'rule_execution_log',
-      'ai_analysis_records', 'validation_records'
+      'ai_analysis_records', 'validation_records',
+      'api_request_log', 'code_analysis_record', 'analysis_result',
+      'notification', 'system_monitor', 'backup_history',
+      'kb_import_history', 'dependency_version', 'project_analysis_summary'
     ];
 
     const results = [];

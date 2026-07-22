@@ -462,6 +462,7 @@ async function initDatabase() {
         suggestions TEXT,
         confidence DECIMAL(5,2) DEFAULT 0,
         executed BOOLEAN DEFAULT FALSE,
+        execution_result TEXT,
         timestamp BIGINT NOT NULL,
         output_data TEXT,
         ai_model VARCHAR(100),
@@ -558,6 +559,159 @@ async function initDatabase() {
         rollback_possible BOOLEAN DEFAULT FALSE,
         status VARCHAR(20) DEFAULT 'pending',
         reason VARCHAR(200),
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS api_request_log (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        api_key_id INT,
+        provider_name VARCHAR(50),
+        endpoint VARCHAR(255),
+        request_method VARCHAR(10),
+        request_headers TEXT,
+        request_body TEXT,
+        response_status INT,
+        response_body TEXT,
+        response_headers TEXT,
+        tokens_used INT,
+        latency_ms INT,
+        error_message TEXT,
+        is_success TINYINT(1) DEFAULT 1,
+        user_id INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS code_analysis_record (
+        id VARCHAR(36) PRIMARY KEY,
+        project_id INT,
+        task_id INT,
+        file_path VARCHAR(500) NOT NULL,
+        file_name VARCHAR(255),
+        language VARCHAR(50),
+        file_size INT,
+        line_count INT,
+        complexity_score DECIMAL(10,2),
+        maintainability_index DECIMAL(10,2),
+        analysis_start_at DATETIME,
+        analysis_end_at DATETIME,
+        duration_ms INT,
+        status VARCHAR(20) DEFAULT 'completed',
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS analysis_result (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        analysis_id VARCHAR(36) NOT NULL,
+        project_id INT,
+        task_id INT,
+        result_type VARCHAR(50) NOT NULL,
+        result_data TEXT,
+        confidence DECIMAL(5,2) DEFAULT 0,
+        source VARCHAR(100),
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS notification (
+        id VARCHAR(36) PRIMARY KEY,
+        user_id INT,
+        message_type VARCHAR(50) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        content TEXT,
+        data_json TEXT,
+        is_read TINYINT(1) DEFAULT 0,
+        is_confirmed TINYINT(1) DEFAULT 0,
+        confirmed_at DATETIME,
+        action VARCHAR(50),
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS system_monitor (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        metric_type VARCHAR(50) NOT NULL,
+        metric_name VARCHAR(100) NOT NULL,
+        metric_value DECIMAL(18,4) NOT NULL,
+        threshold DECIMAL(18,4),
+        is_alert TINYINT(1) DEFAULT 0,
+        component VARCHAR(100),
+        timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS backup_history (
+        id VARCHAR(36) PRIMARY KEY,
+        backup_type VARCHAR(50) NOT NULL,
+        backup_path VARCHAR(500),
+        backup_size BIGINT,
+        backup_count INT,
+        status VARCHAR(20) DEFAULT 'pending',
+        error_message TEXT,
+        started_at DATETIME,
+        completed_at DATETIME,
+        duration_ms INT,
+        user_id INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS kb_import_history (
+        id VARCHAR(36) PRIMARY KEY,
+        source_type VARCHAR(50) NOT NULL,
+        source_path VARCHAR(500),
+        file_count INT DEFAULT 0,
+        imported_count INT DEFAULT 0,
+        skipped_count INT DEFAULT 0,
+        duplicate_count INT DEFAULT 0,
+        status VARCHAR(20) DEFAULT 'pending',
+        error_message TEXT,
+        started_at DATETIME,
+        completed_at DATETIME,
+        user_id INT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS dependency_version (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        package_name VARCHAR(255) NOT NULL,
+        current_version VARCHAR(50),
+        latest_version VARCHAR(50),
+        is_outdated TINYINT(1) DEFAULT 0,
+        update_priority VARCHAR(20) DEFAULT 'low',
+        last_check_at DATETIME,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await query(`
+      CREATE TABLE IF NOT EXISTS project_analysis_summary (
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        project_id INT NOT NULL,
+        analysis_date DATETIME NOT NULL,
+        total_files INT DEFAULT 0,
+        total_issues INT DEFAULT 0,
+        critical_count INT DEFAULT 0,
+        high_count INT DEFAULT 0,
+        medium_count INT DEFAULT 0,
+        low_count INT DEFAULT 0,
+        fixed_count INT DEFAULT 0,
+        avg_complexity DECIMAL(10,2) DEFAULT 0,
+        avg_maintainability DECIMAL(10,2) DEFAULT 0,
+        summary TEXT,
+        user_id INT,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
@@ -714,8 +868,17 @@ async function migrateAiAnalysisRecords() {
   try {
     const columns = await query(`SHOW COLUMNS FROM ai_analysis_records`);
     const idColumn = columns.find(col => col.Field === 'id');
+    const executionResultColumn = columns.find(col => col.Field === 'execution_result');
     
+    let needsRebuild = false;
     if (idColumn && idColumn.Type === 'varchar(36)') {
+      needsRebuild = true;
+    }
+    if (!executionResultColumn) {
+      needsRebuild = true;
+    }
+    
+    if (needsRebuild) {
       await query(`CREATE TABLE IF NOT EXISTS ai_analysis_records_new (
         id INT PRIMARY KEY AUTO_INCREMENT,
         analysis_type VARCHAR(50) NOT NULL,
@@ -725,6 +888,7 @@ async function migrateAiAnalysisRecords() {
         suggestions TEXT,
         confidence DECIMAL(5,2) DEFAULT 0,
         executed BOOLEAN DEFAULT FALSE,
+        execution_result TEXT,
         timestamp BIGINT NOT NULL,
         output_data TEXT,
         ai_model VARCHAR(100),
@@ -736,11 +900,12 @@ async function migrateAiAnalysisRecords() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
       
       await query(`INSERT INTO ai_analysis_records_new (analysis_type, focus, input_data, analysis_result, 
-        suggestions, confidence, executed, timestamp, output_data, ai_model, tokens_used, duration_ms, 
+        suggestions, confidence, executed, execution_result, timestamp, output_data, ai_model, tokens_used, duration_ms, 
         success, error_message, created_at)
         SELECT analysis_type, COALESCE(focus, 'general') as focus, input_data, 
                COALESCE(analysis_result, '') as analysis_result, COALESCE(suggestions, '') as suggestions, 
                COALESCE(confidence, 0) as confidence, COALESCE(executed, 0) as executed, 
+               execution_result,
                COALESCE(timestamp, 0) as timestamp, output_data, ai_model, tokens_used, duration_ms, 
                COALESCE(success, 1) as success, error_message, COALESCE(created_at, NOW()) as created_at
         FROM ai_analysis_records`).catch(() => {});
