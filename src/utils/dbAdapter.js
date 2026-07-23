@@ -14,8 +14,7 @@ function getSqliteDatabase() {
   if (!sqliteDb) {
     let dbPath = config.database.path;
     if (!path.isAbsolute(dbPath)) {
-      const userDataDir = path.join(require('os').homedir(), '.mr-sliy', 'database');
-      dbPath = path.join(userDataDir, 'code_optimizer.db');
+      dbPath = path.join(process.cwd(), dbPath);
     }
     const dbDir = path.dirname(dbPath);
     if (!fs.existsSync(dbDir)) {
@@ -23,7 +22,7 @@ function getSqliteDatabase() {
     }
     sqliteDb = new Database(dbPath);
     sqliteDb.pragma('foreign_keys = ON');
-    sqliteDb.pragma('journal_mode = WAL');
+    sqliteDb.pragma('journal_mode = DELETE');
     initSyncQueueTable();
     createAllTables();
     startRetryTimer();
@@ -92,10 +91,17 @@ function createAllTables() {
     )`,
     `CREATE TABLE IF NOT EXISTS scan_project (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_name VARCHAR(200) NOT NULL,
-      project_path VARCHAR(500),
+      project_name VARCHAR(255) NOT NULL,
+      project_path VARCHAR(500) NOT NULL,
       project_type VARCHAR(50),
       language VARCHAR(50),
+      framework VARCHAR(100),
+      description TEXT,
+      total_files INTEGER DEFAULT 0,
+      total_lines INTEGER DEFAULT 0,
+      scan_count INTEGER DEFAULT 0,
+      last_scan_at DATETIME,
+      user_id INTEGER,
       status VARCHAR(20) DEFAULT 'active',
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -103,103 +109,159 @@ function createAllTables() {
     `CREATE TABLE IF NOT EXISTS scan_task (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       project_id INTEGER,
-      task_name VARCHAR(200) NOT NULL,
-      scan_mode VARCHAR(50),
-      scan_type VARCHAR(50),
+      task_name VARCHAR(255),
+      scan_mode VARCHAR(20) NOT NULL,
+      scan_type VARCHAR(50) NOT NULL,
+      target_path VARCHAR(500),
+      file_count INTEGER DEFAULT 0,
+      scanned_files INTEGER DEFAULT 0,
+      issue_count INTEGER DEFAULT 0,
+      issue_critical INTEGER DEFAULT 0,
+      issue_high INTEGER DEFAULT 0,
+      issue_medium INTEGER DEFAULT 0,
+      issue_low INTEGER DEFAULT 0,
       status VARCHAR(20) DEFAULT 'pending',
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      progress INTEGER DEFAULT 0,
+      started_at DATETIME,
+      completed_at DATETIME,
+      duration_ms INTEGER,
+      error_message TEXT,
+      user_id INTEGER,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS code_issue (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id INTEGER,
+      task_id INTEGER NOT NULL,
       project_id INTEGER,
-      file_path VARCHAR(500),
-      file_name VARCHAR(200),
-      line_number INTEGER,
-      issue_type VARCHAR(50),
-      severity VARCHAR(20),
-      title VARCHAR(200),
-      description TEXT,
+      file_path VARCHAR(500) NOT NULL,
+      file_name VARCHAR(255),
+      language VARCHAR(50),
+      issue_type VARCHAR(50) NOT NULL,
+      severity VARCHAR(20) NOT NULL,
+      message TEXT NOT NULL,
       suggestion TEXT,
+      line_start INTEGER NOT NULL,
+      line_end INTEGER,
+      column_start INTEGER,
+      column_end INTEGER,
+      code_snippet TEXT,
+      ast_node_type VARCHAR(100),
       is_fixed BOOLEAN DEFAULT 0,
       fixed_at DATETIME,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      fixed_by_user_id INTEGER,
+      fix_suggestion TEXT,
+      ai_optimized BOOLEAN DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS ai_optimize_record (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      issue_id INTEGER,
+      issue_id INTEGER NOT NULL,
       task_id INTEGER,
-      original_code TEXT,
+      original_code TEXT NOT NULL,
       optimized_code TEXT,
+      explanation TEXT,
       optimization_type VARCHAR(50),
-      confidence REAL DEFAULT 0,
-      applied BOOLEAN DEFAULT 0,
+      ai_model VARCHAR(100),
+      tokens_used INTEGER,
+      api_latency_ms INTEGER,
+      user_rating INTEGER,
+      user_feedback TEXT,
+      is_applied BOOLEAN DEFAULT 0,
       applied_at DATETIME,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS code_report (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      task_id INTEGER,
+      task_id INTEGER NOT NULL,
       project_id INTEGER,
-      report_name VARCHAR(200),
+      report_name VARCHAR(255) NOT NULL,
       report_type VARCHAR(50),
-      report_data TEXT,
-      generated_at DATETIME,
+      file_path VARCHAR(500),
+      file_size_kb REAL,
+      summary TEXT,
+      include_ai_suggestions BOOLEAN DEFAULT 1,
+      user_id INTEGER,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS llm_api_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       provider_name VARCHAR(50) NOT NULL,
-      api_key VARCHAR(255) NOT NULL,
-      api_url VARCHAR(255),
+      api_key TEXT NOT NULL,
+      api_url TEXT,
       model_name VARCHAR(100),
       is_active BOOLEAN DEFAULT 1,
+      priority INTEGER DEFAULT 0,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS api_access_keys (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      access_key VARCHAR(64) NOT NULL UNIQUE,
+      access_key VARCHAR(100) NOT NULL UNIQUE,
       key_name VARCHAR(100),
       permissions TEXT,
-      rate_limit INTEGER DEFAULT 1000,
-      expires_at DATETIME,
+      rate_limit INTEGER DEFAULT 100,
+      usage_count INTEGER DEFAULT 0,
       is_active BOOLEAN DEFAULT 1,
+      expires_at DATETIME,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS self_update_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      update_type VARCHAR(50),
+      id TEXT PRIMARY KEY,
+      update_type VARCHAR(50) NOT NULL,
       target_version VARCHAR(20),
       current_version VARCHAR(20),
       version_after VARCHAR(20),
-      status VARCHAR(20),
+      update_source VARCHAR(100),
+      update_content TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      user_confirmed BOOLEAN DEFAULT 0,
+      confirmed_at DATETIME,
+      rejected_step VARCHAR(100),
+      sandbox_result TEXT,
+      applied_at DATETIME,
+      rollback_version VARCHAR(20),
+      rollback_at DATETIME,
+      rolled_back_reason VARCHAR(200),
       error_message TEXT,
+      duration_ms INTEGER,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS self_repair_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      error_type VARCHAR(100),
+      id TEXT PRIMARY KEY,
+      error_type VARCHAR(100) NOT NULL,
       error_message TEXT,
       error_stack TEXT,
       affected_component VARCHAR(100),
-      repair_status VARCHAR(20),
-      repair_result TEXT,
+      repair_strategy VARCHAR(100),
+      repair_content TEXT,
+      status VARCHAR(20) DEFAULT 'pending',
+      user_confirmed BOOLEAN DEFAULT 0,
+      confirmed_at DATETIME,
+      sandbox_result TEXT,
+      applied_at DATETIME,
+      rollback_at DATETIME,
+      rolled_back_reason VARCHAR(200),
+      error_count INTEGER DEFAULT 1,
+      last_error_at DATETIME,
+      duration_ms INTEGER,
+      error_message_detail TEXT,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS confirmation_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      operation_type VARCHAR(50),
-      risk_level VARCHAR(20),
+      id TEXT PRIMARY KEY,
+      operation_type VARCHAR(100) NOT NULL,
+      risk_level VARCHAR(20) NOT NULL,
       step_name VARCHAR(100),
-      step_number INTEGER,
-      total_steps INTEGER,
-      user_confirmed BOOLEAN,
-      confirmed_at DATETIME,
+      step_number INTEGER DEFAULT 0,
+      total_steps INTEGER DEFAULT 0,
+      description TEXT NOT NULL,
+      impact VARCHAR(500),
+      files_affected TEXT,
+      backup_available BOOLEAN DEFAULT 0,
+      rollback_possible BOOLEAN DEFAULT 0,
+      status VARCHAR(20) DEFAULT 'pending',
+      reason VARCHAR(200),
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS kb_entries (
@@ -225,7 +287,7 @@ function createAllTables() {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS code_standards (
-      id VARCHAR(36) PRIMARY KEY,
+      id TEXT PRIMARY KEY,
       rule_name VARCHAR(100) NOT NULL,
       rule_description TEXT NOT NULL,
       bad_example TEXT,
@@ -237,18 +299,15 @@ function createAllTables() {
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS user_preferences (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER,
-      preference_key VARCHAR(100),
-      preference_value TEXT,
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      id TEXT PRIMARY KEY,
+      config_key VARCHAR(100) UNIQUE NOT NULL,
+      config_value TEXT,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS kb_metadata (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      key VARCHAR(100),
+      meta_key VARCHAR(100) PRIMARY KEY,
       value TEXT,
-      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS telemetry_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -340,80 +399,111 @@ function createAllTables() {
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS code_analysis_record (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT PRIMARY KEY,
       project_id INTEGER,
       task_id INTEGER,
-      file_path VARCHAR(500),
-      file_name VARCHAR(200),
-      analysis_type VARCHAR(50),
-      analysis_result TEXT,
+      file_path VARCHAR(500) NOT NULL,
+      file_name VARCHAR(255),
+      language VARCHAR(50),
+      file_size INTEGER,
+      line_count INTEGER,
+      complexity_score REAL,
+      maintainability_index REAL,
+      analysis_start_at DATETIME,
+      analysis_end_at DATETIME,
+      duration_ms INTEGER,
+      status VARCHAR(20) DEFAULT 'completed',
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS analysis_result (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      analysis_id INTEGER,
+      analysis_id TEXT NOT NULL,
       project_id INTEGER,
       task_id INTEGER,
-      result_type VARCHAR(50),
+      result_type VARCHAR(50) NOT NULL,
       result_data TEXT,
-      score REAL,
+      confidence REAL DEFAULT 0,
+      source VARCHAR(100),
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS notification (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id TEXT PRIMARY KEY,
       user_id INTEGER,
-      message_type VARCHAR(50),
-      title VARCHAR(200),
+      message_type VARCHAR(50) NOT NULL,
+      title VARCHAR(255) NOT NULL,
       content TEXT,
+      data_json TEXT,
       is_read BOOLEAN DEFAULT 0,
-      read_at DATETIME,
+      is_confirmed BOOLEAN DEFAULT 0,
+      confirmed_at DATETIME,
+      action VARCHAR(50),
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS system_monitor (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      metric_type VARCHAR(50),
-      metric_name VARCHAR(100),
-      metric_value REAL,
-      unit VARCHAR(20),
+      metric_type VARCHAR(50) NOT NULL,
+      metric_name VARCHAR(100) NOT NULL,
+      metric_value REAL NOT NULL,
       threshold REAL,
-      status VARCHAR(20) DEFAULT 'normal',
-      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+      is_alert BOOLEAN DEFAULT 0,
+      component VARCHAR(100),
+      timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS backup_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      backup_type VARCHAR(50),
+      id TEXT PRIMARY KEY,
+      backup_type VARCHAR(50) NOT NULL,
       backup_path VARCHAR(500),
-      backup_size INTEGER,
+      backup_size BIGINT,
       backup_count INTEGER,
-      status VARCHAR(20),
+      status VARCHAR(20) DEFAULT 'pending',
+      error_message TEXT,
+      started_at DATETIME,
+      completed_at DATETIME,
+      duration_ms INTEGER,
+      user_id INTEGER,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS kb_import_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      source_type VARCHAR(50),
+      id TEXT PRIMARY KEY,
+      source_type VARCHAR(50) NOT NULL,
       source_path VARCHAR(500),
-      file_count INTEGER,
-      imported_count INTEGER,
-      status VARCHAR(20),
+      file_count INTEGER DEFAULT 0,
+      imported_count INTEGER DEFAULT 0,
+      skipped_count INTEGER DEFAULT 0,
+      duplicate_count INTEGER DEFAULT 0,
+      status VARCHAR(20) DEFAULT 'pending',
+      error_message TEXT,
+      started_at DATETIME,
+      completed_at DATETIME,
+      user_id INTEGER,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS dependency_version (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      package_name VARCHAR(200),
+      package_name VARCHAR(255) NOT NULL,
       current_version VARCHAR(50),
       latest_version VARCHAR(50),
       is_outdated BOOLEAN DEFAULT 0,
+      update_priority VARCHAR(20) DEFAULT 'low',
+      last_check_at DATETIME,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`,
     `CREATE TABLE IF NOT EXISTS project_analysis_summary (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      project_id INTEGER,
-      analysis_date DATETIME,
-      total_files INTEGER,
-      total_issues INTEGER,
-      fixed_issues INTEGER,
-      score REAL,
+      project_id INTEGER NOT NULL,
+      analysis_date DATETIME NOT NULL,
+      total_files INTEGER DEFAULT 0,
+      total_issues INTEGER DEFAULT 0,
+      critical_count INTEGER DEFAULT 0,
+      high_count INTEGER DEFAULT 0,
+      medium_count INTEGER DEFAULT 0,
+      low_count INTEGER DEFAULT 0,
+      fixed_count INTEGER DEFAULT 0,
+      avg_complexity REAL DEFAULT 0,
+      avg_maintainability REAL DEFAULT 0,
+      summary TEXT,
+      user_id INTEGER,
       created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`
   ];
@@ -426,7 +516,191 @@ function createAllTables() {
     }
   }
   
+  migrateSqliteTables();
+  
   logger.info(`SQLite数据库表初始化完成（${tables.length}张表）`);
+}
+
+function migrateSqliteTables() {
+  const migrations = [
+    { table: 'scan_project', columns: [
+      { name: 'framework', type: 'VARCHAR(100)' },
+      { name: 'description', type: 'TEXT' },
+      { name: 'total_files', type: 'INTEGER DEFAULT 0' },
+      { name: 'total_lines', type: 'INTEGER DEFAULT 0' },
+      { name: 'scan_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'last_scan_at', type: 'DATETIME' },
+      { name: 'user_id', type: 'INTEGER' }
+    ]},
+    { table: 'scan_task', columns: [
+      { name: 'target_path', type: 'VARCHAR(500)' },
+      { name: 'file_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'scanned_files', type: 'INTEGER DEFAULT 0' },
+      { name: 'issue_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'issue_critical', type: 'INTEGER DEFAULT 0' },
+      { name: 'issue_high', type: 'INTEGER DEFAULT 0' },
+      { name: 'issue_medium', type: 'INTEGER DEFAULT 0' },
+      { name: 'issue_low', type: 'INTEGER DEFAULT 0' },
+      { name: 'progress', type: 'INTEGER DEFAULT 0' },
+      { name: 'started_at', type: 'DATETIME' },
+      { name: 'completed_at', type: 'DATETIME' },
+      { name: 'duration_ms', type: 'INTEGER' },
+      { name: 'error_message', type: 'TEXT' },
+      { name: 'user_id', type: 'INTEGER' }
+    ]},
+    { table: 'code_issue', columns: [
+      { name: 'language', type: 'VARCHAR(50)' },
+      { name: 'message', type: 'TEXT' },
+      { name: 'line_start', type: 'INTEGER' },
+      { name: 'line_end', type: 'INTEGER' },
+      { name: 'column_start', type: 'INTEGER' },
+      { name: 'column_end', type: 'INTEGER' },
+      { name: 'code_snippet', type: 'TEXT' },
+      { name: 'ast_node_type', type: 'VARCHAR(100)' },
+      { name: 'fixed_by_user_id', type: 'INTEGER' },
+      { name: 'fix_suggestion', type: 'TEXT' },
+      { name: 'ai_optimized', type: 'BOOLEAN DEFAULT 0' }
+    ]},
+    { table: 'ai_optimize_record', columns: [
+      { name: 'explanation', type: 'TEXT' },
+      { name: 'ai_model', type: 'VARCHAR(100)' },
+      { name: 'tokens_used', type: 'INTEGER' },
+      { name: 'api_latency_ms', type: 'INTEGER' },
+      { name: 'user_rating', type: 'INTEGER' },
+      { name: 'user_feedback', type: 'TEXT' },
+      { name: 'is_applied', type: 'BOOLEAN DEFAULT 0' }
+    ]},
+    { table: 'code_report', columns: [
+      { name: 'file_path', type: 'VARCHAR(500)' },
+      { name: 'file_size_kb', type: 'REAL' },
+      { name: 'summary', type: 'TEXT' },
+      { name: 'include_ai_suggestions', type: 'BOOLEAN DEFAULT 1' },
+      { name: 'user_id', type: 'INTEGER' }
+    ]},
+    { table: 'llm_api_keys', columns: [
+      { name: 'priority', type: 'INTEGER DEFAULT 0' }
+    ]},
+    { table: 'api_access_keys', columns: [
+      { name: 'usage_count', type: 'INTEGER DEFAULT 0' }
+    ]},
+    { table: 'self_update_history', columns: [
+      { name: 'update_source', type: 'VARCHAR(100)' },
+      { name: 'update_content', type: 'TEXT' },
+      { name: 'user_confirmed', type: 'BOOLEAN DEFAULT 0' },
+      { name: 'confirmed_at', type: 'DATETIME' },
+      { name: 'rejected_step', type: 'VARCHAR(100)' },
+      { name: 'sandbox_result', type: 'TEXT' },
+      { name: 'applied_at', type: 'DATETIME' },
+      { name: 'rollback_version', type: 'VARCHAR(20)' },
+      { name: 'rollback_at', type: 'DATETIME' },
+      { name: 'rolled_back_reason', type: 'VARCHAR(200)' },
+      { name: 'duration_ms', type: 'INTEGER' }
+    ]},
+    { table: 'self_repair_history', columns: [
+      { name: 'repair_strategy', type: 'VARCHAR(100)' },
+      { name: 'repair_content', type: 'TEXT' },
+      { name: 'user_confirmed', type: 'BOOLEAN DEFAULT 0' },
+      { name: 'confirmed_at', type: 'DATETIME' },
+      { name: 'sandbox_result', type: 'TEXT' },
+      { name: 'applied_at', type: 'DATETIME' },
+      { name: 'rollback_at', type: 'DATETIME' },
+      { name: 'rolled_back_reason', type: 'VARCHAR(200)' },
+      { name: 'error_count', type: 'INTEGER DEFAULT 1' },
+      { name: 'last_error_at', type: 'DATETIME' },
+      { name: 'duration_ms', type: 'INTEGER' },
+      { name: 'error_message_detail', type: 'TEXT' }
+    ]},
+    { table: 'confirmation_history', columns: [
+      { name: 'description', type: 'TEXT' },
+      { name: 'impact', type: 'VARCHAR(500)' },
+      { name: 'files_affected', type: 'TEXT' },
+      { name: 'backup_available', type: 'BOOLEAN DEFAULT 0' },
+      { name: 'rollback_possible', type: 'BOOLEAN DEFAULT 0' },
+      { name: 'status', type: 'VARCHAR(20) DEFAULT "pending"' },
+      { name: 'reason', type: 'VARCHAR(200)' }
+    ]},
+    { table: 'code_analysis_record', columns: [
+      { name: 'language', type: 'VARCHAR(50)' },
+      { name: 'file_size', type: 'INTEGER' },
+      { name: 'line_count', type: 'INTEGER' },
+      { name: 'complexity_score', type: 'REAL' },
+      { name: 'maintainability_index', type: 'REAL' },
+      { name: 'analysis_start_at', type: 'DATETIME' },
+      { name: 'analysis_end_at', type: 'DATETIME' },
+      { name: 'duration_ms', type: 'INTEGER' },
+      { name: 'status', type: 'VARCHAR(20) DEFAULT "completed"' }
+    ]},
+    { table: 'analysis_result', columns: [
+      { name: 'confidence', type: 'REAL DEFAULT 0' },
+      { name: 'source', type: 'VARCHAR(100)' }
+    ]},
+    { table: 'notification', columns: [
+      { name: 'data_json', type: 'TEXT' },
+      { name: 'is_confirmed', type: 'BOOLEAN DEFAULT 0' },
+      { name: 'confirmed_at', type: 'DATETIME' },
+      { name: 'action', type: 'VARCHAR(50)' }
+    ]},
+    { table: 'system_monitor', columns: [
+      { name: 'is_alert', type: 'BOOLEAN DEFAULT 0' },
+      { name: 'component', type: 'VARCHAR(100)' }
+    ]},
+    { table: 'backup_history', columns: [
+      { name: 'error_message', type: 'TEXT' },
+      { name: 'started_at', type: 'DATETIME' },
+      { name: 'completed_at', type: 'DATETIME' },
+      { name: 'duration_ms', type: 'INTEGER' },
+      { name: 'user_id', type: 'INTEGER' }
+    ]},
+    { table: 'kb_import_history', columns: [
+      { name: 'skipped_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'duplicate_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'error_message', type: 'TEXT' },
+      { name: 'started_at', type: 'DATETIME' },
+      { name: 'completed_at', type: 'DATETIME' },
+      { name: 'user_id', type: 'INTEGER' }
+    ]},
+    { table: 'dependency_version', columns: [
+      { name: 'update_priority', type: 'VARCHAR(20) DEFAULT "low"' },
+      { name: 'last_check_at', type: 'DATETIME' }
+    ]},
+    { table: 'project_analysis_summary', columns: [
+      { name: 'critical_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'high_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'medium_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'low_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'fixed_count', type: 'INTEGER DEFAULT 0' },
+      { name: 'avg_complexity', type: 'REAL DEFAULT 0' },
+      { name: 'avg_maintainability', type: 'REAL DEFAULT 0' },
+      { name: 'summary', type: 'TEXT' },
+      { name: 'user_id', type: 'INTEGER' }
+    ]}
+  ];
+  
+  let migratedCount = 0;
+  
+  for (const migration of migrations) {
+    try {
+      const existingColumns = sqliteDb.prepare(`PRAGMA table_info(${migration.table})`).all();
+      const existingColumnNames = existingColumns.map(col => col.name);
+      
+      for (const col of migration.columns) {
+        if (!existingColumnNames.includes(col.name)) {
+          try {
+            sqliteDb.exec(`ALTER TABLE ${migration.table} ADD COLUMN ${col.name} ${col.type}`);
+            migratedCount++;
+          } catch (e) {
+            logger.debug(`添加列 ${migration.table}.${col.name} 失败: ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      logger.debug(`迁移表 ${migration.table} 失败: ${e.message}`);
+    }
+  }
+  
+  if (migratedCount > 0) {
+    logger.info(`SQLite表结构迁移完成，共添加 ${migratedCount} 个缺失列`);
+  }
 }
 
 function enqueueSyncOperation(tableName, sql, params, operationType) {

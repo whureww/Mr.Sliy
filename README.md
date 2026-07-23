@@ -269,6 +269,40 @@ src/
 
 ## 📝 更新日志
 
+### v3.3.8
+> 更新日期: 2026-07-24
+
+- **🔧 SQLite表结构迁移**：添加 `migrateSqliteTables()` 函数，自动检测并添加缺失的列到现有数据库文件
+  - 针对20张表的115个缺失列进行自动迁移
+  - 使用 `PRAGMA table_info()` 检测现有列，避免重复添加
+  - 在表初始化完成后自动执行迁移，无需手动干预
+
+### v3.3.7
+> 更新日期: 2026-07-24
+
+- **🐛 数据库表结构修复**：修复 `dbAdapter.js` 中所有表结构定义与 `schema.sql` 不一致的问题
+  - **scan_project**：添加 `framework`、`description`、`total_files`、`total_lines`、`scan_count`、`last_scan_at`、`user_id` 字段
+  - **scan_task**：添加 `target_path`、`file_count`、`scanned_files`、`issue_count`、`issue_critical`、`issue_high`、`issue_medium`、`issue_low`、`progress`、`started_at`、`completed_at`、`duration_ms`、`error_message`、`user_id` 字段
+  - **code_issue**：添加 `language`、`message`、`line_start`、`line_end`、`column_start`、`column_end`、`code_snippet`、`ast_node_type`、`fixed_by_user_id`、`fix_suggestion`、`ai_optimized` 字段
+  - **ai_optimize_record**：添加 `explanation`、`ai_model`、`tokens_used`、`api_latency_ms`、`user_rating`、`user_feedback` 字段，将 `applied` 改为 `is_applied`
+  - **code_report**：添加 `file_path`、`file_size_kb`、`summary`、`include_ai_suggestions`、`user_id` 字段
+  - **llm_api_keys**：`api_key` 类型改为 `TEXT`，添加 `priority` 字段
+  - **api_access_keys**：`access_key` 长度改为 100，`rate_limit` 默认值改为 100，添加 `usage_count` 字段
+  - **self_update_history**：主键改为 `TEXT PRIMARY KEY`，添加 `update_source`、`update_content`、`user_confirmed`、`confirmed_at`、`rejected_step`、`sandbox_result`、`applied_at`、`rollback_version`、`rollback_at`、`rolled_back_reason`、`duration_ms` 字段
+  - **self_repair_history**：主键改为 `TEXT PRIMARY KEY`，添加 `repair_strategy`、`repair_content`、`user_confirmed`、`confirmed_at`、`sandbox_result`、`applied_at`、`rollback_at`、`rolled_back_reason`、`error_count`、`last_error_at`、`duration_ms`、`error_message_detail` 字段
+  - **confirmation_history**：主键改为 `TEXT PRIMARY KEY`，添加 `description`、`impact`、`files_affected`、`backup_available`、`rollback_possible`、`status`、`reason` 字段
+  - **code_standards**：主键改为 `TEXT PRIMARY KEY`
+  - **user_preferences**：主键改为 `TEXT PRIMARY KEY`，字段改为 `config_key`、`config_value`
+  - **kb_metadata**：主键改为 `meta_key VARCHAR(100) PRIMARY KEY`
+  - **code_analysis_record**：主键改为 `TEXT PRIMARY KEY`，添加 `language`、`file_size`、`line_count`、`complexity_score`、`maintainability_index`、`analysis_start_at`、`analysis_end_at`、`duration_ms`、`status` 字段
+  - **analysis_result**：添加 `confidence`、`source` 字段
+  - **notification**：主键改为 `TEXT PRIMARY KEY`，添加 `data_json`、`is_confirmed`、`confirmed_at`、`action` 字段
+  - **system_monitor**：添加 `is_alert`、`component` 字段，`timestamp` 字段改为 `DATETIME`
+  - **backup_history**：主键改为 `TEXT PRIMARY KEY`，添加 `error_message`、`started_at`、`completed_at`、`duration_ms`、`user_id` 字段
+  - **kb_import_history**：主键改为 `TEXT PRIMARY KEY`，添加 `skipped_count`、`duplicate_count`、`error_message`、`started_at`、`completed_at`、`user_id` 字段
+  - **dependency_version**：添加 `update_priority`、`last_check_at` 字段
+  - **project_analysis_summary**：添加 `critical_count`、`high_count`、`medium_count`、`low_count`、`fixed_count`、`avg_complexity`、`avg_maintainability`、`summary`、`user_id` 字段
+
 ### v3.3.6
 > 更新日期: 2026-07-23
 
