@@ -662,12 +662,27 @@ const allIndexesSqlite = [
 
 let sqliteInitialized = false;
 
-function ensureSqliteTables() {
-  if (sqliteInitialized) return;
-
-  sqliteInitialized = true;
-
+function ensureSqliteTables(force = false) {
   const db = getSqliteDatabase();
+  
+  const existingTables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).all();
+  const existingTableNames = existingTables.map(t => t.name);
+  
+  const expectedTables = allTablesSqlite.map(sql => {
+    const match = sql.match(/CREATE TABLE IF NOT EXISTS (\w+)/);
+    return match ? match[1] : '';
+  }).filter(Boolean);
+  
+  const missingTables = expectedTables.filter(t => !existingTableNames.includes(t));
+  
+  if (missingTables.length === 0 && !force) {
+    sqliteInitialized = true;
+    return;
+  }
+  
+  if (missingTables.length > 0) {
+    logger.info(`检测到 ${missingTables.length} 张表缺失，正在创建: ${missingTables.join(', ')}`);
+  }
   
   for (const sql of allTablesSqlite) {
     try {
@@ -684,6 +699,8 @@ function ensureSqliteTables() {
       logger.debug(`创建索引失败: ${e.message}`);
     }
   }
+  
+  sqliteInitialized = true;
 }
 
 module.exports = {

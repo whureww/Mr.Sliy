@@ -27,7 +27,11 @@ function getMySQLConnectionConfig() {
       user: config.mysql.user,
       password: config.mysql.password,
       database: config.mysql.database || 'code_optimizer',
-      connectionLimit: config.mysql.connectionLimit || 10
+      connectionLimit: config.mysql.connectionLimit || 10,
+      namedPlaceholders: true,
+      decimalNumbers: true,
+      supportBigNumbers: true,
+      bigNumberStrings: false
     };
   }
 
@@ -48,7 +52,11 @@ function getConnectionConfigFromCustom(customConfig) {
     user: customConfig.user,
     password: customConfig.password,
     database: customConfig.database || 'code_optimizer',
-    connectionLimit: customConfig.connectionLimit || 10
+    connectionLimit: customConfig.connectionLimit || 10,
+    namedPlaceholders: true,
+    decimalNumbers: true,
+    supportBigNumbers: true,
+    bigNumberStrings: false
   };
 }
 
@@ -427,28 +435,31 @@ async function initDatabase() {
 
     await query(`
       CREATE TABLE IF NOT EXISTS sustain_rules (
-        id VARCHAR(36) PRIMARY KEY,
-        rule_name VARCHAR(100) NOT NULL,
-        rule_type VARCHAR(50) NOT NULL,
+        id INT PRIMARY KEY AUTO_INCREMENT,
+        rule_id VARCHAR(36) UNIQUE NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        description TEXT,
         \`condition\` TEXT NOT NULL,
         \`action\` TEXT NOT NULL,
-        priority INT DEFAULT 0,
-        min_samples INT DEFAULT 0,
-        enabled BOOLEAN DEFAULT TRUE,
-        description TEXT,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        action_params TEXT,
+        priority INT DEFAULT 50,
+        enabled INT DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
     await query(`
       CREATE TABLE IF NOT EXISTS rule_execution_log (
-        id VARCHAR(36) PRIMARY KEY,
+        id INT PRIMARY KEY AUTO_INCREMENT,
         rule_id VARCHAR(36) NOT NULL,
-        rule_name VARCHAR(100),
-        execution_result TEXT,
-        is_triggered BOOLEAN DEFAULT FALSE,
-        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        rule_name VARCHAR(100) NOT NULL,
+        context TEXT,
+        action_taken TEXT,
+        result TEXT,
+        success INT,
+        timestamp BIGINT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
@@ -767,7 +778,19 @@ async function initDatabase() {
     
     await migrateTableStructure();
     
-    logger.info('MySQL数据库表初始化完成（23张表）');
+    const expectedTables = 32;
+    const actualTableCount = (await query(`
+      SELECT COUNT(*) as count FROM information_schema.TABLES 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME != 'sync_metadata'
+    `))[0].count;
+    
+    logger.info(`MySQL数据库表初始化完成（${actualTableCount}/${expectedTables}张表）`);
+    
+    if (actualTableCount < expectedTables) {
+      logger.warn(`MySQL表数量不足，期望${expectedTables}张，实际${actualTableCount}张，尝试创建缺失的表...`);
+      await ensureAllTablesExist();
+    }
+    
     return true;
   } catch (error) {
     logger.warn(`MySQL数据库表初始化失败: ${error.message}`);
@@ -1073,7 +1096,11 @@ async function switchConnection(connectionConfig) {
       connectionLimit: mysqlConfig.connectionLimit,
       waitForConnections: true,
       queueLimit: 0,
-      charset: 'utf8mb4'
+      charset: 'utf8mb4',
+      namedPlaceholders: true,
+      decimalNumbers: true,
+      supportBigNumbers: true,
+      bigNumberStrings: false
     });
 
     const connection = await pool.getConnection();
@@ -1098,6 +1125,194 @@ async function switchConnection(connectionConfig) {
  */
 function getCurrentConnectionConfig() {
   return currentConnectionConfig || config.mysql;
+}
+
+/**
+ * 确保所有表都存在，用于修复表创建失败的情况
+ */
+async function ensureAllTablesExist() {
+  const pool = getPool();
+  if (!pool) return;
+  
+  const allTables = [
+    'sys_user', 'sys_oper_log', 'sys_config',
+    'scan_project', 'scan_task', 'code_issue',
+    'ai_optimize_record', 'code_report', 'llm_api_keys',
+    'api_access_keys', 'self_update_history', 'self_repair_history',
+    'confirmation_history', 'kb_entries', 'kb_cases',
+    'code_standards', 'user_preferences', 'kb_metadata',
+    'telemetry_events', 'sustain_rules', 'rule_execution_log',
+    'ai_analysis_records', 'validation_records',
+    'api_request_log', 'code_analysis_record', 'analysis_result',
+    'notification', 'system_monitor', 'backup_history',
+    'kb_import_history', 'dependency_version', 'project_analysis_summary'
+  ];
+  
+  try {
+    const existingTables = (await query(`
+      SELECT TABLE_NAME FROM information_schema.TABLES 
+      WHERE TABLE_SCHEMA = DATABASE()
+    `)).map(row => row.TABLE_NAME);
+    
+    await cleanupTempTables();
+    
+    for (const table of allTables) {
+      if (!existingTables.includes(table)) {
+        logger.info(`创建缺失的表: ${table}`);
+        await createMissingTable(table);
+      } else {
+        await syncTableSchemaFromSqlite(table);
+      }
+    }
+    
+    const finalCount = (await query(`
+      SELECT COUNT(*) as count FROM information_schema.TABLES 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME != 'sync_metadata'
+    `))[0].count;
+    
+    logger.info(`表检查完成，当前共有${finalCount}张表`);
+  } catch (error) {
+    logger.error(`确保所有表存在失败: ${error.message}`);
+  }
+}
+
+async function cleanupTempTables() {
+  try {
+    const tempTables = (await query(`
+      SELECT TABLE_NAME FROM information_schema.TABLES 
+      WHERE TABLE_SCHEMA = DATABASE() 
+      AND TABLE_NAME LIKE '%_sync_temp' OR TABLE_NAME LIKE '%_sync_backup'
+    `)).map(row => row.TABLE_NAME);
+    
+    for (const table of tempTables) {
+      await query(`DROP TABLE IF EXISTS \`${table}\``);
+      logger.info(`清理临时表: ${table}`);
+    }
+  } catch (error) {
+    logger.debug(`清理临时表失败: ${error.message}`);
+  }
+}
+
+async function syncTableSchemaFromSqlite(tableName) {
+  try {
+    const sqlite = require('./dbAdapter').dbAdapter.getSqlite();
+    const schemaResult = sqlite.prepare(`PRAGMA table_info(${tableName})`).all();
+    
+    if (!schemaResult || schemaResult.length === 0) {
+      logger.warn(`SQLite表 ${tableName} 不存在，跳过结构同步`);
+      return;
+    }
+    
+    const mysqlColumns = (await query(`
+      SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${tableName}'
+    `)).map(row => row.COLUMN_NAME);
+    
+    let hasChanges = false;
+    for (const col of schemaResult) {
+      if (!mysqlColumns.includes(col.name)) {
+        let mysqlType = col.type.toUpperCase();
+        
+        if (mysqlType === 'INTEGER') {
+          mysqlType = col.pk === 1 ? 'INT' : 'INT';
+        } else if (mysqlType === 'TEXT') {
+          mysqlType = 'TEXT';
+        } else if (mysqlType === 'REAL') {
+          mysqlType = 'DECIMAL(10,2)';
+        } else if (mysqlType === 'BOOLEAN') {
+          mysqlType = 'TINYINT(1)';
+        } else if (mysqlType === 'BIGINT') {
+          mysqlType = 'BIGINT';
+        } else if (mysqlType === 'DATETIME') {
+          mysqlType = 'DATETIME';
+        } else if (mysqlType === 'VARCHAR') {
+          mysqlType = `VARCHAR(${col.dflt_value || 255})`;
+        }
+        
+        let constraint = '';
+        if (col.notnull !== 1) {
+          constraint += ' NULL';
+        }
+        if (col.dflt_value !== null && col.dflt_value !== undefined && !['TEXT', 'BLOB', 'JSON'].includes(mysqlType)) {
+          let defaultValue = col.dflt_value;
+          if (typeof defaultValue === 'string' && !defaultValue.startsWith("'")) {
+            defaultValue = `'${defaultValue}'`;
+          }
+          constraint += ` DEFAULT ${defaultValue}`;
+        }
+        
+        try {
+          await query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${col.name}\` ${mysqlType}${constraint}`);
+          logger.info(`表 ${tableName} 添加缺失字段: ${col.name}`);
+          hasChanges = true;
+        } catch (alterError) {
+          logger.warn(`添加字段 ${col.name} 失败: ${alterError.message}`);
+        }
+      }
+    }
+    
+    if (hasChanges) {
+      logger.info(`表 ${tableName} 结构同步完成`);
+    }
+  } catch (error) {
+    logger.warn(`同步表结构失败 [${tableName}]: ${error.message}`);
+  }
+}
+
+async function createMissingTable(tableName) {
+  try {
+    const sqlite = require('./dbAdapter').dbAdapter.getSqlite();
+    const schemaResult = sqlite.prepare(`PRAGMA table_info(${tableName})`).all();
+    
+    if (!schemaResult || schemaResult.length === 0) {
+      logger.warn(`SQLite表 ${tableName} 也不存在，跳过创建`);
+      return;
+    }
+    
+    const columns = schemaResult.map(col => {
+      let mysqlType = col.type.toUpperCase();
+      
+      if (mysqlType === 'INTEGER') {
+        mysqlType = col.pk === 1 && col.notnull === 1 ? 'INT PRIMARY KEY AUTO_INCREMENT' : 'INT';
+      } else if (mysqlType === 'TEXT') {
+        mysqlType = col.pk === 1 ? 'VARCHAR(36)' : 'TEXT';
+      } else if (mysqlType === 'REAL') {
+        mysqlType = 'DECIMAL(10,2)';
+      } else if (mysqlType === 'BOOLEAN') {
+        mysqlType = 'TINYINT(1)';
+      } else if (mysqlType === 'BIGINT') {
+        mysqlType = 'BIGINT';
+      } else if (mysqlType === 'DATETIME') {
+        mysqlType = 'DATETIME';
+      } else if (mysqlType === 'VARCHAR') {
+        mysqlType = `VARCHAR(${col.dflt_value || 255})`;
+      }
+      
+      let constraint = '';
+      if (col.notnull === 1 && !mysqlType.includes('PRIMARY KEY')) {
+        constraint += ' NOT NULL';
+      }
+      if (col.dflt_value !== null && col.dflt_value !== undefined && !['TEXT', 'BLOB', 'JSON'].includes(mysqlType)) {
+        let defaultValue = col.dflt_value;
+        if (typeof defaultValue === 'string' && !defaultValue.startsWith("'")) {
+          defaultValue = `'${defaultValue}'`;
+        }
+        constraint += ` DEFAULT ${defaultValue}`;
+      }
+      if (col.pk === 1 && !mysqlType.includes('PRIMARY KEY')) {
+        constraint += ' PRIMARY KEY';
+      }
+      
+      return `\`${col.name}\` ${mysqlType}${constraint}`;
+    });
+    
+    const createSql = `CREATE TABLE \`${tableName}\` (${columns.join(', ')}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+    await query(createSql);
+    
+    logger.info(`表 ${tableName} 创建成功`);
+  } catch (error) {
+    logger.error(`创建表 ${tableName} 失败: ${error.message}`);
+  }
 }
 
 module.exports = {

@@ -12,11 +12,19 @@ const { queryOne } = require('../../utils/database');
  */
 async function getLLMKeyFromDB(providerName) {
   try {
-    const key = await queryOne(
-      'SELECT api_key, api_url, model_name FROM llm_api_keys WHERE provider_name = ? AND is_active = 1 ORDER BY priority DESC LIMIT 1',
-      [providerName]
-    );
-    return key;
+    const { dbAdapter } = require('../../utils/dbAdapter');
+    const sqlite = dbAdapter.getSqlite();
+    
+    const allRecords = sqlite.prepare('SELECT * FROM llm_api_keys').all();
+    const matched = allRecords.find(r => r.provider_name === providerName);
+    if (matched) {
+      return {
+        api_key: matched.api_key,
+        api_url: matched.api_url,
+        model_name: matched.model_name
+      };
+    }
+    return null;
   } catch (error) {
     logger.debug(`从数据库获取${providerName}密钥失败: ${error.message}`);
     return null;
