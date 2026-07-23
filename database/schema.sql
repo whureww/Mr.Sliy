@@ -1,7 +1,7 @@
-﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿﻿-- ============================================
+-- ============================================
 -- 代码优化智能体数据库架构设计
--- 版本: 1.0.0
--- 描述: 包含8张核心数据表
+-- 版本: 2.0.0
+-- 描述: 包含32张核心数据表
 -- ============================================
 
 -- 1. 用户表 (sys_user)
@@ -151,6 +151,401 @@ CREATE TABLE IF NOT EXISTS code_report (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 9. AI模型密钥表 (llm_api_keys)
+CREATE TABLE IF NOT EXISTS llm_api_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider_name VARCHAR(50) NOT NULL,
+    api_key TEXT NOT NULL,
+    api_url TEXT,
+    model_name VARCHAR(100),
+    is_active BOOLEAN DEFAULT 1,
+    priority INTEGER DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 10. 访问密钥表 (api_access_keys)
+CREATE TABLE IF NOT EXISTS api_access_keys (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    access_key VARCHAR(100) NOT NULL UNIQUE,
+    key_name VARCHAR(100),
+    permissions TEXT,
+    rate_limit INTEGER DEFAULT 100,
+    usage_count INTEGER DEFAULT 0,
+    is_active BOOLEAN DEFAULT 1,
+    expires_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 11. 自更新记录表 (self_update_history)
+CREATE TABLE IF NOT EXISTS self_update_history (
+    id TEXT PRIMARY KEY,
+    update_type VARCHAR(50) NOT NULL,
+    target_version VARCHAR(20),
+    current_version VARCHAR(20),
+    version_after VARCHAR(20),
+    update_source VARCHAR(100),
+    update_content TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    user_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    rejected_step VARCHAR(100),
+    sandbox_result TEXT,
+    applied_at DATETIME,
+    rollback_version VARCHAR(20),
+    rollback_at DATETIME,
+    rolled_back_reason VARCHAR(200),
+    error_message TEXT,
+    duration_ms INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 12. 自修复记录表 (self_repair_history)
+CREATE TABLE IF NOT EXISTS self_repair_history (
+    id TEXT PRIMARY KEY,
+    error_type VARCHAR(100) NOT NULL,
+    error_message TEXT,
+    error_stack TEXT,
+    affected_component VARCHAR(100),
+    repair_strategy VARCHAR(100),
+    repair_content TEXT,
+    status VARCHAR(20) DEFAULT 'pending',
+    user_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    sandbox_result TEXT,
+    applied_at DATETIME,
+    rollback_at DATETIME,
+    rolled_back_reason VARCHAR(200),
+    error_count INTEGER DEFAULT 1,
+    last_error_at DATETIME,
+    duration_ms INTEGER,
+    error_message_detail TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 13. 确认记录表 (confirmation_history)
+CREATE TABLE IF NOT EXISTS confirmation_history (
+    id TEXT PRIMARY KEY,
+    operation_type VARCHAR(100) NOT NULL,
+    risk_level VARCHAR(20) NOT NULL,
+    step_name VARCHAR(100),
+    step_number INTEGER DEFAULT 0,
+    total_steps INTEGER DEFAULT 0,
+    description TEXT NOT NULL,
+    impact VARCHAR(500),
+    files_affected TEXT,
+    backup_available BOOLEAN DEFAULT 0,
+    rollback_possible BOOLEAN DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'pending',
+    reason VARCHAR(200),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 14. 知识库条目表 (kb_entries)
+CREATE TABLE IF NOT EXISTS kb_entries (
+    id TEXT PRIMARY KEY,
+    content TEXT NOT NULL,
+    content_type VARCHAR(50) NOT NULL,
+    language VARCHAR(20),
+    tags TEXT,
+    source VARCHAR(100),
+    vector_json TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 15. 知识库案例表 (kb_cases)
+CREATE TABLE IF NOT EXISTS kb_cases (
+    id TEXT PRIMARY KEY,
+    original_code TEXT NOT NULL,
+    optimized_code TEXT NOT NULL,
+    explanation TEXT,
+    language VARCHAR(20),
+    issue_type VARCHAR(50),
+    vector_json TEXT,
+    usage_count INTEGER DEFAULT 0,
+    rating REAL DEFAULT 0.00,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 16. 代码标准表 (code_standards)
+CREATE TABLE IF NOT EXISTS code_standards (
+    id TEXT PRIMARY KEY,
+    rule_name VARCHAR(100) NOT NULL,
+    rule_description TEXT NOT NULL,
+    bad_example TEXT,
+    good_example TEXT,
+    language VARCHAR(20),
+    severity VARCHAR(20),
+    is_active BOOLEAN DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 17. 用户偏好表 (user_preferences)
+CREATE TABLE IF NOT EXISTS user_preferences (
+    id TEXT PRIMARY KEY,
+    config_key VARCHAR(100) UNIQUE NOT NULL,
+    config_value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 18. 知识库元数据表 (kb_metadata)
+CREATE TABLE IF NOT EXISTS kb_metadata (
+    meta_key VARCHAR(100) PRIMARY KEY,
+    value TEXT,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 19. 遥测事件表 (telemetry_events)
+CREATE TABLE IF NOT EXISTS telemetry_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type VARCHAR(100) NOT NULL,
+    event_category VARCHAR(100) NOT NULL,
+    event_data TEXT,
+    severity VARCHAR(20) DEFAULT 'info',
+    timestamp BIGINT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 20. 自持规则表 (sustain_rules)
+CREATE TABLE IF NOT EXISTS sustain_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    condition TEXT NOT NULL,
+    action TEXT NOT NULL,
+    action_params TEXT,
+    priority INTEGER DEFAULT 50,
+    enabled INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 21. 规则执行日志表 (rule_execution_log)
+CREATE TABLE IF NOT EXISTS rule_execution_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rule_id VARCHAR(36) NOT NULL,
+    rule_name VARCHAR(100) NOT NULL,
+    context TEXT,
+    action_taken TEXT,
+    result TEXT,
+    success INTEGER,
+    timestamp BIGINT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 22. AI分析记录表 (ai_analysis_records)
+CREATE TABLE IF NOT EXISTS ai_analysis_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_type VARCHAR(50) NOT NULL,
+    focus VARCHAR(100) DEFAULT 'general',
+    input_data TEXT,
+    analysis_result TEXT,
+    suggestions TEXT,
+    confidence REAL DEFAULT 0,
+    executed BOOLEAN DEFAULT 0,
+    execution_result TEXT,
+    timestamp BIGINT NOT NULL,
+    output_data TEXT,
+    ai_model VARCHAR(100),
+    tokens_used INTEGER,
+    duration_ms INTEGER,
+    success BOOLEAN DEFAULT 1,
+    error_message TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 23. 验证记录表 (validation_records)
+CREATE TABLE IF NOT EXISTS validation_records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    validation_type VARCHAR(50) NOT NULL,
+    target_id TEXT,
+    target_type VARCHAR(50),
+    before_state TEXT,
+    after_state TEXT,
+    metrics_before TEXT,
+    metrics_after TEXT,
+    success INTEGER DEFAULT 0,
+    improvement_score REAL DEFAULT 0,
+    timestamp BIGINT NOT NULL,
+    cycle_id TEXT,
+    result TEXT,
+    score REAL,
+    passed BOOLEAN DEFAULT 0,
+    details TEXT,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 24. API请求日志表 (api_request_log)
+CREATE TABLE IF NOT EXISTS api_request_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    api_key_id INTEGER,
+    provider_name VARCHAR(50),
+    endpoint VARCHAR(255),
+    request_method VARCHAR(10),
+    request_headers TEXT,
+    request_body TEXT,
+    response_status INTEGER,
+    response_body TEXT,
+    response_headers TEXT,
+    tokens_used INTEGER,
+    latency_ms INTEGER,
+    error_message TEXT,
+    is_success BOOLEAN DEFAULT 1,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 25. 代码分析记录表 (code_analysis_record)
+CREATE TABLE IF NOT EXISTS code_analysis_record (
+    id TEXT PRIMARY KEY,
+    project_id INTEGER,
+    task_id INTEGER,
+    file_path VARCHAR(500) NOT NULL,
+    file_name VARCHAR(255),
+    language VARCHAR(50),
+    file_size INTEGER,
+    line_count INTEGER,
+    complexity_score REAL,
+    maintainability_index REAL,
+    analysis_start_at DATETIME,
+    analysis_end_at DATETIME,
+    duration_ms INTEGER,
+    status VARCHAR(20) DEFAULT 'completed',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 26. 分析结果表 (analysis_result)
+CREATE TABLE IF NOT EXISTS analysis_result (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    analysis_id TEXT NOT NULL,
+    project_id INTEGER,
+    task_id INTEGER,
+    result_type VARCHAR(50) NOT NULL,
+    result_data TEXT,
+    confidence REAL DEFAULT 0,
+    source VARCHAR(100),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 27. 通知表 (notification)
+CREATE TABLE IF NOT EXISTS notification (
+    id TEXT PRIMARY KEY,
+    user_id INTEGER,
+    message_type VARCHAR(50) NOT NULL,
+    title VARCHAR(255) NOT NULL,
+    content TEXT,
+    data_json TEXT,
+    is_read BOOLEAN DEFAULT 0,
+    is_confirmed BOOLEAN DEFAULT 0,
+    confirmed_at DATETIME,
+    action VARCHAR(50),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 28. 系统监控表 (system_monitor)
+CREATE TABLE IF NOT EXISTS system_monitor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    metric_type VARCHAR(50) NOT NULL,
+    metric_name VARCHAR(100) NOT NULL,
+    metric_value REAL NOT NULL,
+    threshold REAL,
+    is_alert BOOLEAN DEFAULT 0,
+    component VARCHAR(100),
+    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 29. 备份历史表 (backup_history)
+CREATE TABLE IF NOT EXISTS backup_history (
+    id TEXT PRIMARY KEY,
+    backup_type VARCHAR(50) NOT NULL,
+    backup_path VARCHAR(500),
+    backup_size BIGINT,
+    backup_count INTEGER,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message TEXT,
+    started_at DATETIME,
+    completed_at DATETIME,
+    duration_ms INTEGER,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 30. 知识库导入历史表 (kb_import_history)
+CREATE TABLE IF NOT EXISTS kb_import_history (
+    id TEXT PRIMARY KEY,
+    source_type VARCHAR(50) NOT NULL,
+    source_path VARCHAR(500),
+    file_count INTEGER DEFAULT 0,
+    imported_count INTEGER DEFAULT 0,
+    skipped_count INTEGER DEFAULT 0,
+    duplicate_count INTEGER DEFAULT 0,
+    status VARCHAR(20) DEFAULT 'pending',
+    error_message TEXT,
+    started_at DATETIME,
+    completed_at DATETIME,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 31. 依赖版本表 (dependency_version)
+CREATE TABLE IF NOT EXISTS dependency_version (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    package_name VARCHAR(255) NOT NULL,
+    current_version VARCHAR(50),
+    latest_version VARCHAR(50),
+    is_outdated BOOLEAN DEFAULT 0,
+    update_priority VARCHAR(20) DEFAULT 'low',
+    last_check_at DATETIME,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 32. 项目分析汇总表 (project_analysis_summary)
+CREATE TABLE IF NOT EXISTS project_analysis_summary (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL,
+    analysis_date DATETIME NOT NULL,
+    total_files INTEGER DEFAULT 0,
+    total_issues INTEGER DEFAULT 0,
+    critical_count INTEGER DEFAULT 0,
+    high_count INTEGER DEFAULT 0,
+    medium_count INTEGER DEFAULT 0,
+    low_count INTEGER DEFAULT 0,
+    fixed_count INTEGER DEFAULT 0,
+    avg_complexity REAL DEFAULT 0,
+    avg_maintainability REAL DEFAULT 0,
+    summary TEXT,
+    user_id INTEGER,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 33. 同步元数据表 (sync_metadata)
+CREATE TABLE IF NOT EXISTS sync_metadata (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    table_name VARCHAR(50) NOT NULL,
+    last_sync_at DATETIME,
+    record_count INTEGER DEFAULT 0,
+    machine_id VARCHAR(32),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 34. 同步队列表 (sync_queue)
+CREATE TABLE IF NOT EXISTS sync_queue (
+    id TEXT PRIMARY KEY,
+    table_name TEXT NOT NULL,
+    sql TEXT NOT NULL,
+    params TEXT,
+    operation_type TEXT NOT NULL,
+    retry_count INTEGER DEFAULT 0,
+    last_retry_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- ============================================
 -- 索引设计
 -- ============================================
@@ -186,112 +581,63 @@ CREATE INDEX IF NOT EXISTS idx_report_task_id ON code_report(task_id);
 CREATE INDEX IF NOT EXISTS idx_report_project_id ON code_report(project_id);
 CREATE INDEX IF NOT EXISTS idx_report_user_id ON code_report(user_id);
 
--- 9. AI模型密钥表 (llm_api_keys)
-CREATE TABLE IF NOT EXISTS llm_api_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    provider_name VARCHAR(50) NOT NULL,
-    api_key TEXT NOT NULL,
-    api_url TEXT,
-    model_name VARCHAR(100),
-    is_active BOOLEAN DEFAULT 1,
-    priority INTEGER DEFAULT 0,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE INDEX IF NOT EXISTS idx_llm_provider ON llm_api_keys(provider_name);
 CREATE INDEX IF NOT EXISTS idx_llm_active ON llm_api_keys(is_active);
-
--- 10. 访问密钥表 (api_access_keys)
-CREATE TABLE IF NOT EXISTS api_access_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    access_key VARCHAR(100) NOT NULL UNIQUE,
-    key_name VARCHAR(100),
-    permissions TEXT,
-    rate_limit INTEGER DEFAULT 100,
-    usage_count INTEGER DEFAULT 0,
-    is_active BOOLEAN DEFAULT 1,
-    expires_at DATETIME,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
 
 CREATE INDEX IF NOT EXISTS idx_access_key ON api_access_keys(access_key);
 CREATE INDEX IF NOT EXISTS idx_access_active ON api_access_keys(is_active);
 
--- 11. 自更新记录表 (self_update_history)
-CREATE TABLE IF NOT EXISTS self_update_history (
-    id TEXT PRIMARY KEY,
-    update_type VARCHAR(50) NOT NULL,
-    target_version VARCHAR(20),
-    current_version VARCHAR(20),
-    update_source VARCHAR(100),
-    update_content TEXT,
-    status VARCHAR(20) DEFAULT 'pending',
-    user_confirmed BOOLEAN DEFAULT 0,
-    confirmed_at DATETIME,
-    rejected_step VARCHAR(100),
-    sandbox_result TEXT,
-    applied_at DATETIME,
-    rollback_version VARCHAR(20),
-    rollback_at DATETIME,
-    rolled_back_reason VARCHAR(200),
-    error_message TEXT,
-    duration_ms INTEGER,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE INDEX IF NOT EXISTS idx_update_type ON self_update_history(update_type);
 CREATE INDEX IF NOT EXISTS idx_update_status ON self_update_history(status);
 CREATE INDEX IF NOT EXISTS idx_update_created_at ON self_update_history(created_at);
-
--- 12. 自修复记录表 (self_repair_history)
-CREATE TABLE IF NOT EXISTS self_repair_history (
-    id TEXT PRIMARY KEY,
-    error_type VARCHAR(100) NOT NULL,
-    error_message TEXT,
-    error_stack TEXT,
-    affected_component VARCHAR(100),
-    repair_strategy VARCHAR(100),
-    repair_content TEXT,
-    status VARCHAR(20) DEFAULT 'pending',
-    user_confirmed BOOLEAN DEFAULT 0,
-    confirmed_at DATETIME,
-    sandbox_result TEXT,
-    applied_at DATETIME,
-    rollback_at DATETIME,
-    rolled_back_reason VARCHAR(200),
-    error_count INTEGER DEFAULT 1,
-    last_error_at DATETIME,
-    duration_ms INTEGER,
-    error_message_detail TEXT,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
 
 CREATE INDEX IF NOT EXISTS idx_repair_error_type ON self_repair_history(error_type);
 CREATE INDEX IF NOT EXISTS idx_repair_status ON self_repair_history(status);
 CREATE INDEX IF NOT EXISTS idx_repair_created_at ON self_repair_history(created_at);
 CREATE INDEX IF NOT EXISTS idx_repair_component ON self_repair_history(affected_component);
 
--- 13. 确认记录表 (confirmation_history)
-CREATE TABLE IF NOT EXISTS confirmation_history (
-    id TEXT PRIMARY KEY,
-    operation_type VARCHAR(100) NOT NULL,
-    risk_level VARCHAR(20) NOT NULL,
-    step_name VARCHAR(100),
-    step_number INTEGER DEFAULT 0,
-    total_steps INTEGER DEFAULT 0,
-    description TEXT NOT NULL,
-    impact VARCHAR(500),
-    files_affected TEXT,
-    backup_available BOOLEAN DEFAULT 0,
-    rollback_possible BOOLEAN DEFAULT 0,
-    status VARCHAR(20) DEFAULT 'pending',
-    reason VARCHAR(200),
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
 CREATE INDEX IF NOT EXISTS idx_confirmation_operation ON confirmation_history(operation_type);
 CREATE INDEX IF NOT EXISTS idx_confirmation_risk_level ON confirmation_history(risk_level);
 CREATE INDEX IF NOT EXISTS idx_confirmation_status ON confirmation_history(status);
 CREATE INDEX IF NOT EXISTS idx_confirmation_created_at ON confirmation_history(created_at);
+
+CREATE INDEX IF NOT EXISTS idx_kb_content_type ON kb_entries(content_type);
+CREATE INDEX IF NOT EXISTS idx_kb_language ON kb_entries(language);
+
+CREATE INDEX IF NOT EXISTS idx_kb_cases_language ON kb_cases(language);
+CREATE INDEX IF NOT EXISTS idx_kb_cases_issue_type ON kb_cases(issue_type);
+
+CREATE INDEX IF NOT EXISTS idx_standards_language ON code_standards(language);
+
+CREATE INDEX IF NOT EXISTS idx_monitor_type ON telemetry_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_monitor_component ON telemetry_events(event_category);
+
+CREATE INDEX IF NOT EXISTS idx_sustain_rule_id ON sustain_rules(rule_id);
+CREATE INDEX IF NOT EXISTS idx_sustain_enabled ON sustain_rules(enabled);
+
+CREATE INDEX IF NOT EXISTS idx_api_request_provider ON api_request_log(provider_name);
+CREATE INDEX IF NOT EXISTS idx_api_request_user ON api_request_log(user_id);
+
+CREATE INDEX IF NOT EXISTS idx_analysis_project ON code_analysis_record(project_id);
+CREATE INDEX IF NOT EXISTS idx_analysis_task ON code_analysis_record(task_id);
+
+CREATE INDEX IF NOT EXISTS idx_result_analysis ON analysis_result(analysis_id);
+
+CREATE INDEX IF NOT EXISTS idx_notification_user ON notification(user_id);
+CREATE INDEX IF NOT EXISTS idx_notification_type ON notification(message_type);
+
+CREATE INDEX IF NOT EXISTS idx_monitor_metric ON system_monitor(metric_type);
+
+CREATE INDEX IF NOT EXISTS idx_backup_type ON backup_history(backup_type);
+
+CREATE INDEX IF NOT EXISTS idx_import_source ON kb_import_history(source_type);
+
+CREATE INDEX IF NOT EXISTS idx_dependency_package ON dependency_version(package_name);
+
+CREATE INDEX IF NOT EXISTS idx_summary_project ON project_analysis_summary(project_id);
+CREATE INDEX IF NOT EXISTS idx_summary_date ON project_analysis_summary(analysis_date);
+
+CREATE INDEX IF NOT EXISTS idx_sync_table ON sync_metadata(table_name);
+
+CREATE INDEX IF NOT EXISTS idx_queue_table ON sync_queue(table_name);
+CREATE INDEX IF NOT EXISTS idx_queue_retry ON sync_queue(retry_count);

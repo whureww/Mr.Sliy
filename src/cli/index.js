@@ -1401,7 +1401,27 @@ async function cloudSyncMenu() {
     const { config } = require('../config');
     const cloudEnabled = config.mysql.enabled;
     
-    console.log(c('  云端同步状态: ' + (cloudEnabled ? c('已启用', 'green') : c('未启用', 'yellow')), 'white'));
+    let syncStatus = '从未同步';
+    if (config.mysql.lastSyncTime) {
+      const lastSync = new Date(config.mysql.lastSyncTime);
+      const now = new Date();
+      const diffMs = now - lastSync;
+      const diffMins = Math.floor(diffMs / 60000);
+      const diffHours = Math.floor(diffMins / 60);
+      const diffDays = Math.floor(diffHours / 24);
+      
+      if (diffDays > 0) {
+        syncStatus = `${diffDays}天前`;
+      } else if (diffHours > 0) {
+        syncStatus = `${diffHours}小时前`;
+      } else if (diffMins > 0) {
+        syncStatus = `${diffMins}分钟前`;
+      } else {
+        syncStatus = '刚刚';
+      }
+    }
+    
+    console.log(c('  上次同步: ' + (cloudEnabled ? c(syncStatus, 'green') : c('未启用', 'yellow')), 'white'));
     console.log(c('  服务器: ' + config.mysql.host + ':' + config.mysql.port, 'dim'));
     console.log(c('  数据库: ' + config.mysql.database, 'dim'));
     console.log();
@@ -1531,7 +1551,8 @@ async function downloadFromCloud() {
   console.log(c('  正在从云端同步...', 'cyan'));
   
   try {
-    const result = await agent.syncKnowledgeFromCloud();
+    const { dbAdapter } = require('../utils/dbAdapter');
+    const result = await dbAdapter.syncAllRemoteToLocal();
     if (result.success) {
       console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
     } else {
@@ -1895,20 +1916,10 @@ async function switchDefaultConnection() {
   console.log();
   if (result.success) {
     console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
-    
-    const confirmTest = await ask('  是否测试新的默认连接？(y/N): ');
-    if (confirmTest === '__CANCEL__') {
-      await waitEnter();
-      return;
-    }
-    
-    if (confirmTest.toLowerCase() === 'y' || confirmTest.toLowerCase() === 'yes') {
-      await testCloudConnection();
-    }
   } else {
     console.log(c('  ✗ ' + result.message, 'red'));
-    await waitEnter();
   }
+  await waitEnter();
 }
 
 async function testSpecificConnection() {

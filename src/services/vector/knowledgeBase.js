@@ -94,19 +94,8 @@ class KnowledgeBase {
     const { getDatabase } = require('../../utils/database');
     const db = getDatabase();
     
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS kb_entries (
-        id TEXT PRIMARY KEY,
-        content TEXT NOT NULL,
-        content_type TEXT NOT NULL,
-        language TEXT,
-        tags TEXT,
-        source TEXT,
-        vector_json TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
+    this._ensureTableStructure(db);
+    
     db.exec(`
       CREATE TABLE IF NOT EXISTS kb_metadata (
         key TEXT PRIMARY KEY,
@@ -114,33 +103,131 @@ class KnowledgeBase {
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    this._ensureIndexes(db);
+  }
 
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS kb_cases (
-        id TEXT PRIMARY KEY,
-        original_code TEXT NOT NULL,
-        optimized_code TEXT NOT NULL,
-        explanation TEXT,
-        language TEXT,
-        issue_type TEXT,
-        vector_json TEXT,
-        usage_count INTEGER DEFAULT 0,
-        rating REAL DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
+  _ensureTableStructure(db) {
     try {
-      db.exec('ALTER TABLE kb_entries ADD COLUMN IF NOT EXISTS vector_json TEXT');
-      db.exec('ALTER TABLE kb_entries ADD COLUMN IF NOT EXISTS source TEXT');
-      db.exec('ALTER TABLE kb_cases ADD COLUMN IF NOT EXISTS issue_type TEXT');
-      db.exec('ALTER TABLE kb_cases ADD COLUMN IF NOT EXISTS usage_count INTEGER DEFAULT 0');
-      db.exec('ALTER TABLE kb_cases ADD COLUMN IF NOT EXISTS rating REAL DEFAULT 0');
-      db.exec('ALTER TABLE kb_cases ADD COLUMN IF NOT EXISTS vector_json TEXT');
+      const kbEntriesSchema = db.prepare("PRAGMA table_info(kb_entries)").all();
+      const kbEntriesColumns = kbEntriesSchema.map(col => col.name);
+      
+      const kbCasesSchema = db.prepare("PRAGMA table_info(kb_cases)").all();
+      const kbCasesColumns = kbCasesSchema.map(col => col.name);
+      
+      const kbEntriesNeedsMigration = !kbEntriesColumns.includes('vector_json');
+      const kbCasesNeedsMigration = !kbCasesColumns.includes('vector_json');
+      
+      if (kbEntriesNeedsMigration || kbCasesNeedsMigration) {
+        logger.info('检测到旧版数据库表结构，正在迁移...');
+        
+        if (kbEntriesNeedsMigration) {
+          const entries = db.prepare('SELECT * FROM kb_entries').all();
+          db.exec('DROP TABLE IF EXISTS kb_entries');
+          db.exec(`
+            CREATE TABLE kb_entries (
+              id TEXT PRIMARY KEY,
+              content TEXT NOT NULL,
+              content_type TEXT NOT NULL,
+              language TEXT,
+              tags TEXT,
+              source TEXT,
+              vector_json TEXT,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+          const stmt = db.prepare(`
+            INSERT INTO kb_entries (id, content, content_type, language, tags, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `);
+          for (const entry of entries) {
+            stmt.run(
+              entry.id ? String(entry.id) : this._generateUUID(),
+              entry.content,
+              entry.content_type || 'general',
+              entry.language || null,
+              entry.tags || null,
+              entry.source || null,
+              entry.created_at || new Date().toISOString()
+            );
+          }
+          logger.info(`已迁移 ${entries.length} 条知识条目`);
+        }
+        
+        if (kbCasesNeedsMigration) {
+          const cases = db.prepare('SELECT * FROM kb_cases').all();
+          db.exec('DROP TABLE IF EXISTS kb_cases');
+          db.exec(`
+            CREATE TABLE kb_cases (
+              id TEXT PRIMARY KEY,
+              original_code TEXT NOT NULL,
+              optimized_code TEXT NOT NULL,
+              explanation TEXT,
+              language TEXT,
+              issue_type TEXT,
+              vector_json TEXT,
+              usage_count INTEGER DEFAULT 0,
+              rating REAL DEFAULT 0,
+              created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+          `);
+          const stmt = db.prepare(`
+            INSERT INTO kb_cases (id, original_code, optimized_code, explanation, language, issue_type, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `);
+          for (const c of cases) {
+            stmt.run(
+              c.id ? String(c.id) : this._generateUUID(),
+              c.original_code,
+              c.optimized_code,
+              c.explanation || null,
+              c.language || null,
+              c.issue_type || null,
+              c.created_at || new Date().toISOString()
+            );
+          }
+          logger.info(`已迁移 ${cases.length} 条优化案例`);
+        }
+        
+        logger.info('数据库表结构迁移完成');
+      }
     } catch (e) {
-      logger.debug('数据库迁移失败，可能是旧版本SQLite不支持: ' + e.message);
+      logger.warn('数据库表结构检查失败: ' + e.message);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kb_entries (
+          id TEXT PRIMARY KEY,
+          content TEXT NOT NULL,
+          content_type TEXT NOT NULL,
+          language TEXT,
+          tags TEXT,
+          source TEXT,
+          vector_json TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS kb_cases (
+          id TEXT PRIMARY KEY,
+          original_code TEXT NOT NULL,
+          optimized_code TEXT NOT NULL,
+          explanation TEXT,
+          language TEXT,
+          issue_type TEXT,
+          vector_json TEXT,
+          usage_count INTEGER DEFAULT 0,
+          rating REAL DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+      `);
     }
+  }
 
+  _generateUUID() {
+    const { generateUUID } = require('../../utils/helpers');
+    return generateUUID();
+  }
+
+  _ensureIndexes(db) {
     db.exec('CREATE INDEX IF NOT EXISTS idx_kb_entries_type ON kb_entries(content_type)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_kb_entries_lang ON kb_entries(language)');
     
@@ -717,7 +804,7 @@ class KnowledgeBase {
           source: 'default'
         });
       } catch (e) {
-        logger.warn(`知识条目插入失败 [${i}]:`, e.message);
+        logger.warn(`知识条目插入失败 [${i}]: ${e.message}`, e);
       }
     }
 
@@ -802,7 +889,7 @@ class KnowledgeBase {
           issueType: c.issueType
         });
       } catch (e) {
-        logger.warn(`优化案例插入失败 [${i}]:`, e.message);
+        logger.warn(`优化案例插入失败 [${i}]: ${e.message}`, e);
       }
     }
 

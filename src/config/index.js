@@ -74,7 +74,8 @@ const config = {
     password: process.env.MYSQL_PASSWORD || '',
     database: process.env.MYSQL_DATABASE || 'code_optimizer',
     connectionLimit: parseInt(process.env.MYSQL_CONNECTION_LIMIT) || 10,
-    syncOnStartup: process.env.MYSQL_SYNC_ON_STARTUP !== 'false'
+    syncOnStartup: process.env.MYSQL_SYNC_ON_STARTUP !== 'false',
+    lastSyncTime: null
   },
 
   // 多数据库连接配置
@@ -397,20 +398,10 @@ async function setDefaultConnection(id) {
         await mysql.switchConnection(conn);
         await mysql.initDatabase();
         
-        const { dbAdapter } = require('../utils/dbAdapter');
-        const syncResult = await dbAdapter.syncAllLocalToRemote();
-        
-        if (syncResult.success) {
-          return { 
-            success: true, 
-            message: `默认连接已切换到: ${conn.name}，数据同步完成，共 ${syncResult.totalRecords} 条记录` 
-          };
-        } else {
-          return { 
-            success: true, 
-            message: `默认连接已切换到: ${conn.name}，但数据同步失败: ${syncResult.message}` 
-          };
-        }
+        return { 
+          success: true, 
+          message: `默认连接已切换到: ${conn.name}` 
+        };
       } else {
         config.mysql.enabled = false;
         return { 
