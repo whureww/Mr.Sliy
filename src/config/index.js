@@ -57,7 +57,7 @@ const config = {
 
   // 数据库配置
   database: {
-    path: process.env.DB_PATH || './database/code_optimizer.db',
+    path: process.env.DB_PATH || path.join(require('os').homedir(), '.mr-sliy', 'database', 'code_optimizer.db'),
     // SQLite不需要连接池，但保留配置以备后用
     pool: {
       max: parseInt(process.env.DB_POOL_MAX) || 10,
