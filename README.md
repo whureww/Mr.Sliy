@@ -265,7 +265,7 @@ src/
 ### v3.5.7
 > 更新日期: 2026-07-25
 
-- **🔍 修复云端数据库表结构不一致问题**：使用提供的云端数据库连接信息（162.211.183.129:3306）检查并修复表结构
+- **🔍 修复云端数据库表结构不一致问题**：使用提供的云端数据库连接信息检查并修复表结构
   - 云端数据库共33张表（32张业务表 + sync_metadata），所有业务表都存在
   - 修复了50+个缺失列：scan_project、scan_task、code_issue、ai_optimize_record、code_report、code_standards、user_preferences、kb_metadata、analysis_result、system_monitor、project_analysis_summary 等表
   - 同步了LLM API密钥（deepseek）到云端

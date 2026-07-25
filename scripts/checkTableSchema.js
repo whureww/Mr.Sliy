@@ -1,17 +1,19 @@
 /**
  * 检查本地和云端数据库表结构一致性
+ * 使用环境变量配置数据库连接：MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
  */
 
 const mysql = require('mysql2/promise');
 const sqlite3 = require('sqlite3');
 const path = require('path');
 
+// 从环境变量读取数据库配置
 const MYSQL_CONFIG = {
-  host: '162.211.183.129',
-  port: 3306,
-  user: 'root',
-  password: '123456',
-  database: 'code_optimizer',
+  host: process.env.MYSQL_HOST || 'localhost',
+  port: parseInt(process.env.MYSQL_PORT) || 3306,
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD || '',
+  database: process.env.MYSQL_DATABASE || 'code_optimizer',
   charset: 'utf8mb4'
 };
 
@@ -33,6 +35,12 @@ const STANDARD_TABLES = [
 
 async function main() {
   console.log('\n=== 检查表结构一致性 ===\n');
+  
+  // 检查配置
+  if (!MYSQL_CONFIG.password) {
+    console.error('✗ 请设置 MYSQL_PASSWORD 环境变量');
+    process.exit(1);
+  }
   
   const pool = mysql.createPool(MYSQL_CONFIG);
   

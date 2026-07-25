@@ -1,18 +1,19 @@
 /**
  * 检查云端MySQL数据库表结构脚本
+ * 使用环境变量配置数据库连接：MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE
  */
 
 const mysql = require('mysql2/promise');
 const sqlite3 = require('sqlite3');
 const path = require('path');
 
-// 云端MySQL配置
+// 从环境变量读取数据库配置
 const MYSQL_CONFIG = {
-  host: '162.211.183.129',
-  port: 3306,
-  user: 'root',
-  password: '123456',
-  database: 'code_optimizer',
+  host: process.env.MYSQL_HOST || 'localhost',
+  port: parseInt(process.env.MYSQL_PORT) || 3306,
+  user: process.env.MYSQL_USER || 'root',
+  password: process.env.MYSQL_PASSWORD || '',
+  database: process.env.MYSQL_DATABASE || 'code_optimizer',
   charset: 'utf8mb4'
 };
 
@@ -40,8 +41,28 @@ const LOCAL_ONLY_TABLES = ['sync_queue'];
 // 云端特有表（只在MySQL中存在）
 const REMOTE_ONLY_TABLES = ['sync_metadata'];
 
+// 创建readline接口
+const readline = require('readline');
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+function ask(question) {
+  return new Promise(resolve => {
+    rl.question(question, resolve);
+  });
+}
+
 async function main() {
   console.log('\n=== 云端数据库表结构检查 ===\n');
+  
+  // 检查配置
+  if (!MYSQL_CONFIG.password) {
+    console.error('✗ 请设置 MYSQL_PASSWORD 环境变量');
+    rl.close();
+    process.exit(1);
+  }
   
   // 检查云端MySQL数据库
   console.log('1. 检查云端MySQL数据库...');
@@ -49,6 +70,7 @@ async function main() {
   
   if (!mysqlResult) {
     console.log('无法连接到云端数据库');
+    rl.close();
     process.exit(1);
   }
   
@@ -68,6 +90,7 @@ async function main() {
     console.log('\n✓ 修复完成');
   }
   
+  rl.close();
   console.log('\n=== 检查完成 ===');
   process.exit(0);
 }
@@ -283,23 +306,9 @@ async function fixDifferences(mysqlResult) {
   }
 }
 
-function ask(question) {
-  return new Promise(resolve => {
-    const readline = require('readline');
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: false
-    });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
 // 执行脚本
 main().catch(e => {
   console.error('脚本执行失败:', e.message);
+  rl.close();
   process.exit(1);
 });
