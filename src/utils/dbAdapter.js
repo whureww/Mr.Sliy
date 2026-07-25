@@ -9,6 +9,15 @@ let sqliteDb = null;
 let retryTimer = null;
 const MAX_RETRY_COUNT = 5;
 const RETRY_INTERVAL = 30000;
+const BATCH_SIZE = 100;
+
+const syncMetrics = {
+  totalOperations: 0,
+  successfulOperations: 0,
+  failedOperations: 0,
+  startTime: null,
+  endTime: null
+};
 
 function getSqliteDatabase() {
   if (!sqliteDb) {
@@ -71,9 +80,17 @@ function initSyncQueueTable() {
         operation_type TEXT NOT NULL,
         retry_count INTEGER DEFAULT 0,
         last_retry_at DATETIME,
+        next_retry_at DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )
     `);
+    
+    // 添加缺失的 next_retry_at 列（兼容旧数据库）
+    try {
+      sqliteDb.exec(`ALTER TABLE sync_queue ADD COLUMN IF NOT EXISTS next_retry_at DATETIME`);
+    } catch (e) {
+      // 列已存在，忽略错误
+    }
   } catch (e) {
     logger.debug(`初始化同步队列表失败: ${e.message}`);
   }
@@ -839,6 +856,57 @@ function enqueueSyncOperation(tableName, sql, params, operationType) {
   }
 }
 
+/**
+ * 指数退避延迟计算
+ */
+function getExponentialBackoffDelay(retryCount, baseDelay = 1000, maxDelay = 30000) {
+  const delay = baseDelay * Math.pow(2, retryCount) + Math.random() * 1000;
+  return Math.min(delay, maxDelay);
+}
+
+/**
+ * 批量执行MySQL操作
+ */
+async function executeBatchOperations(pool, operations) {
+  const batchResults = [];
+  
+  for (let i = 0; i < operations.length; i += BATCH_SIZE) {
+    const batch = operations.slice(i, i + BATCH_SIZE);
+    const connection = await pool.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+      
+      for (const op of batch) {
+        try {
+          await connection.execute(op.sql, op.params);
+          batchResults.push({ ...op, success: true });
+        } catch (error) {
+          if (error.message.includes('Duplicate entry')) {
+            batchResults.push({ ...op, success: true, skipped: true });
+          } else {
+            batchResults.push({ ...op, success: false, error: error.message });
+          }
+        }
+      }
+      
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      logger.error(`批量操作事务失败: ${error.message}`);
+      for (const op of batch) {
+        if (!batchResults.find(r => r.id === op.id)) {
+          batchResults.push({ ...op, success: false, error: error.message });
+        }
+      }
+    } finally {
+      connection.release();
+    }
+  }
+  
+  return batchResults;
+}
+
 async function processSyncQueue() {
   if (!mysql.isEnabled()) return;
   
@@ -855,35 +923,44 @@ async function processSyncQueue() {
     const pool = mysql.getPool();
     if (!pool) return;
     
-    for (const op of pendingOperations) {
-      try {
-        const params = op.params ? JSON.parse(op.params) : [];
-        const convertedParams = convertTimestampParams(params, op.table_name);
-        await mysql.execute(op.sql, convertedParams);
-        
-        sqliteDb.prepare('DELETE FROM sync_queue WHERE id = ?').run(op.id);
-        logger.debug(`同步队列操作成功 [${op.table_name}]: ${op.operation_type}`);
-      } catch (error) {
-        if (error.message.includes('Duplicate entry')) {
-          sqliteDb.prepare('DELETE FROM sync_queue WHERE id = ?').run(op.id);
-          logger.debug(`同步队列操作跳过（重复主键）[${op.table_name}]`);
-          continue;
-        }
+    // 转换操作格式
+    const operations = pendingOperations.map(op => ({
+      id: op.id,
+      tableName: op.table_name,
+      sql: op.sql,
+      params: convertTimestampParams(op.params ? JSON.parse(op.params) : [], op.table_name),
+      operationType: op.operation_type,
+      retryCount: op.retry_count
+    }));
+    
+    // 批量执行
+    const results = await executeBatchOperations(pool, operations);
+    
+    // 更新同步队列状态
+    for (const result of results) {
+      if (result.success) {
+        sqliteDb.prepare('DELETE FROM sync_queue WHERE id = ?').run(result.id);
+        logger.debug(`同步队列操作成功 [${result.tableName}]: ${result.operationType}`);
+      } else {
+        // 指数退避重试
+        const newRetryCount = result.retryCount + 1;
+        const delay = getExponentialBackoffDelay(newRetryCount);
         
         sqliteDb.prepare(`
           UPDATE sync_queue 
-          SET retry_count = retry_count + 1, last_retry_at = CURRENT_TIMESTAMP
+          SET retry_count = ?, last_retry_at = CURRENT_TIMESTAMP, next_retry_at = datetime('now', '+${Math.floor(delay / 1000)} seconds')
           WHERE id = ?
-        `).run(op.id);
-        logger.debug(`同步队列操作重试失败 [${op.table_name}]: ${error.message}, 重试次数: ${op.retry_count + 1}`);
+        `).run(newRetryCount, result.id);
         
-        if (op.retry_count + 1 >= MAX_RETRY_COUNT) {
-          logger.debug(`同步队列操作达到最大重试次数，已放弃 [${op.table_name}]: ${op.sql}`);
+        logger.debug(`同步队列操作重试失败 [${result.tableName}]: ${result.error}, 重试次数: ${newRetryCount}, 下次重试: ${delay}ms后`);
+        
+        if (newRetryCount >= MAX_RETRY_COUNT) {
+          logger.error(`同步队列操作达到最大重试次数，已放弃 [${result.tableName}]`);
         }
       }
     }
   } catch (e) {
-    logger.debug(`处理同步队列失败: ${e.message}`);
+    logger.error(`处理同步队列失败: ${e.message}`);
   }
 }
 

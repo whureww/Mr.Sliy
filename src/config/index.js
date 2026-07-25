@@ -7,6 +7,14 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
+// 延迟加载logger以避免循环依赖
+function getLogger() {
+  if (!getLogger._cached) {
+    getLogger._cached = require('../utils/logger').logger;
+  }
+  return getLogger._cached;
+}
+
 const CONFIG_FILE = path.join(require('os').homedir(), '.mr-sliy', 'database_connections.json');
 
 function loadConnectionsFromFile() {
@@ -313,7 +321,7 @@ function validate() {
   }
   
   if (errors.length > 0) {
-    console.error('配置验证失败:', errors);
+    getLogger().error('配置验证失败:', errors);
     return false;
   }
   

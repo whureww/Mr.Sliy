@@ -1,4 +1,5 @@
 const { generateUUID, getFileLanguage } = require('../../../utils/helpers');
+const { logger } = require('../../../utils/logger');
 
 const meta = {
   id: 'duplicate_code',
@@ -48,7 +49,7 @@ function detect(tree, sourceCode, filePath, ruleConfig) {
       }
     }
   } catch (error) {
-    console.error('检测重复代码失败:', error);
+    logger.error('检测重复代码失败:', error);
   }
 
   return issues;

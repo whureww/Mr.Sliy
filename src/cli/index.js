@@ -459,9 +459,31 @@ async function showMenu() {
 
       if (isBackspace(chunk)) {
         if ((menuState.input || '').length > 0) {
-          menuState.input = (menuState.input || '').slice(0, -1);
+          const newInput = (menuState.input || '').slice(0, -1);
+          const wasFilterMode = (menuState.input || '').startsWith('/');
+          const isFilterMode = newInput.startsWith('/');
+          
+          menuState.input = newInput;
           menuState.selectedIndex = 0;
-          render();
+          
+          // 如果退出命令模式或进入命令模式，需要重新渲染
+          if (wasFilterMode !== isFilterMode) {
+            render();
+          } else if (isFilterMode) {
+            // 在命令模式下，如果匹配结果变化，需要重新渲染
+            const oldFiltered = getFilteredCommands(menuState.input + chunk);
+            const newFiltered = getFilteredCommands(newInput);
+            if (oldFiltered.length !== newFiltered.length ||
+                oldFiltered.some((item, index) => newFiltered[index] && item.key !== newFiltered[index].key)) {
+              render();
+            } else {
+              // 匹配结果不变，只删除字符
+              process.stdout.write('\b \b');
+            }
+          } else {
+            // 在普通模式下，只删除字符
+            process.stdout.write('\b \b');
+          }
         }
         return;
       }
@@ -473,9 +495,31 @@ async function showMenu() {
       }
 
       if (isPrintable(chunk)) {
-        menuState.input = (menuState.input || '') + chunk;
+        const newInput = (menuState.input || '') + chunk;
+        const wasFilterMode = (menuState.input || '').startsWith('/');
+        const isFilterMode = newInput.startsWith('/');
+        
+        menuState.input = newInput;
         menuState.selectedIndex = 0;
-        render();
+        
+        // 如果进入命令模式或从命令模式退出，需要重新渲染
+        if (wasFilterMode !== isFilterMode) {
+          render();
+        } else if (isFilterMode) {
+          // 在命令模式下，如果匹配结果变化，需要重新渲染
+          const oldFiltered = getFilteredCommands(menuState.input.slice(0, -1) || '');
+          const newFiltered = getFilteredCommands(newInput);
+          if (oldFiltered.length !== newFiltered.length ||
+              oldFiltered.some((item, index) => newFiltered[index] && item.key !== newFiltered[index].key)) {
+            render();
+          } else {
+            // 匹配结果不变，只追加字符
+            process.stdout.write(chunk);
+          }
+        } else {
+          // 在普通模式下，只追加字符
+          process.stdout.write(chunk);
+        }
       }
     }
 
@@ -815,7 +859,7 @@ async function optimizeCodeWithCode(code) {
 }
 
 async function searchKnowledge(query) {
-  console.log(c('  (≧∀≦) 知识库搜索结果', 'bright cyan'));
+  console.log(c('  (≧∀ ≦) 知识库搜索结果', 'bright cyan'));
   console.log(c('─'.repeat(70), 'dim'));
   console.log();
 
@@ -1309,7 +1353,7 @@ async function knowledgeMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c('  (≧∀≦)  知识库管理', 'bright cyan'));
+    console.log(c('  (≧∀ ≦)  知识库管理', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -2625,7 +2669,7 @@ async function sustainMenu() {
   while (true) {
     clearScreen();
     printBanner();
-    console.log(c('  (≧∀≦)  AI自持引擎', 'bright cyan'));
+    console.log(c('  (≧∀ ≦)  AI自持引擎', 'bright cyan'));
     console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
     console.log(c('─'.repeat(70), 'dim'));
     
@@ -2892,7 +2936,7 @@ async function showHelp() {
   console.log(c('    (✧ω✧) 项目扫描   扫描整个项目，批量分析所有代码文件', 'white'));
   console.log(c('    (◕ᴗ◕✿) 代码优化   交互式输入代码，获取优化建议', 'white'));
   console.log(c("    (´･ω･`) 提供商管理 配置云端大模型，支持多种API", 'white'));
-  console.log(c('    (≧∀≦) 知识库管理 搜索、导入、扩充本地RAG知识库', 'white'));
+  console.log(c('    (≧∀ ≦) 知识库管理 搜索、导入、扩充本地RAG知识库', 'white'));
   console.log(c("    (っ'-')╮ 模式切换   离线/在线/自动 三种工作模式", 'white'));
   console.log(c('    (๑•̀ㅂ•́)و✧ 系统状态   查看系统运行状态和配置信息', 'white'));
   console.log();

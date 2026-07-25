@@ -18,6 +18,11 @@ let wasmDir = null;
 let wasmDirResolved = false;
 let diagnostics = [];
 
+// AST解析结果缓存
+const parseCache = new Map();
+const CACHE_MAX_SIZE = 100;
+const CACHE_TTL = 300000; // 5分钟
+
 const languageMap = {
   javascript: 'javascript',
   typescript: 'typescript',
@@ -316,36 +321,109 @@ class FallbackParser {
   }
 }
 
+/**
+ * 计算代码内容的哈希值作为缓存键
+ */
+function computeCacheKey(sourceCode, languageName) {
+  let hash = 0;
+  const str = languageName + ':' + sourceCode;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(36);
+}
+
+/**
+ * 获取缓存的解析结果
+ */
+function getParseCache(sourceCode, languageName) {
+  const key = computeCacheKey(sourceCode, languageName);
+  const cached = parseCache.get(key);
+  
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    logger.debug(`AST解析缓存命中 [${languageName}]`);
+    return cached.result;
+  }
+  
+  if (cached) {
+    parseCache.delete(key);
+  }
+  
+  return null;
+}
+
+/**
+ * 缓存解析结果
+ */
+function setParseCache(sourceCode, languageName, result) {
+  const key = computeCacheKey(sourceCode, languageName);
+  
+  // 清理过期缓存
+  if (parseCache.size >= CACHE_MAX_SIZE) {
+    const oldestKey = Array.from(parseCache.keys()).sort((a, b) => 
+      parseCache.get(a).timestamp - parseCache.get(b).timestamp
+    )[0];
+    parseCache.delete(oldestKey);
+  }
+  
+  parseCache.set(key, {
+    timestamp: Date.now(),
+    result: { ...result }
+  });
+  
+  logger.debug(`AST解析缓存已设置 [${languageName}]`);
+}
+
+/**
+ * 清除解析缓存
+ */
+function clearParseCache() {
+  parseCache.clear();
+  logger.debug('AST解析缓存已清空');
+}
+
 async function parseCode(sourceCode, languageName) {
+  // 先检查缓存
+  const cachedResult = getParseCache(sourceCode, languageName);
+  if (cachedResult) {
+    return cachedResult;
+  }
+  
   try {
     const result = await parserPool.parse(sourceCode, languageName);
     
     if (result.success) {
-      return {
+      const parseResult = {
         success: true,
         tree: { rootNode: result.rootNode },
         language: languageName,
         rootNode: result.rootNode,
         fallback: result.fallback || false
       };
+      setParseCache(sourceCode, languageName, parseResult);
+      return parseResult;
     }
 
     logger.warn('Worker解析失败，使用基础解析器: ' + languageName);
     const fallback = new FallbackParser();
     const tree = fallback.parse(sourceCode);
-    return {
+    const parseResult = {
       success: true,
       tree: tree,
       language: languageName,
       rootNode: tree.rootNode,
       fallback: true
     };
+    setParseCache(sourceCode, languageName, parseResult);
+    return parseResult;
   } catch (error) {
     logger.error('解析代码失败:', error);
 
     const fallback = new FallbackParser();
     const tree = fallback.parse(sourceCode);
-    return {
+    const parseResult = {
       success: true,
       tree: tree,
       language: languageName,
@@ -353,6 +431,8 @@ async function parseCode(sourceCode, languageName) {
       fallback: true,
       error: error.message
     };
+    setParseCache(sourceCode, languageName, parseResult);
+    return parseResult;
   }
 }
 

@@ -1,5 +1,6 @@
 const { getNodesByType } = require('../../../services/ast/parser');
 const { generateUUID, getFileLanguage } = require('../../../utils/helpers');
+const { logger } = require('../../../utils/logger');
 
 const meta = {
   id: 'missing_comment',
@@ -55,7 +56,7 @@ function detect(tree, sourceCode, filePath, ruleConfig) {
       }
     });
   } catch (error) {
-    console.error('检测缺少注释失败:', error);
+    logger.error('检测缺少注释失败:', error);
   }
 
   return issues;

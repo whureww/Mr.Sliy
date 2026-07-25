@@ -113,70 +113,72 @@ async function detectIssues(sourceCode, filePath, options = {}) {
     }
     
     const tree = parseResult.tree;
-    const issues = [];
     
-    // 2. 执行各项检测
+    // 2. 构建并行检测任务
+    const detectionTasks = [];
+    
     if (detectionRules.unusedVariables.enabled) {
-      const unusedVarIssues = detectUnusedVariables(tree, sourceCode, filePath);
-      issues.push(...unusedVarIssues);
+      detectionTasks.push(() => detectUnusedVariables(tree, sourceCode, filePath));
     }
     
     if (detectionRules.unusedImports.enabled) {
-      const unusedImportIssues = detectUnusedImports(tree, sourceCode, filePath);
-      issues.push(...unusedImportIssues);
+      detectionTasks.push(() => detectUnusedImports(tree, sourceCode, filePath));
     }
     
     if (detectionRules.unusedFunctions.enabled) {
-      const unusedFuncIssues = detectUnusedFunctions(tree, sourceCode, filePath);
-      issues.push(...unusedFuncIssues);
+      detectionTasks.push(() => detectUnusedFunctions(tree, sourceCode, filePath));
     }
     
     if (detectionRules.magicNumbers.enabled) {
-      const magicNumberIssues = detectMagicNumbers(tree, sourceCode, filePath);
-      issues.push(...magicNumberIssues);
+      detectionTasks.push(() => detectMagicNumbers(tree, sourceCode, filePath));
     }
     
     if (detectionRules.longFunctions.enabled) {
-      const longFuncIssues = detectLongFunctions(tree, sourceCode, filePath);
-      issues.push(...longFuncIssues);
+      detectionTasks.push(() => detectLongFunctions(tree, sourceCode, filePath));
     }
 
     if (detectionRules.highComplexity.enabled) {
-      const complexityIssues = detectCyclomaticComplexity(tree, sourceCode, filePath);
-      issues.push(...complexityIssues);
+      detectionTasks.push(() => detectCyclomaticComplexity(tree, sourceCode, filePath));
     }
 
     if (detectionRules.deepNesting.enabled) {
-      const nestingIssues = detectDeepNesting(tree, sourceCode, filePath);
-      issues.push(...nestingIssues);
+      detectionTasks.push(() => detectDeepNesting(tree, sourceCode, filePath));
     }
 
     if (detectionRules.nullCheck.enabled) {
-      const nullCheckIssues = detectMissingNullCheck(tree, sourceCode, filePath);
-      issues.push(...nullCheckIssues);
+      detectionTasks.push(() => detectMissingNullCheck(tree, sourceCode, filePath));
     }
 
     if (detectionRules.unnecessaryElse.enabled) {
-      const elseIssues = detectUnnecessaryElse(tree, sourceCode, filePath);
-      issues.push(...elseIssues);
+      detectionTasks.push(() => detectUnnecessaryElse(tree, sourceCode, filePath));
     }
 
     if (detectionRules.consoleLog.enabled) {
-      const consoleIssues = detectConsoleLog(tree, sourceCode, filePath);
-      issues.push(...consoleIssues);
+      detectionTasks.push(() => detectConsoleLog(tree, sourceCode, filePath));
     }
 
     if (detectionRules.duplicateCode.enabled) {
-      const duplicateIssues = detectDuplicateCode(tree, sourceCode, filePath);
-      issues.push(...duplicateIssues);
+      detectionTasks.push(() => detectDuplicateCode(tree, sourceCode, filePath));
     }
 
     if (detectionRules.missingComments.enabled) {
-      const commentIssues = detectMissingComments(tree, sourceCode, filePath);
-      issues.push(...commentIssues);
+      detectionTasks.push(() => detectMissingComments(tree, sourceCode, filePath));
     }
     
-    // 3. 统计检测结果
+    // 3. 并行执行检测任务
+    const results = await Promise.all(detectionTasks.map(task => {
+      try {
+        return task();
+      } catch (error) {
+        logger.error(`检测规则执行失败: ${error.message}`);
+        return [];
+      }
+    }));
+    
+    // 4. 合并所有检测结果
+    const issues = results.flat();
+    
+    // 5. 统计检测结果
     const result = {
       success: true,
       filePath,

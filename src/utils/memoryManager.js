@@ -1,4 +1,5 @@
 const heapdump = require('heapdump');
+const { logger } = require('./logger');
 
 class MemoryManager {
   constructor() {
@@ -11,9 +12,9 @@ class MemoryManager {
       const snapshotPath = `/tmp/heapdump-${Date.now()}.heapsnapshot`;
       heapdump.writeSnapshot(snapshotPath, (err) => {
         if (err) {
-          console.error('Failed to write heap snapshot:', err);
+          logger.error('Failed to write heap snapshot:', err);
         } else {
-          console.log('Heap snapshot saved to:', snapshotPath);
+          logger.info('Heap snapshot saved to:', snapshotPath);
         }
       });
     }, intervalMs);

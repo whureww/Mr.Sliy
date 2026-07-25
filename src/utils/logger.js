@@ -7,10 +7,36 @@
 const winston = require('winston');
 const path = require('path');
 const fs = require('fs');
-const { config } = require('../config');
+
+// 延迟加载config以避免循环依赖
+function getConfig() {
+  if (!getConfig._cached) {
+    getConfig._cached = require('../config').config;
+  }
+  return getConfig._cached;
+}
+
+// 默认日志配置（用于初始化阶段）
+const defaultLogConfig = {
+  level: 'info',
+  file: './logs/app.log',
+  maxSize: 5242880,
+  maxFiles: 5
+};
+
+// 获取日志配置
+function getLogConfig() {
+  try {
+    const config = getConfig();
+    return config.logging || defaultLogConfig;
+  } catch (e) {
+    return defaultLogConfig;
+  }
+}
 
 // 确保日志目录存在
-const logDir = path.dirname(config.logging.file);
+const logConfig = getLogConfig();
+const logDir = path.dirname(logConfig.file);
 if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
 }
@@ -110,28 +136,37 @@ const consoleFormat = winston.format.combine(
 
 // 创建logger实例
 const logger = winston.createLogger({
-  level: config.logging.level,
+  level: logConfig.level,
   format: logFormat,
   transports: [
     // 文件日志
     new winston.transports.File({
-      filename: config.logging.file,
-      maxsize: config.logging.maxSize,
-      maxFiles: config.logging.maxFiles,
+      filename: logConfig.file,
+      maxsize: logConfig.maxSize,
+      maxFiles: logConfig.maxFiles,
       tailable: true
     }),
     // 错误日志单独文件
     new winston.transports.File({
       filename: path.join(logDir, 'error.log'),
       level: 'error',
-      maxsize: config.logging.maxSize,
-      maxFiles: config.logging.maxFiles
+      maxsize: logConfig.maxSize,
+      maxFiles: logConfig.maxFiles
     })
   ]
 });
 
 // 开发环境添加控制台输出（显示info及以上级别）
-if (config.server.nodeEnv !== 'production') {
+function shouldUseConsole() {
+  try {
+    const config = getConfig();
+    return config.server.nodeEnv !== 'production';
+  } catch (e) {
+    return true;
+  }
+}
+
+if (shouldUseConsole()) {
   logger.add(new winston.transports.Console({
     format: consoleFormat,
     level: 'info'

@@ -1,5 +1,6 @@
 const { getNodesByType } = require('../../../services/ast/parser');
 const { generateUUID, getFileLanguage } = require('../../../utils/helpers');
+const { logger } = require('../../../utils/logger');
 
 const meta = {
   id: 'console_log',
@@ -36,7 +37,7 @@ function detect(tree, sourceCode, filePath, ruleConfig) {
       }
     });
   } catch (error) {
-    console.error('检测console.log失败:', error);
+    logger.error('检测console.log失败:', error);
   }
 
   return issues;

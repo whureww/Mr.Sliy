@@ -1,4 +1,5 @@
 const { generateUUID, getFileLanguage } = require('../../../utils/helpers');
+const { logger } = require('../../../utils/logger');
 
 const meta = {
   id: 'high_complexity',
@@ -100,7 +101,7 @@ function detect(tree, sourceCode, filePath, ruleConfig) {
       }
     });
   } catch (error) {
-    console.error('检测圈复杂度失败:', error);
+    logger.error('检测圈复杂度失败:', error);
   }
 
   return issues;

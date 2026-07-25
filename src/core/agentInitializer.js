@@ -41,6 +41,8 @@ function logInfo(message) {
   console.log(`[INFO] ${message}`);
 }
 
+const { logger } = require('../utils/logger');
+
 function logError(message) {
-  console.error(`[ERROR] ${message}`);
+  logger.error(`[ERROR] ${message}`);
 }

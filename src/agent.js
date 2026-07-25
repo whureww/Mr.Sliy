@@ -12,6 +12,7 @@
 
 const { startCLI } = require('./cli');
 const { agent } = require('./agent/agent');
+const { logger } = require('./utils/logger');
 
 // 解析命令行参数
 const args = process.argv.slice(2);
@@ -45,7 +46,7 @@ async function main() {
   switch (command) {
     case 'analyze':
       if (!args[1]) {
-        console.error('用法: node src/agent.js analyze <文件路径>');
+        logger.error('用法: node src/agent.js analyze <文件路径>');
         process.exit(1);
       }
       {
@@ -56,7 +57,7 @@ async function main() {
 
     case 'scan':
       if (!args[1]) {
-        console.error('用法: node src/agent.js scan <项目路径>');
+        logger.error('用法: node src/agent.js scan <项目路径>');
         process.exit(1);
       }
       {
@@ -82,6 +83,6 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error('Agent启动失败:', error);
+  logger.error('Agent启动失败:', error);
   process.exit(1);
 });

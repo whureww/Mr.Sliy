@@ -1,3 +1,5 @@
+const { logger } = require('./logger');
+
 const SYSTEM_EVENTS = {
   SYSTEM_ERROR: 'system_error',
   SYSTEM_WARNING: 'system_warning',
@@ -50,7 +52,7 @@ class EventBus {
       try {
         listener(...args);
       } catch (error) {
-        console.error(`EventBus: 事件 "${event}" 的监听器执行失败`, error);
+        logger.error(`EventBus: 事件 "${event}" 的监听器执行失败`, error);
       }
     }
   }
@@ -64,7 +66,7 @@ class EventBus {
         const result = await listener(...args);
         results.push(result);
       } catch (error) {
-        console.error(`EventBus: 事件 "${event}" 的监听器执行失败`, error);
+        logger.error(`EventBus: 事件 "${event}" 的监听器执行失败`, error);
         results.push({ error: error.message });
       }
     }

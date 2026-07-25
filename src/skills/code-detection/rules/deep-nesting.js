@@ -1,4 +1,5 @@
 const { generateUUID, getFileLanguage } = require('../../../utils/helpers');
+const { logger } = require('../../../utils/logger');
 
 const meta = {
   id: 'deep_nesting',
@@ -67,7 +68,7 @@ function detect(tree, sourceCode, filePath, ruleConfig) {
       });
     }
   } catch (error) {
-    console.error('检测嵌套过深失败:', error);
+    logger.error('检测嵌套过深失败:', error);
   }
 
   return issues;
