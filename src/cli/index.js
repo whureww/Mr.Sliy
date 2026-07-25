@@ -2439,7 +2439,7 @@ async function pendingMenu() {
     console.log(c('    输入 序号+n 拒绝执行 (如 1+n)', 'white'));
     console.log(c('    q - 返回主菜单', 'white'));
     
-    const input = await getInput('  请选择操作: ');
+    const input = await ask('  请选择操作: ');
     
     if (!input || input.toLowerCase() === 'q') {
       break;
@@ -3802,21 +3802,15 @@ async function showNotification(message) {
       process.stdout.write(c('  0) 忽略', 'red') + '\n');
       process.stdout.write('\n');
       
-      const handleKey = (chunk, key) => {
-        process.stdin.removeListener('keypress', handleKey);
-        process.stdout.write('\n');
-        
-        if (chunk === '1') {
-          resolve({ confirmed: true, action: 'execute', message });
-        } else if (chunk === '2') {
-          resolve({ confirmed: false, action: 'later', message });
-        } else {
-          resolve({ confirmed: false, action: 'ignore', message });
-        }
-      };
+      const input = await ask(c('  请选择操作 (1/2/0): ', 'white'));
       
-      process.stdin.once('keypress', handleKey);
-      process.stdout.write(c('  请选择操作 (1/2/0): ', 'white'));
+      if (input === '1') {
+        resolve({ confirmed: true, action: 'execute', message });
+      } else if (input === '2') {
+        resolve({ confirmed: false, action: 'later', message });
+      } else {
+        resolve({ confirmed: false, action: 'ignore', message });
+      }
     } else {
       process.stdout.write(c('  按任意键继续...', 'dim') + '\n');
       

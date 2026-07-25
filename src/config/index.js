@@ -7,7 +7,7 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_FILE = path.join(process.cwd(), 'data', 'database_connections.json');
+const CONFIG_FILE = path.join(require('os').homedir(), '.mr-sliy', 'database_connections.json');
 
 function loadConnectionsFromFile() {
   try {

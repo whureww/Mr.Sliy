@@ -120,14 +120,14 @@ class RollbackManager {
       const pkg = require('../../../package.json');
       
       const dbResult = await this.executeWithRetry(
-        'INSERT INTO self_update_history (id, update_type, target_version, current_version, update_source, update_content, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO self_update_history (id, update_type, target_version, current_version, update_source, update_content, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [backupId, 'backup', pkg.version, pkg.version, 'system', JSON.stringify({ 
           targetPath, 
           backupType,
           filesToBackup,
           skippedFiles,
           timestamp
-        }), 'applied']
+        }), 'applied', new Date().toISOString()]
       );
 
       if (!dbResult.success) {
@@ -888,13 +888,13 @@ class RollbackManager {
       }
 
       const dbResult = await this.executeWithRetry(
-        'INSERT INTO self_update_history (id, update_type, target_version, current_version, update_source, update_content, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO self_update_history (id, update_type, target_version, current_version, update_source, update_content, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [backupId, 'system', pkg.version, pkg.version, 'system', JSON.stringify({ 
           type: 'full_system',
           filesToBackup,
           skippedFiles,
           timestamp
-        }), 'applied']
+        }), 'applied', new Date().toISOString()]
       );
 
       if (!dbResult.success) {
