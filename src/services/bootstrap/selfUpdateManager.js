@@ -1046,8 +1046,8 @@ class SelfUpdateManager {
   async saveUpdateRecord(record) {
     try {
       await execute(
-        'INSERT INTO self_update_history (id, update_type, target_version, current_version, update_source, update_content, status, rollback_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [record.id, record.updateType, record.targetVersion, record.currentVersion, record.updateSource, record.updateContent, record.status, record.rollbackVersion]
+        'INSERT INTO self_update_history (id, update_type, target_version, current_version, update_source, update_content, status, rollback_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [record.id, record.updateType, record.targetVersion, record.currentVersion, record.updateSource, record.updateContent, record.status, record.rollbackVersion, new Date().toISOString()]
       );
     } catch (error) {
       logger.error('保存更新记录失败:', error);

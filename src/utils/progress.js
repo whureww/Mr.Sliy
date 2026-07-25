@@ -24,7 +24,7 @@ class ProgressBar {
     this.width = options.width || 50;
     this.description = options.description || '';
     this.status = options.status || '';
-    this.startTime = Date.now();
+    this.startTime = null; // 延迟初始化，在第一次更新时设置
     this.lastUpdateTime = 0;
     this.updateInterval = options.updateInterval || 50;
     this.showETA = options.showETA !== false;
@@ -56,6 +56,11 @@ class ProgressBar {
       return;
     }
 
+    // 第一次更新时初始化 startTime
+    if (this.startTime === null) {
+      this.startTime = now;
+    }
+
     this.lastUpdateTime = now;
     this.render();
   }
@@ -63,6 +68,10 @@ class ProgressBar {
   startAnimation() {
     if (this._animationTimer) return;
     this._isActive = true;
+    // 首次渲染时初始化 startTime
+    if (this.startTime === null) {
+      this.startTime = Date.now();
+    }
     this._animationTimer = setInterval(() => {
       if (this._isActive) {
         this.render();
@@ -111,7 +120,9 @@ class ProgressBar {
       bar += '░';
     }
 
-    const elapsed = Date.now() - this.startTime;
+    // 使用实际的 startTime，如果未初始化则使用当前时间
+    const effectiveStartTime = this.startTime || Date.now();
+    const elapsed = Date.now() - effectiveStartTime;
     const eta = this.current > 0 ? Math.round((elapsed * (this.total - this.current)) / this.current) : 0;
 
     this._animationIndex = (this._animationIndex + 1) % this._animationChars.length;
@@ -139,8 +150,8 @@ class ProgressBar {
       line += colors.dim + '(' + status + ')' + colors.reset + ' ';
     }
 
-    if (this.showETA && eta > 0) {
-      line += colors.dim + '⏳ ' + formatTime(eta) + colors.reset;
+    if (this.showETA) {
+      line += colors.dim + '⏱️ ' + formatTime(elapsed) + colors.reset;
     }
 
     const clearPad = Math.max(0, (this._lastRender.length || 0) - line.length);

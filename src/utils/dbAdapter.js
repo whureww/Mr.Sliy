@@ -16,6 +16,35 @@ function getSqliteDatabase() {
     if (!path.isAbsolute(dbPath)) {
       dbPath = path.join(process.cwd(), dbPath);
     }
+    
+    // 检测旧数据库并提示迁移
+    const oldDbPath = path.join(__dirname, '../database/code_optimizer.db');
+    const newDbExists = fs.existsSync(dbPath);
+    const oldDbExists = fs.existsSync(oldDbPath);
+    
+    if (oldDbExists && !newDbExists) {
+      logger.info(`检测到旧数据库: ${oldDbPath}`);
+      logger.info(`新数据库位置: ${dbPath}`);
+      
+      try {
+        const oldDb = new Database(oldDbPath);
+        const tableCount = oldDb.prepare("SELECT count(*) as cnt FROM sqlite_master WHERE type='table'").get().cnt;
+        oldDb.close();
+        logger.info(`旧数据库包含 ${tableCount} 张表，是否迁移数据到新位置？`);
+        
+        // 简单的控制台提示（非交互式，避免阻塞启动）
+        console.log('\n' + '='.repeat(60));
+        console.log(' ⚠️  检测到旧数据库文件');
+        console.log(`    旧位置: ${oldDbPath}`);
+        console.log(`    新位置: ${dbPath}`);
+        console.log('='.repeat(60));
+        console.log('  如需迁移数据，请手动复制旧数据库文件到新位置');
+        console.log('='.repeat(60) + '\n');
+      } catch (e) {
+        logger.debug(`检测旧数据库失败: ${e.message}`);
+      }
+    }
+    
     const dbDir = path.dirname(dbPath);
     if (!fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
@@ -522,6 +551,100 @@ function createAllTables() {
 }
 
 function migrateSqliteTables() {
+  // 主键类型迁移：将 INTEGER AUTOINCREMENT 主键改为 TEXT PRIMARY KEY
+  const pkMigrations = [
+    { table: 'self_update_history', columns: 'id TEXT PRIMARY KEY, version_before VARCHAR(20), version_after VARCHAR(20), update_source VARCHAR(100), update_content TEXT, user_confirmed BOOLEAN DEFAULT 0, confirmed_at DATETIME, rejected_step VARCHAR(100), sandbox_result TEXT, applied_at DATETIME, rollback_version VARCHAR(20), rollback_at DATETIME, rolled_back_reason VARCHAR(200), duration_ms INTEGER, created_at DATETIME' },
+    { table: 'self_repair_history', columns: 'id TEXT PRIMARY KEY, repair_strategy VARCHAR(100), repair_content TEXT, user_confirmed BOOLEAN DEFAULT 0, confirmed_at DATETIME, sandbox_result TEXT, applied_at DATETIME, rollback_at DATETIME, rolled_back_reason VARCHAR(200), error_count INTEGER DEFAULT 1, last_error_at DATETIME, duration_ms INTEGER, error_message_detail TEXT, created_at DATETIME' },
+    { table: 'confirmation_history', columns: 'id TEXT PRIMARY KEY, user_id INTEGER, action VARCHAR(100), description TEXT, impact VARCHAR(500), files_affected TEXT, backup_available BOOLEAN DEFAULT 0, rollback_possible BOOLEAN DEFAULT 0, status VARCHAR(20) DEFAULT "pending", reason VARCHAR(200), created_at DATETIME' },
+    { table: 'code_standards', columns: 'id TEXT PRIMARY KEY, language VARCHAR(50), rule_name VARCHAR(200), rule_code VARCHAR(100), description TEXT, severity VARCHAR(20), category VARCHAR(50), pattern TEXT, fix_suggestion TEXT, created_at DATETIME' },
+    { table: 'user_preferences', columns: 'id TEXT PRIMARY KEY, user_id INTEGER, config_key VARCHAR(100), config_value TEXT, category VARCHAR(50), created_at DATETIME' },
+    { table: 'kb_metadata', columns: 'id TEXT PRIMARY KEY, kb_entry_id INTEGER, meta_key VARCHAR(100), meta_value TEXT, created_at DATETIME' },
+    { table: 'code_analysis_record', columns: 'id TEXT PRIMARY KEY, project_id INTEGER, file_path VARCHAR(500), language VARCHAR(50), file_size INTEGER, line_count INTEGER, complexity_score REAL, maintainability_index REAL, analysis_start_at DATETIME, analysis_end_at DATETIME, duration_ms INTEGER, status VARCHAR(20) DEFAULT "completed", created_at DATETIME' },
+    { table: 'notification', columns: 'id TEXT PRIMARY KEY, user_id INTEGER, type VARCHAR(50), title VARCHAR(200), message TEXT, data_json TEXT, is_confirmed BOOLEAN DEFAULT 0, confirmed_at DATETIME, action VARCHAR(50), created_at DATETIME' },
+    { table: 'backup_history', columns: 'id TEXT PRIMARY KEY, backup_type VARCHAR(50), backup_path VARCHAR(500), file_size_kb REAL, status VARCHAR(20), error_message TEXT, started_at DATETIME, completed_at DATETIME, duration_ms INTEGER, user_id INTEGER, created_at DATETIME' },
+    { table: 'kb_import_history', columns: 'id TEXT PRIMARY KEY, kb_id INTEGER, file_path VARCHAR(500), import_count INTEGER DEFAULT 0, skipped_count INTEGER DEFAULT 0, duplicate_count INTEGER DEFAULT 0, error_message TEXT, started_at DATETIME, completed_at DATETIME, user_id INTEGER, created_at DATETIME' }
+  ];
+  
+  for (const pkMig of pkMigrations) {
+    try {
+      const existingColumns = sqliteDb.prepare(`PRAGMA table_info(${pkMig.table})`).all();
+      const pkCol = existingColumns.find(col => col.pk === 1);
+      
+      if (pkCol && pkCol.type !== 'TEXT') {
+        logger.info(`检测到 ${pkMig.table} 主键类型需要迁移 (${pkCol.type} → TEXT)`);
+        try {
+          // 创建临时表
+          sqliteDb.exec(`CREATE TABLE IF NOT EXISTS ${pkMig.table}_temp (${pkMig.columns})`);
+          // 复制数据（将 INTEGER id 转为 TEXT）
+          const copyResult = sqliteDb.prepare(`INSERT INTO ${pkMig.table}_temp SELECT * FROM ${pkMig.table}`).run();
+          if (copyResult.changes > 0) {
+            // 删除旧表
+            sqliteDb.exec(`DROP TABLE ${pkMig.table}`);
+            // 重命名临时表
+            sqliteDb.exec(`ALTER TABLE ${pkMig.table}_temp RENAME TO ${pkMig.table}`);
+            logger.info(`主键类型迁移完成 ${pkMig.table}: 迁移 ${copyResult.changes} 条记录`);
+          } else {
+            // 无数据，直接删除旧表并重命名
+            sqliteDb.exec(`DROP TABLE ${pkMig.table}`);
+            sqliteDb.exec(`ALTER TABLE ${pkMig.table}_temp RENAME TO ${pkMig.table}`);
+            logger.info(`主键类型迁移完成 ${pkMig.table}: 空表`);
+          }
+        } catch (e) {
+          logger.debug(`主键类型迁移 ${pkMig.table} 失败: ${e.message}`);
+          // 清理临时表
+          try { sqliteDb.exec(`DROP TABLE IF EXISTS ${pkMig.table}_temp`); } catch {}
+        }
+      }
+    } catch (e) {
+      logger.debug(`检测主键类型 ${pkMig.table} 失败: ${e.message}`);
+    }
+  }
+  
+  // 列重命名数据迁移：检测旧列是否存在且有数据，复制到新列
+  const renameMigrations = [
+    { table: 'ai_optimize_record', renames: [
+      { old: 'applied', new: 'is_applied' }
+    ]},
+    { table: 'user_preferences', renames: [
+      { old: 'preference_key', new: 'config_key' },
+      { old: 'preference_value', new: 'config_value' }
+    ]},
+    { table: 'kb_metadata', renames: [
+      { old: 'key', new: 'meta_key' }
+    ]}
+  ];
+  
+  let dataMigratedCount = 0;
+  for (const rename of renameMigrations) {
+    try {
+      const existingColumns = sqliteDb.prepare(`PRAGMA table_info(${rename.table})`).all();
+      const existingColumnNames = existingColumns.map(col => col.name);
+      
+      for (const r of rename.renames) {
+        if (existingColumnNames.includes(r.old) && !existingColumnNames.includes(r.new)) {
+          try {
+            // 添加新列
+            sqliteDb.exec(`ALTER TABLE ${rename.table} ADD COLUMN ${r.new} TEXT`);
+            // 复制数据
+            const count = sqliteDb.prepare(`UPDATE ${rename.table} SET ${r.new} = ${r.old} WHERE ${r.new} IS NULL`).run().changes;
+            if (count > 0) {
+              dataMigratedCount += count;
+              logger.debug(`迁移 ${rename.table}: ${r.old} → ${r.new}, 迁移 ${count} 条数据`);
+            }
+          } catch (e) {
+            logger.debug(`列重命名迁移 ${rename.table}.${r.old} → ${r.new} 失败: ${e.message}`);
+          }
+        }
+      }
+    } catch (e) {
+      logger.debug(`列重命名迁移表 ${rename.table} 失败: ${e.message}`);
+    }
+  }
+  
+  if (dataMigratedCount > 0) {
+    logger.info(`SQLite列重命名数据迁移完成，共迁移 ${dataMigratedCount} 条数据`);
+  }
+  
   const migrations = [
     { table: 'scan_project', columns: [
       { name: 'framework', type: 'VARCHAR(100)' },

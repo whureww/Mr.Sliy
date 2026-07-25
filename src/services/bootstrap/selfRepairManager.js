@@ -546,7 +546,7 @@ class SelfRepairManager {
       const { errorType, errorMessage, errorStack, affectedComponent, repairStrategy, repairContent, status, errorCount, lastErrorAt, appliedAt, rollbackAt, sandboxResult, userConfirmed, confirmedAt, durationMs, error } = record;
 
       await execute(
-        'INSERT INTO self_repair_history (id, error_type, error_message, error_stack, affected_component, repair_strategy, repair_content, status, sandbox_result, user_confirmed, confirmed_at, applied_at, rollback_at, error_count, last_error_at, duration_ms, error_message_detail) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT INTO self_repair_history (id, error_type, error_message, error_stack, affected_component, repair_strategy, repair_content, status, sandbox_result, user_confirmed, confirmed_at, applied_at, rollback_at, error_count, last_error_at, duration_ms, error_message_detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
         [
           recordId,
           errorType,
@@ -564,7 +564,8 @@ class SelfRepairManager {
           errorCount || 1,
           lastErrorAt || Date.now(),
           durationMs || null,
-          error || null
+          error || null,
+          new Date().toISOString()
         ]
       );
 
