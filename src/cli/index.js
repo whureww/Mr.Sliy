@@ -3759,7 +3759,7 @@ function waitEnter() {
 }
 
 async function showNotification(message) {
-  return new Promise((resolve) => {
+  return new Promise(async (resolve) => {
     process.stdout.write('\n\n');
     process.stdout.write(c('─'.repeat(60), 'bright magenta') + '\n');
     

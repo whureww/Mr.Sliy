@@ -231,6 +231,20 @@ const config = {
   defaultMode: process.env.DEFAULT_MODE || 'offline' // offline | online
 };
 
+// 从保存的数据库连接配置中初始化 MySQL 设置（确保重启后状态不丢失）
+if (savedConfig && savedConfig.defaultConnection) {
+  const defaultConn = config.databases.connections[savedConfig.defaultConnection];
+  if (defaultConn && defaultConn.enabled) {
+    config.mysql.enabled = true;
+    config.mysql.host = defaultConn.host;
+    config.mysql.port = defaultConn.port;
+    config.mysql.user = defaultConn.user;
+    config.mysql.password = defaultConn.password;
+    config.mysql.database = defaultConn.database;
+    config.mysql.connectionLimit = defaultConn.connectionLimit;
+  }
+}
+
 /**
  * 获取配置值
  */

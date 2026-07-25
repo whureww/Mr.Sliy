@@ -39,6 +39,20 @@ class DualModeEngine {
       logger.debug('刷新提供商状态失败: ' + e.message);
     }
     
+    // 启动时自动初始化 MySQL 连接（从保存的配置加载）
+    try {
+      const mysql = require('../utils/mysql');
+      const config = require('../config');
+      
+      if (config.mysql.enabled && config.mysql.host) {
+        await mysql.initDatabase();
+        await mysql.checkConnectionHealth();
+        logger.info('MySQL数据库自动初始化完成');
+      }
+    } catch (e) {
+      logger.debug('MySQL自动初始化失败: ' + e.message);
+    }
+    
     if (this.mode === 'auto') {
       try {
         const isConnected = await checkNetworkConnectivity();
