@@ -6,6 +6,8 @@ const { ruleEngine } = require('./ruleEngine');
 const { analysisEngine } = require('./analysisEngine');
 const { validator } = require('./validator');
 const { notificationSystem } = require('../../utils/notificationSystem');
+const { selfRepairManager } = require('./selfRepairManager');
+const { selfUpdateManager } = require('./selfUpdateManager');
 
 class SelfSustainEngine {
   constructor() {
@@ -15,6 +17,14 @@ class SelfSustainEngine {
     this.currentCycle = 0;
     this.cycleHistory = [];
     this.maxHistorySize = 50;
+    
+    // 自动更新修复配置
+    this.autoRepairEnabled = true;
+    this.autoUpdateEnabled = true;
+    this.idleThresholdForAuto = 3 * 60 * 1000; // 3分钟空闲后自动执行
+    this.minAutoInterval = 30 * 60 * 1000; // 最小自动执行间隔
+    this.lastAutoActionTime = 0;
+    
     this.setupEventListeners();
   }
 
@@ -88,6 +98,9 @@ class SelfSustainEngine {
       if (this.currentCycle % 6 === 0) {
         await this.runAIAnalysis();
       }
+      
+      // 检查是否空闲并执行自动更新修复
+      await this.runAutoUpdateAndRepair();
 
       const afterState = validator.captureState('post');
 
@@ -223,6 +236,201 @@ class SelfSustainEngine {
       lastAnalysis,
       stats,
       recentCycles: this.cycleHistory.slice(-5)
+    };
+  }
+
+  /**
+   * 检查系统是否处于空闲状态
+   */
+  isSystemIdle() {
+    const now = Date.now();
+    const idleTime = now - notificationSystem.lastActivityTime;
+    return idleTime >= this.idleThresholdForAuto;
+  }
+
+  /**
+   * 获取距离上次自动执行的时间间隔
+   */
+  getTimeSinceLastAutoAction() {
+    return Date.now() - this.lastAutoActionTime;
+  }
+
+  /**
+   * 在空闲时自动执行更新和修复
+   */
+  async runAutoUpdateAndRepair() {
+    // 检查是否启用自动更新修复
+    if (!this.autoUpdateEnabled && !this.autoRepairEnabled) {
+      return;
+    }
+    
+    // 检查是否空闲
+    if (!this.isSystemIdle()) {
+      return;
+    }
+    
+    // 检查是否超过最小执行间隔
+    if (this.getTimeSinceLastAutoAction() < this.minAutoInterval) {
+      return;
+    }
+    
+    logger.info('🔄 检测到系统空闲，开始自动执行更新和修复...');
+    this.lastAutoActionTime = Date.now();
+    
+    // 发出开始事件
+    eventBus.emit(SYSTEM_EVENTS.AUTO_MAINTENANCE_START);
+    
+    try {
+      // 先执行自动修复
+      if (this.autoRepairEnabled) {
+        await this.runAutoRepair();
+      }
+      
+      // 再执行自动更新检查
+      if (this.autoUpdateEnabled) {
+        await this.runAutoUpdateCheck();
+      }
+      
+      logger.info('✅ 自动更新修复完成');
+      telemetry.recordEvent('auto_maintenance_complete', 'sustain_engine', {}, 'info');
+      
+      // 发出结束事件（成功）
+      eventBus.emit(SYSTEM_EVENTS.AUTO_MAINTENANCE_END, { success: true });
+    } catch (error) {
+      logger.error(`自动更新修复失败: ${error.message}`);
+      telemetry.recordEvent('auto_maintenance_error', 'sustain_engine', {
+        error: error.message
+      }, 'error');
+      
+      // 发出结束事件（失败）
+      eventBus.emit(SYSTEM_EVENTS.AUTO_MAINTENANCE_END, { success: false, error: error.message });
+    }
+  }
+
+  /**
+   * 自动执行修复
+   */
+  async runAutoRepair() {
+    logger.info('🔧 开始自动修复检查...');
+    
+    try {
+      // 获取系统健康状态
+      const healthStatus = systemMonitor.getHealthStatus();
+      
+      if (healthStatus.overallStatus !== 'healthy') {
+        logger.info(`检测到系统健康问题: ${healthStatus.issues.join(', ')}`);
+        
+        // 尝试自动修复所有问题
+        for (const issue of healthStatus.issues) {
+          try {
+            const result = await selfRepairManager.detectAndRepair({
+              message: issue,
+              stack: ''
+            }, {
+              autoConfirm: true,
+              skipBackup: false
+            });
+            
+            if (result.success) {
+              logger.info(`✅ 自动修复成功: ${issue}`);
+              telemetry.recordEvent('auto_repair_success', 'sustain_engine', {
+                issue
+              }, 'info');
+            } else {
+              logger.warn(`❌ 自动修复失败: ${issue}`);
+              telemetry.recordEvent('auto_repair_failure', 'sustain_engine', {
+                issue,
+                reason: result.message
+              }, 'warning');
+            }
+          } catch (repairError) {
+            logger.error(`修复 ${issue} 时发生异常: ${repairError.message}`);
+          }
+        }
+      } else {
+        logger.info('系统健康状态良好，无需修复');
+      }
+    } catch (error) {
+      logger.error(`自动修复检查失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 自动执行更新检查
+   */
+  async runAutoUpdateCheck() {
+    logger.info('🔍 开始自动更新检查...');
+    
+    try {
+      // 检查是否有待处理的更新建议
+      const pendingUpdates = selfUpdateManager.pendingUpdates;
+      
+      if (pendingUpdates.length > 0) {
+        logger.info(`检测到 ${pendingUpdates.length} 个待处理更新`);
+        
+        for (const update of pendingUpdates) {
+          try {
+            // 对于低风险更新自动执行，高风险更新需要确认
+            // pendingUpdates 中的对象结构：{ id, updateType, status, ... }
+            const updateDescription = update.description || `更新 ${update.updateType || update.id}`;
+            const autoConfirm = true; // 自动模式下默认确认
+            
+            logger.info(`自动执行更新: ${updateDescription}`);
+            const result = await selfUpdateManager.executeUpdate(update.id, { 
+              autoConfirm: autoConfirm,
+              skipConfirmation: autoConfirm
+            });
+            
+            if (result.success) {
+              logger.info(`✅ 更新成功: ${updateDescription}`);
+              telemetry.recordEvent('auto_update_success', 'sustain_engine', {
+                updateType: update.updateType,
+                description: updateDescription
+              }, 'info');
+            } else {
+              logger.warn(`❌ 更新失败: ${updateDescription}`);
+            }
+          } catch (updateError) {
+            logger.error(`执行更新 ${update.id} 时发生异常: ${updateError.message}`);
+          }
+        }
+      } else {
+        logger.info('无待处理更新');
+      }
+    } catch (error) {
+      logger.error(`自动更新检查失败: ${error.message}`);
+    }
+  }
+
+  /**
+   * 设置自动更新修复配置
+   */
+  setAutoConfig(options) {
+    if (options.autoRepairEnabled !== undefined) {
+      this.autoRepairEnabled = options.autoRepairEnabled;
+    }
+    if (options.autoUpdateEnabled !== undefined) {
+      this.autoUpdateEnabled = options.autoUpdateEnabled;
+    }
+    if (options.idleThresholdForAuto !== undefined) {
+      this.idleThresholdForAuto = options.idleThresholdForAuto;
+    }
+    if (options.minAutoInterval !== undefined) {
+      this.minAutoInterval = options.minAutoInterval;
+    }
+    logger.info(`自动更新修复配置已更新: autoRepair=${this.autoRepairEnabled}, autoUpdate=${this.autoUpdateEnabled}`);
+  }
+
+  /**
+   * 获取自动更新修复配置
+   */
+  getAutoConfig() {
+    return {
+      autoRepairEnabled: this.autoRepairEnabled,
+      autoUpdateEnabled: this.autoUpdateEnabled,
+      idleThresholdForAuto: this.idleThresholdForAuto,
+      minAutoInterval: this.minAutoInterval,
+      lastAutoActionTime: this.lastAutoActionTime
     };
   }
 }

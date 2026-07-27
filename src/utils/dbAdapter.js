@@ -85,11 +85,24 @@ function initSyncQueueTable() {
       )
     `);
     
-    // 添加缺失的 next_retry_at 列（兼容旧数据库）
+    // 兼容旧数据库：检查并添加缺失的列
     try {
-      sqliteDb.exec(`ALTER TABLE sync_queue ADD COLUMN IF NOT EXISTS next_retry_at DATETIME`);
+      const existingColumns = sqliteDb.prepare(`PRAGMA table_info(sync_queue)`).all();
+      const existingColumnNames = existingColumns.map(col => col.name);
+      
+      const missingColumns = [
+        { name: 'next_retry_at', type: 'DATETIME' },
+        { name: 'last_retry_at', type: 'DATETIME' }
+      ];
+      
+      for (const col of missingColumns) {
+        if (!existingColumnNames.includes(col.name)) {
+          sqliteDb.exec(`ALTER TABLE sync_queue ADD COLUMN ${col.name} ${col.type}`);
+          logger.info(`同步队列表添加缺失列: ${col.name}`);
+        }
+      }
     } catch (e) {
-      // 列已存在，忽略错误
+      logger.debug(`检查同步队列表列失败: ${e.message}`);
     }
   } catch (e) {
     logger.debug(`初始化同步队列表失败: ${e.message}`);
@@ -1007,6 +1020,16 @@ function convertTimestampParams(params, tableName = '') {
     }
     if (shouldConvert && typeof param === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(param)) {
       return param.slice(0, 19).replace('T', ' ');
+    }
+    // 处理字符串形式的毫秒时间戳（如 '1785130963019.0'）
+    // 使用正则表达式确保只匹配纯数字字符串，避免UUID如 '9e4433d2' 被解析为 Infinity
+    if (shouldConvert && typeof param === 'string') {
+      if (/^-?\d+(\.\d+)?$/.test(param)) {
+        const numValue = parseFloat(param);
+        if (!isNaN(numValue) && numValue > 1000000000000 && numValue < 9000000000000) {
+          return new Date(numValue).toISOString().slice(0, 19).replace('T', ' ');
+        }
+      }
     }
     return param;
   });

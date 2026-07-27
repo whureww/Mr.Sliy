@@ -6,7 +6,9 @@ const SYSTEM_EVENTS = {
   SYSTEM_HEALTH_CHECK: 'system_health_check',
   SYSTEM_HEALTH_STATUS: 'system_health_status',
   SYSTEM_DEGRADE: 'system_degrade',
-  SYSTEM_RECOVER: 'system_recover'
+  SYSTEM_RECOVER: 'system_recover',
+  AUTO_MAINTENANCE_START: 'auto_maintenance_start',
+  AUTO_MAINTENANCE_END: 'auto_maintenance_end'
 };
 
 class EventBus {

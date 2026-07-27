@@ -13,6 +13,7 @@ const { ProgressBar, MultiStepProgress } = require('../utils/progress');
 const { padEndDisplay } = require('../utils/helpers');
 const mysql = require('../utils/mysql');
 const { notificationSystem } = require('../utils/notificationSystem');
+const { eventBus, SYSTEM_EVENTS } = require('../utils/eventBus');
 
 const colors = {
   reset: '\x1b[0m',
@@ -48,20 +49,14 @@ function clearScreen() {
 }
 
 const MENU_ITEMS = [
-  { key: 'analyze', command: '/analyze', label: '/analyze', desc: '分析单个文件', shortcut: 'a', keywords: 'analyze file analysis 分析' },
-  { key: 'scan', command: '/scan', label: '/scan', desc: '扫描项目目录', shortcut: 's', keywords: 'scan project directory 扫描' },
-  { key: 'optimize', command: '/optimize', label: '/optimize', desc: '交互式代码优化', shortcut: 'o', keywords: 'optimize code improvement optimization 优化' },
-  { key: 'provider', command: '/provider', label: '/provider', desc: '大模型提供商管理', shortcut: 'p', keywords: 'provider llm model api 提供商 模型' },
-  { key: 'knowledge', command: '/knowledge', label: '/knowledge', desc: '知识库管理', shortcut: 'k', keywords: 'knowledge kb database rag 知识库' },
-  { key: 'update', command: '/update', label: '/update', desc: '自更新管理', shortcut: 'u', keywords: 'update self-update upgrade 更新 升级' },
-  { key: 'repair', command: '/repair', label: '/repair', desc: '自修复管理', shortcut: 'r', keywords: 'repair self-repair fix 修复' },
-  { key: 'mode', command: '/mode', label: '/mode', desc: '切换工作模式', shortcut: 'm', keywords: 'mode online offline auto 模式 离线 在线' },
-  { key: 'status', command: '/status', label: '/status', desc: '查看系统状态', shortcut: 'i', keywords: 'status info state stat 状态 信息' },
-  { key: 'health', command: '/health', label: '/health', desc: '健康检查', shortcut: 'h', keywords: 'health check monitor 健康 检查' },
-  { key: 'sustain', command: '/sustain', label: '/sustain', desc: 'AI自持引擎', shortcut: 't', keywords: 'sustain ai self-sustain auto 自持 自动' },
-  { key: 'pending', command: '/pending', label: '/pending', desc: '待处理确认队列', shortcut: 'd', keywords: 'pending queue confirmation 待处理 队列' },
+  { key: 'analyze', command: '/analyze', label: '/analyze', desc: '代码分析', shortcut: 'a', keywords: 'analyze scan file project analysis 分析 扫描' },
+  { key: 'optimize', command: '/optimize', label: '/optimize', desc: '代码优化', shortcut: 'o', keywords: 'optimize code improvement optimization 优化' },
+  { key: 'sustain', command: '/sustain', label: '/sustain', desc: 'AI自持引擎', shortcut: 't', keywords: 'sustain ai self-sustain update repair auto 自持 自动 更新 修复' },
+  { key: 'config', command: '/config', label: '/config', desc: '配置管理', shortcut: 'c', keywords: 'config provider knowledge mode settings 配置 提供商 知识库 模式' },
+  { key: 'status', command: '/status', label: '/status', desc: '系统状态', shortcut: 'i', keywords: 'status health info monitor 状态 健康 监控' },
+  { key: 'pending', command: '/pending', label: '/pending', desc: '待处理队列', shortcut: 'd', keywords: 'pending queue confirmation 待处理 队列' },
   { key: 'help', command: '/help', label: '/help', desc: '帮助文档', shortcut: '?', keywords: 'help manual usage guide 帮助 说明' },
-  { key: 'clear', command: '/clear', label: '/clear', desc: '清空屏幕', shortcut: 'c', keywords: 'clear cls screen clean 清空 清理' },
+  { key: 'clear', command: '/clear', label: '/clear', desc: '清空屏幕', shortcut: 'x', keywords: 'clear cls screen clean 清空 清理' },
   { key: 'exit', command: '/exit', label: '/exit', desc: '退出程序', shortcut: 'e', keywords: 'exit quit bye 离开 退出' }
 ];
 
@@ -314,6 +309,55 @@ async function showMenu() {
       inputState.mode = 'idle';
     }
 
+    function updateSelectionHighlight(filtered, oldIndex, newIndex) {
+      const maxDisplay = 5;
+      const start = Math.max(0, Math.min(newIndex - Math.floor(maxDisplay / 2), filtered.length - maxDisplay));
+      const end = Math.min(start + maxDisplay, filtered.length);
+
+      // 计算需要移动的行数：从输入提示行向上到标题行之前
+      // 输入提示行(1) + 空行(1) + 分隔线(1) + 提示行(可选1) + 命令行(maxDisplay)
+      let linesToMove = 3 + maxDisplay; // 输入提示 + 空行 + 分隔线 + 命令行
+      if (filtered.length > maxDisplay) {
+        linesToMove += 1; // 加上 "... 共 N 条匹配" 行
+      }
+
+      // 保存光标位置
+      process.stdout.write('\x1b[s');
+      
+      // 向上移动到标题行位置
+      process.stdout.write(`\x1b[${linesToMove}A`);
+      
+      // 清除从当前位置开始到屏幕末尾的内容
+      process.stdout.write('\x1b[0J');
+      
+      // 重新绘制匹配命令列表（标题 + 命令）
+      process.stdout.write(c('  (✧∇✧)╯ 匹配命令:', 'cyan') + '\n');
+      
+      for (let i = start; i < end; i++) {
+        const item = filtered[i];
+        const isSel = i === newIndex;
+        const prefix = isSel ? c('  ▶ ', 'green') : '    ';
+        const cmd = isSel ? c(item.command, 'bright white') : c(item.command, 'cyan');
+        const desc = isSel ? c('  ' + item.desc, 'white') : c('  ' + item.desc, 'gray');
+        process.stdout.write(prefix + cmd + desc + '\n');
+      }
+
+      if (filtered.length > maxDisplay) {
+        process.stdout.write(c('    ... 共 ' + filtered.length + ' 条匹配', 'dim') + '\n');
+      }
+      
+      // 重新绘制分隔线和输入提示
+      process.stdout.write(c('  ' + '─'.repeat(66), 'dim') + '\n');
+      process.stdout.write('\n');
+      
+      const input = menuState.input || '';
+      const promptLine = c(' (◕ᴗ◕✿) ', 'magenta') + c('输入命令或与AI聊天: ', 'white') + input;
+      process.stdout.write(promptLine);
+      
+      // 恢复光标位置
+      process.stdout.write('\x1b[u');
+    }
+
     function render() {
       clearScreen();
       printBanner();
@@ -432,8 +476,16 @@ async function showMenu() {
       if (isUpArrow(chunk, key)) {
         const filtered = getFilteredCommands(menuState.input || '');
         if (filtered.length > 0) {
+          const oldIndex = menuState.selectedIndex;
           menuState.selectedIndex = Math.max(0, menuState.selectedIndex - 1);
-          render();
+          if (oldIndex !== menuState.selectedIndex) {
+            if (menuState.input && menuState.input.startsWith('/')) {
+              // 只更新选中高亮，不清屏重绘
+              updateSelectionHighlight(filtered, oldIndex, menuState.selectedIndex);
+            } else {
+              render();
+            }
+          }
         }
         return;
       }
@@ -441,8 +493,16 @@ async function showMenu() {
       if (isDownArrow(chunk, key)) {
         const filtered = getFilteredCommands(menuState.input || '');
         if (filtered.length > 0) {
+          const oldIndex = menuState.selectedIndex;
           menuState.selectedIndex = Math.min(filtered.length - 1, menuState.selectedIndex + 1);
-          render();
+          if (oldIndex !== menuState.selectedIndex) {
+            if (menuState.input && menuState.input.startsWith('/')) {
+              // 只更新选中高亮，不清屏重绘
+              updateSelectionHighlight(filtered, oldIndex, menuState.selectedIndex);
+            } else {
+              render();
+            }
+          }
         }
         return;
       }
@@ -889,6 +949,43 @@ function reprintMenu() {
   printMenu();
 }
 
+async function analyzeMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' (✧ω✧) 代码分析', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) 分析文件      (file)', 'white'));
+    console.log(c('    2) 扫描项目      (scan)', 'white'));
+    console.log(c('    0) 返回主菜单    (back)', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice === '0' || choice.toLowerCase() === 'back') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+      case 'file':
+        await analyzeFile();
+        break;
+      case '2':
+      case 'scan':
+        await scanProject();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
+  }
+}
+
 async function analyzeFile() {
   clearScreen();
   printBanner();
@@ -1234,6 +1331,48 @@ async function optimizeCode() {
     progressBar.fail('优化失败', error.message);
     console.log(c('  ✗ 优化失败: ' + error.message, 'red'));
     await waitEnter();
+  }
+}
+
+async function configMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' (◕ᴗ◕✿) 配置管理', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) 提供商管理    (provider)', 'white'));
+    console.log(c('    2) 知识库管理    (knowledge)', 'white'));
+    console.log(c('    3) 模式切换      (mode)', 'white'));
+    console.log(c('    0) 返回主菜单    (back)', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice === '0' || choice.toLowerCase() === 'back') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+      case 'provider':
+        await providerMenu();
+        break;
+      case '2':
+      case 'knowledge':
+        await knowledgeMenu();
+        break;
+      case '3':
+      case 'mode':
+        await modeMenu();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
   }
 }
 
@@ -2360,6 +2499,43 @@ async function modeMenu() {
   }
 }
 
+async function statusMenu() {
+  while (true) {
+    clearScreen();
+    printBanner();
+    console.log(c(' (✧∇✧)╯ 系统状态', 'bright cyan'));
+    console.log(c('  输入 q 返回主菜单，Esc 返回', 'dim'));
+    console.log(c('─'.repeat(70), 'dim'));
+    
+    console.log(c('  操作:', 'cyan'));
+    console.log(c('    1) 查看状态      (status)', 'white'));
+    console.log(c('    2) 健康检查      (health)', 'white'));
+    console.log(c('    0) 返回主菜单    (back)', 'dim'));
+    console.log();
+    
+    const choice = await ask('  请选择操作: ');
+    
+    if (choice === '__CANCEL__') return;
+    if (choice.toLowerCase() === 'q' || choice === '0' || choice.toLowerCase() === 'back') {
+      return;
+    }
+    
+    switch (choice) {
+      case '1':
+      case 'status':
+        await showStatus();
+        break;
+      case '2':
+      case 'health':
+        await healthCheckMenu();
+        break;
+      default:
+        console.log(c('  无效的选择，请重新输入', 'yellow'));
+        await waitEnter();
+    }
+  }
+}
+
 async function showStatus() {
   clearScreen();
   printBanner();
@@ -2686,9 +2862,11 @@ async function sustainMenu() {
     console.log(c('    2) 启动自持引擎', 'white'));
     console.log(c('    3) 停止自持引擎', 'white'));
     console.log(c('    4) 触发AI分析', 'white'));
-    console.log(c('    5) 规则管理', 'white'));
-    console.log(c('    6) 遥测数据', 'white'));
-    console.log(c('    7) 验证统计', 'white'));
+    console.log(c('    5) 手动更新      (update)', 'white'));
+    console.log(c('    6) 手动修复      (repair)', 'white'));
+    console.log(c('    7) 规则管理', 'white'));
+    console.log(c('    8) 遥测数据', 'white'));
+    console.log(c('    9) 验证统计', 'white'));
     console.log(c('    0) 返回主菜单', 'dim'));
     console.log();
     
@@ -2717,12 +2895,20 @@ async function sustainMenu() {
         await triggerAnalysisMenu();
         break;
       case '5':
-        await rulesMenu();
+      case 'update':
+        await aiUpdate();
         break;
       case '6':
-        await showTelemetry();
+      case 'repair':
+        await aiRepair();
         break;
       case '7':
+        await rulesMenu();
+        break;
+      case '8':
+        await showTelemetry();
+        break;
+      case '9':
         await showValidationStats();
         break;
       default:
@@ -3904,6 +4090,20 @@ async function startCLI() {
   
   notificationSystem.start(showNotification);
   
+  // 监听自动维护结束事件，日志停留1分钟后自动清除并重新显示输入提示
+  eventBus.on(SYSTEM_EVENTS.AUTO_MAINTENANCE_END, () => {
+    // 日志停留1分钟后自动清除
+    setTimeout(() => {
+      // 重新显示菜单和输入提示
+      reprintMenu();
+      process.stdout.write('\n');
+      process.stdout.write(c(' (◕ᴗ◕✿) ', 'magenta') + c('输入命令或与AI聊天: ', 'white'));
+      if (typeof process.stdout.flush === 'function') {
+        process.stdout.flush();
+      }
+    }, 60000); // 1分钟 = 60000毫秒
+  });
+  
   while (true) {
     notificationSystem.recordActivity();
     const choice = await showMenu();
@@ -3912,40 +4112,22 @@ async function startCLI() {
     
     switch (choice) {
       case 'analyze':
-        await analyzeFile();
-        break;
-      case 'scan':
-        await scanProject();
+        await analyzeMenu();
         break;
       case 'optimize':
         await optimizeCode();
         break;
-      case 'provider':
-        await providerMenu();
+      case 'sustain':
+        await sustainMenu();
         break;
-      case 'knowledge':
-        await knowledgeMenu();
-        break;
-      case 'update':
-        await updateMenu();
-        break;
-      case 'repair':
-        await repairMenu();
-        break;
-      case 'mode':
-        await modeMenu();
+      case 'config':
+        await configMenu();
         break;
       case 'status':
-        await showStatus();
+        await statusMenu();
         break;
       case 'pending':
         await pendingMenu();
-        break;
-      case 'health':
-        await healthCheckMenu();
-        break;
-      case 'sustain':
-        await sustainMenu();
         break;
       case 'help':
         await showHelp();
