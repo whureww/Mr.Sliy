@@ -26,6 +26,35 @@ class SkillManager {
     const codeAnalysisSkill = require('./code-analysis');
     this.register(codeAnalysisSkill);
 
+    // 注册子技能
+    const complexityAnalysisSkill = require('./code-analysis/complexityAnalysis');
+    this.register(complexityAnalysisSkill);
+
+    const securityDetectionSkill = require('./code-analysis/securityDetection');
+    this.register(securityDetectionSkill);
+
+    const performanceOptimizationSkill = require('./code-analysis/performanceOptimization');
+    this.register(performanceOptimizationSkill);
+
+    // 注册高级技能
+    const codeGenerationSkill = require('./code-generation');
+    this.register(codeGenerationSkill);
+
+    const codeRefactoringSkill = require('./code-refactoring');
+    this.register(codeRefactoringSkill);
+
+    const codeDebuggingSkill = require('./code-debugging');
+    this.register(codeDebuggingSkill);
+
+    const documentationSkill = require('./documentation');
+    this.register(documentationSkill);
+
+    const databaseSkill = require('./database');
+    this.register(databaseSkill);
+
+    const securityAuditSkill = require('./security-audit');
+    this.register(securityAuditSkill);
+
     for (const skill of this.skills.values()) {
       if (typeof skill.init === 'function') {
         try {

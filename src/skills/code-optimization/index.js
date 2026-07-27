@@ -205,6 +205,35 @@ class CodeOptimizationSkill extends Skill {
           return { fixedCode: code, explanation: '无法定位导入语句' };
         }
       },
+      unused_variable: {
+        apply: (code, issue) => {
+          const lines = code.split('\n');
+          const lineIndex = issue.lineStart - 1;
+          if (lineIndex >= 0 && lineIndex < lines.length) {
+            lines.splice(lineIndex, 1);
+            return {
+              fixedCode: lines.join('\n'),
+              explanation: '删除了未使用的变量声明'
+            };
+          }
+          return { fixedCode: code, explanation: '无法定位变量声明' };
+        }
+      },
+      unused_function: {
+        apply: (code, issue) => {
+          const lines = code.split('\n');
+          const startLine = issue.lineStart - 1;
+          const endLine = issue.lineEnd || startLine + 5;
+          if (startLine >= 0 && startLine < lines.length) {
+            lines.splice(startLine, endLine - startLine + 1);
+            return {
+              fixedCode: lines.join('\n'),
+              explanation: '删除了未使用的函数定义'
+            };
+          }
+          return { fixedCode: code, explanation: '无法定位函数定义' };
+        }
+      },
       console_log: {
         apply: (code, issue) => {
           const lines = code.split('\n');
@@ -221,23 +250,85 @@ class CodeOptimizationSkill extends Skill {
       },
       unnecessary_else: {
         apply: (code, issue) => {
-          return {
-            fixedCode: code,
-            explanation: '建议手动移除 return 后的 else 语句'
-          };
+          const lines = code.split('\n');
+          const lineIndex = issue.lineStart - 1;
+          if (lineIndex >= 0 && lineIndex < lines.length) {
+            const line = lines[lineIndex];
+            const elseMatch = line.match(/^\s*else\s*\{?/);
+            if (elseMatch) {
+              lines[lineIndex] = line.replace(/^\s*else\s*\{?/, '');
+              return {
+                fixedCode: lines.join('\n'),
+                explanation: '移除了 return 后的不必要 else 语句'
+              };
+            }
+          }
+          return { fixedCode: code, explanation: '建议手动移除 return 后的 else 语句' };
         }
       },
       magic_number: {
         apply: (code, issue) => {
+          const number = issue.magicNumber;
+          const constantName = this._generateConstantName(number);
+          const lines = code.split('\n');
+          const firstLine = lines[0] || '';
+          
+          let constantLine = '';
+          if (firstLine.startsWith('import') || firstLine.startsWith('const') || firstLine.startsWith('let') || firstLine.startsWith('var')) {
+            constantLine = `const ${constantName} = ${number};\n`;
+            lines.unshift(constantLine);
+          } else {
+            constantLine = `const ${constantName} = ${number};\n`;
+            lines.unshift(constantLine);
+          }
+          
+          for (let i = 0; i < lines.length; i++) {
+            lines[i] = lines[i].replace(new RegExp(`\\b${number}\\b`, 'g'), constantName);
+          }
+          
           return {
-            fixedCode: code,
-            explanation: '建议将魔法数字提取为具名常量'
+            fixedCode: lines.join('\n'),
+            explanation: `将魔法数字 ${number} 提取为常量 ${constantName}`
           };
+        }
+      },
+      null_check: {
+        apply: (code, issue) => {
+          const lines = code.split('\n');
+          const lineIndex = issue.lineStart - 1;
+          if (lineIndex >= 0 && lineIndex < lines.length) {
+            const line = lines[lineIndex];
+            const variableName = issue.variable;
+            if (variableName && !line.includes('null') && !line.includes('undefined')) {
+              lines[lineIndex] = `if (${variableName} == null) return;\n` + line;
+              return {
+                fixedCode: lines.join('\n'),
+                explanation: `添加了 ${variableName} 的空值检查`
+              };
+            }
+          }
+          return { fixedCode: code, explanation: '建议添加空值检查' };
         }
       }
     };
 
     return strategies[issueType] || null;
+  }
+
+  _generateConstantName(number) {
+    const nameMap = {
+      '0': 'ZERO',
+      '1': 'ONE',
+      '2': 'TWO',
+      '100': 'PERCENT',
+      '1000': 'THOUSAND',
+      '1024': 'KILOBYTE',
+      '200': 'SUCCESS_STATUS',
+      '400': 'BAD_REQUEST_STATUS',
+      '404': 'NOT_FOUND_STATUS',
+      '500': 'ERROR_STATUS'
+    };
+    return nameMap[number] || `MAGIC_NUMBER_${number}`;
   }
 
   async _generateSuggestions(issues, language) {

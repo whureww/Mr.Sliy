@@ -7,6 +7,9 @@ const Skill = require('../Skill');
 const { logger } = require('../../utils/logger');
 const { getFileLanguage, countLines } = require('../../utils/helpers');
 const { parseCode, extractFunctions, extractVariables, extractImports } = require('../../services/ast/parser');
+const complexityAnalysis = require('./complexityAnalysis');
+const securityDetection = require('./securityDetection');
+const performanceOptimization = require('./performanceOptimization');
 
 class CodeAnalysisSkill extends Skill {
   constructor() {
@@ -16,6 +19,11 @@ class CodeAnalysisSkill extends Skill {
       '1.0.0'
     );
     this.dependencies = ['ast-parser'];
+    this.subSkills = {
+      complexity: complexityAnalysis,
+      security: securityDetection,
+      performance: performanceOptimization
+    };
   }
 
   async init() {
@@ -96,6 +104,18 @@ class CodeAnalysisSkill extends Skill {
       totalFiles: files.length,
       analyzedFiles: results.length
     };
+  }
+
+  async analyzeComplexity(sourceCode, language = 'javascript') {
+    return await complexityAnalysis.execute({ sourceCode, language });
+  }
+
+  async analyzeSecurity(sourceCode, language = 'javascript') {
+    return await securityDetection.execute({ sourceCode, language });
+  }
+
+  async analyzePerformance(sourceCode, language = 'javascript') {
+    return await performanceOptimization.execute({ sourceCode, language });
   }
 
   async getMetrics(sourceCode, language = 'javascript') {

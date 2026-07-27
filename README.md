@@ -202,10 +202,30 @@ src/
 │   ├── rag/                # RAG 知识库
 │   └── vector/             # 向量数据库
 ├── skills/                 # 技能模块
-│   ├── code-analysis/
-│   ├── code-detection/
-│   │   └── rules/          # 检测规则
-│   └── code-optimization/
+│   ├── code-analysis/      # 代码分析子技能
+│   │   ├── index.js                    # 主入口
+│   │   ├── complexityAnalysis.js       # 复杂度分析（圈复杂度、认知复杂度）
+│   │   ├── securityDetection.js        # 安全检测（XSS、SQL注入、硬编码密钥）
+│   │   └── performanceOptimization.js  # 性能优化分析（循环效率、内存问题）
+│   ├── code-detection/     # 代码问题检测
+│   │   ├── index.js
+│   │   └── rules/          # 检测规则（14+规则）
+│   ├── code-optimization/  # 代码优化子技能
+│   │   └── index.js        # 自动修复策略（8+策略）
+│   ├── code-generation/    # 代码生成（参考 superpowers）
+│   │   └── index.js        # 需求→代码、单元测试、模拟数据
+│   ├── code-refactoring/   # 代码重构（参考 superpowers）
+│   │   └── index.js        # 提取方法、内联、重命名、简化条件
+│   ├── code-debugging/     # 代码调试（参考 superpowers）
+│   │   └── index.js        # 错误分析、问题诊断、潜在bug检测
+│   ├── documentation/      # 文档生成（参考 superpowers）
+│   │   └── index.js        # 代码文档、API文档、README、架构文档
+│   ├── database/           # 数据库开发（参考 supabase/agent-skills）
+│   │   └── index.js        # 表结构生成、SQL查询、数据库迁移、ER图
+│   ├── security-audit/     # 安全审计（参考 auditor-skill）
+│   │   └── index.js        # 全面安全审计、深度分析、审计报告
+│   ├── Skill.js            # 技能基类
+│   └── index.js            # 技能管理器
 ├── utils/                  # 工具函数
 │   ├── crypto.js           # 加密工具
 │   ├── database.js         # 数据库抽象层
@@ -258,6 +278,36 @@ src/
 - **自动记忆**：重启后自动加载上次配置的数据库连接，无需重新切换
 
 ## 📝 更新日志
+
+### v3.8.0
+> 更新日期: 2026-07-27
+
+- **✨ 新增高级技能模块**：参考 GitHub 优秀项目，添加6个全新技能
+  - `code-generation` - 代码生成技能（基于需求描述生成高质量代码、单元测试、模拟数据）
+  - `code-refactoring` - 代码重构技能（提取方法、内联方法、重命名变量、简化条件）
+  - `code-debugging` - 代码调试技能（错误分析、问题诊断、潜在bug检测）
+  - `documentation` - 文档生成技能（代码文档、API文档、README、架构文档、更新日志）
+  - `database` - 数据库开发技能（表结构生成、SQL查询生成、数据库迁移、ER图生成）
+  - `security-audit` - 安全审计技能（全面安全审计、深度分析、审计报告生成）
+- **✨ 参考优秀开源项目**：
+  - superpowers (obra/superpowers)：代码生成、重构、调试、文档
+  - agent-skills (supabase/agent-skills)：后端/数据库/全栈开发
+  - auditor-skill (solanabr/auditor-skill)：安全审计
+
+### v3.7.2
+> 更新日期: 2026-07-27
+
+- **✨ 新增代码分析子技能**：扩展 skills/code-analysis/ 目录，添加三个新技能
+  - `complexityAnalysis.js` - 代码复杂度分析（圈复杂度、认知复杂度计算）
+  - `securityDetection.js` - 代码安全检测（XSS漏洞、SQL注入、硬编码密钥、路径遍历）
+  - `performanceOptimization.js` - 性能优化分析（循环效率、内存问题、低效代码）
+- **✨ 增强代码优化技能**：扩展 skills/code-optimization/index.js，新增自动修复策略
+  - 新增 `unused_variable` 自动修复：删除未使用的变量声明
+  - 新增 `unused_function` 自动修复：删除未使用的函数定义
+  - 增强 `unnecessary_else` 自动修复：自动移除 return 后的 else 语句
+  - 增强 `magic_number` 自动修复：自动提取为具名常量
+  - 新增 `null_check` 自动修复：添加空值检查
+- **✨ 优化技能管理器**：注册新子技能，支持独立调用和组合调用
 
 ### v3.7.1
 > 更新日期: 2026-07-27
