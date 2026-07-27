@@ -1491,7 +1491,7 @@ class DbAdapter {
     return result;
   }
 
-  async syncLocalToRemote(tableName) {
+  async syncLocalToRemote(tableName, mode = 'merge') {
     if (!mysql.isEnabled()) {
       logger.warn('MySQL未启用，无法同步');
       return { success: false, message: 'MySQL未启用' };
@@ -1512,58 +1512,101 @@ class DbAdapter {
       
       const connection = await pool.getConnection();
       
-      const [remoteRows] = await connection.query(`SELECT COUNT(*) as count FROM \`${tableName}\``);
-      const remoteCount = remoteRows[0]?.count || 0;
-      
-      if (remoteCount > 0 && rows.length < remoteCount * 0.5) {
-        logger.warn(`同步 ${tableName}: 本地(${rows.length})远少于云端(${remoteCount})，跳过以防止数据丢失`);
-        connection.release();
-        return { success: true, count: 0, table: tableName, skipped: true };
-      }
-      
       try {
         await connection.beginTransaction();
-        
         await connection.execute("SET sql_mode = ''");
-        
-        const tempTable = `${tableName}_sync_temp`;
-        const backupTable = `${tableName}_sync_backup`;
-        
-        await connection.execute(`DROP TABLE IF EXISTS \`${tempTable}\``);
-        
-        await ensureTableColumns(connection, tableName);
-        
-        try {
-          await syncTableSchemaFromSqlite(connection, tableName, tempTable);
-        } catch (schemaError) {
-          logger.warn(`从SQLite同步表结构失败，尝试使用LIKE创建 [${tableName}]: ${schemaError.message}`);
-          try {
-            await connection.execute(`CREATE TABLE \`${tempTable}\` LIKE \`${tableName}\``);
-          } catch (createError) {
-            logger.error(`使用LIKE创建表失败 [${tableName}]: ${createError.message}`);
-            throw new Error(`表 ${tableName} 创建失败: ${createError.message}`);
-          }
-        }
         
         const columns = Object.keys(rows[0]);
         const noTimestampTables = ['telemetry_events', 'validation_records', 'ai_analysis_records', 'rule_execution_log'];
         const convertTimestamp = !noTimestampTables.includes(tableName);
+        const idColumn = columns.includes('id') ? 'id' : columns[0];
         
-        for (let i = 0; i < rows.length; i += 50) {
-          const batch = rows.slice(i, i + 50);
-          const values = batch.map(row => {
-            return '(' + columns.map(col => escapeValue(row[col], convertTimestamp)).join(', ') + ')';
-          }).join(',\n');
-          await connection.execute(`INSERT INTO \`${tempTable}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
+        let syncedCount = 0;
+        let updatedCount = 0;
+        let insertedCount = 0;
+        
+        if (mode === 'overwrite') {
+          const tempTable = `${tableName}_sync_temp`;
+          const backupTable = `${tableName}_sync_backup`;
+          
+          await connection.execute(`DROP TABLE IF EXISTS \`${tempTable}\``);
+          
+          await ensureTableColumns(connection, tableName);
+          
+          try {
+            await syncTableSchemaFromSqlite(connection, tableName, tempTable);
+          } catch (schemaError) {
+            logger.warn(`从SQLite同步表结构失败，尝试使用LIKE创建 [${tableName}]: ${schemaError.message}`);
+            try {
+              await connection.execute(`CREATE TABLE \`${tempTable}\` LIKE \`${tableName}\``);
+            } catch (createError) {
+              throw new Error(`表 ${tableName} 创建失败: ${createError.message}`);
+            }
+          }
+          
+          for (let i = 0; i < rows.length; i += 50) {
+            const batch = rows.slice(i, i + 50);
+            const values = batch.map(row => {
+              return '(' + columns.map(col => escapeValue(row[col], convertTimestamp)).join(', ') + ')';
+            }).join(',\n');
+            await connection.execute(`INSERT INTO \`${tempTable}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
+          }
+          
+          await connection.execute(`RENAME TABLE \`${tableName}\` TO \`${backupTable}\`, \`${tempTable}\` TO \`${tableName}\``);
+          await connection.execute(`DROP TABLE IF EXISTS \`${backupTable}\``);
+          syncedCount = rows.length;
+          
+        } else if (mode === 'append') {
+          const [existingIds] = await connection.query(`SELECT \`${idColumn}\` FROM \`${tableName}\``);
+          const existingIdSet = new Set(existingIds.map(r => r[idColumn]));
+          
+          for (let i = 0; i < rows.length; i += 50) {
+            const batch = rows.slice(i, i + 50).filter(row => !existingIdSet.has(row[idColumn]));
+            if (batch.length === 0) continue;
+            
+            const values = batch.map(row => {
+              return '(' + columns.map(col => escapeValue(row[col], convertTimestamp)).join(', ') + ')';
+            }).join(',\n');
+            await connection.execute(`INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`);
+            insertedCount += batch.length;
+          }
+          syncedCount = insertedCount;
+          
+        } else {
+          for (let i = 0; i < rows.length; i += 50) {
+            const batch = rows.slice(i, i + 50);
+            const values = batch.map(row => {
+              return '(' + columns.map(col => escapeValue(row[col], convertTimestamp)).join(', ') + ')';
+            }).join(',\n');
+            
+            const updateColumns = columns.filter(col => col !== idColumn);
+            const updateClause = updateColumns.map(col => `\`${col}\` = VALUES(\`${col}\`)`).join(', ');
+            
+            try {
+              await connection.execute(
+                `INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES ${values} ON DUPLICATE KEY UPDATE ${updateClause}`
+              );
+              updatedCount += batch.length;
+            } catch (upsertError) {
+              await connection.execute(
+                `INSERT INTO \`${tableName}\` (\`${columns.join('\`, \`')}\`) VALUES ${values}`
+              );
+              insertedCount += batch.length;
+            }
+          }
+          syncedCount = updatedCount + insertedCount;
         }
-        
-        await connection.execute(`RENAME TABLE \`${tableName}\` TO \`${backupTable}\`, \`${tempTable}\` TO \`${tableName}\``);
-        await connection.execute(`DROP TABLE IF EXISTS \`${backupTable}\``);
         
         await connection.commit();
         
-        logger.info(`同步 ${tableName}: ${rows.length} 条记录`);
-        return { success: true, count: rows.length, table: tableName };
+        logger.info(`同步 ${tableName} [${mode}]: ${syncedCount} 条记录 (更新: ${updatedCount}, 新增: ${insertedCount})`);
+        return { 
+          success: true, 
+          count: syncedCount, 
+          table: tableName,
+          updated: updatedCount,
+          inserted: insertedCount
+        };
       } catch (error) {
         await connection.rollback();
         logger.error(`同步 ${tableName} 失败，已回滚: ${error.message}`);
@@ -1577,12 +1620,12 @@ class DbAdapter {
     }
   }
 
-  async syncAllLocalToRemote() {
+  async syncAllLocalToRemote(mode = 'merge') {
     if (!mysql.isEnabled()) {
       return { success: false, message: 'MySQL未启用' };
     }
 
-    logger.info('开始全量同步本地数据到云端...');
+    logger.info(`开始全量同步本地数据到云端 [${mode}]...`);
     
     const tables = [
       'sys_user', 'sys_oper_log', 'sys_config',
@@ -1603,7 +1646,7 @@ class DbAdapter {
     let totalCount = 0;
 
     for (const table of tables) {
-      const result = await this.syncLocalToRemote(table);
+      const result = await this.syncLocalToRemote(table, mode);
       results.push(result);
       if (result.success) {
         successCount++;

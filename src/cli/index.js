@@ -1704,11 +1704,36 @@ async function uploadToCloud() {
   console.log(c('  正在同步到云端...', 'cyan'));
   
   try {
-    const result = await agent.syncKnowledgeToCloud(mode);
-    if (result.success) {
-      console.log(c('  (◕ᴗ◕✿) ' + result.message, 'green'));
-      if (result.updatedEntries > 0 || result.updatedCases > 0) {
-        console.log(c(`  📝 更新: ${result.updatedEntries} 条知识, ${result.updatedCases} 个案例`, 'yellow'));
+    const { dbAdapter } = require('../utils/dbAdapter');
+    
+    // 同步数据（表结构会自动同步）
+    console.log(c(`  📊 同步数据 [${modeName}]...`, 'gray'));
+    const result = await dbAdapter.syncAllLocalToRemote(mode);
+    
+    if (result.success || result.totalRecords > 0) {
+      console.log(c('  (◕ᴗ◕✿) 上传完成', 'green'));
+      console.log(c(`  📝 同步结果: ${result.message}`, 'yellow'));
+      console.log(c(`  📊 总记录数: ${result.totalRecords}`, 'cyan'));
+      
+      if (result.results) {
+        const failedTables = result.results.filter(r => !r.success);
+        const emptyTables = result.results.filter(r => r.count === 0);
+        const syncedTables = result.results.filter(r => r.success && r.count > 0);
+        const totalUpdated = result.results.reduce((sum, r) => sum + (r.updated || 0), 0);
+        const totalInserted = result.results.reduce((sum, r) => sum + (r.inserted || 0), 0);
+        
+        console.log(c(`  ✅ 成功同步: ${syncedTables.length} 张表`, 'green'));
+        console.log(c(`  🔄 更新: ${totalUpdated} 条记录`, 'cyan'));
+        console.log(c(`  ➕ 新增: ${totalInserted} 条记录`, 'cyan'));
+        if (emptyTables.length > 0) {
+          console.log(c(`  ⚠️  空表(无数据): ${emptyTables.length} 张`, 'yellow'));
+        }
+        if (failedTables.length > 0) {
+          console.log(c(`  ❌ 失败: ${failedTables.length} 张表`, 'red'));
+          failedTables.forEach(t => {
+            console.log(c(`     - ${t.table}: ${t.error || t.message || '未知错误'}`, 'red'));
+          });
+        }
       }
     } else {
       console.log(c('  ✗ 同步失败: ' + result.message, 'red'));
