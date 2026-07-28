@@ -1032,6 +1032,14 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
   }
 
   /**
+   * 重置知识库
+   * @param {boolean} confirm - 确认重置操作
+   */
+  async resetKnowledge(confirm = false) {
+    return await knowledgeBase.resetKnowledgeBase(confirm);
+  }
+
+  /**
    * 测试云端连接
    */
   async testCloudConnection() {

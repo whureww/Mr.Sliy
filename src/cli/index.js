@@ -1508,6 +1508,7 @@ async function knowledgeMenu() {
     console.log(c('    5) 查看统计        (stats)', 'white'));
     console.log(c('    6) 检测重复条目    (duplicate)', 'white'));
     console.log(c('    7) 云端同步设置    (cloud)', 'white'));
+    console.log(c('    8) 重置知识库      (reset)', 'yellow'));
     console.log(c('    0) 返回主菜单      (back)', 'dim'));
     console.log();
     
@@ -1547,11 +1548,67 @@ async function knowledgeMenu() {
       case 'cloud':
         await cloudSyncMenu();
         break;
+      case '8':
+      case 'reset':
+        await resetKnowledgeMenu();
+        break;
       default:
         console.log(c('  无效的选择，请重新输入', 'yellow'));
         await waitEnter();
     }
   }
+}
+
+async function resetKnowledgeMenu() {
+  console.log();
+  console.log(c('  ⚠️  重置知识库', 'yellow'));
+  console.log(c('  ─'.repeat(50), 'dim'));
+  
+  const stats = agent.getStatus().engine.knowledgeBase;
+  console.log(c(`  当前状态: ${stats.totalEntries} 条知识 | ${stats.totalCases} 个案例`, 'white'));
+  console.log();
+  console.log(c('  此操作将：', 'yellow'));
+  console.log(c('    1. 删除所有现有知识条目和案例', 'white'));
+  console.log(c('    2. 重新初始化默认知识库内容', 'white'));
+  console.log(c('    3. 新增约 350+ 条知识条目', 'white'));
+  console.log(c('    4. 新增约 60+ 个优化案例', 'white'));
+  console.log();
+  console.log(c('  ⚠️  这是一个不可逆操作！', 'red'));
+  
+  const confirm = await ask('  确认重置知识库？(y/N): ');
+  
+  if (confirm === '__CANCEL__') return;
+  if (confirm.toLowerCase() !== 'y' && confirm.toLowerCase() !== 'yes') {
+    console.log(c('  已取消重置', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  const doubleConfirm = await ask('  再次确认：输入 "RESET" 继续: ');
+  
+  if (doubleConfirm === '__CANCEL__') return;
+  if (doubleConfirm !== 'RESET') {
+    console.log(c('  已取消重置', 'yellow'));
+    await waitEnter();
+    return;
+  }
+  
+  try {
+    console.log(c('  正在重置知识库...', 'cyan'));
+    const result = await agent.resetKnowledge(true);
+    
+    if (result.success) {
+      console.log(c('  (◕ᴗ◕✿) 知识库已重置！', 'green'));
+      console.log(c(`    重置前: ${result.before.entries} 条知识 | ${result.before.cases} 个案例`, 'yellow'));
+      console.log(c(`    重置后: ${result.after.entries} 条知识 | ${result.after.cases} 个案例`, 'green'));
+    } else {
+      console.log(c('  ✗ 重置失败: ' + result.message, 'red'));
+    }
+  } catch (error) {
+    console.log(c('  ✗ 重置失败: ' + error.message, 'red'));
+  }
+  
+  await waitEnter();
 }
 
 async function exportKnowledge() {
