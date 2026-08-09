@@ -19,6 +19,7 @@ const { telemetry } = require('../utils/telemetry');
 const { ruleEngine } = require('../services/bootstrap/ruleEngine');
 const { analysisEngine } = require('../services/bootstrap/analysisEngine');
 const { validator } = require('../services/bootstrap/validator');
+const { sandboxManager } = require('../sandbox/sandboxManager');
 
 /**
  * Agent状态
@@ -43,9 +44,11 @@ class CodeOptimizerAgent {
     this.config = {
       mode: 'auto',
       autoSave: true,
-      maxIssuesPerFile: 100
+      maxIssuesPerFile: 100,
+      useSandbox: true
     };
     this.tools = this._initTools();
+    this.sandboxStatus = { mode: 'inactive' };
   }
 
   /**
@@ -402,6 +405,53 @@ class CodeOptimizerAgent {
             }
           }
         }
+      },
+      sandbox_status: {
+        name: 'sandbox_status',
+        description: '获取沙箱架构状态和所有服务的运行情况',
+        parameters: {
+          type: 'object',
+          properties: {
+            serviceName: {
+              type: 'string',
+              description: '可选，指定查看单个服务的状态'
+            }
+          }
+        }
+      },
+      sandbox_enable: {
+        name: 'sandbox_enable',
+        description: '启用沙箱架构，将功能模块隔离到独立线程中运行',
+        parameters: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      sandbox_disable: {
+        name: 'sandbox_disable',
+        description: '禁用沙箱架构，切换回传统单线程模式',
+        parameters: {
+          type: 'object',
+          properties: {}
+        }
+      },
+      sandbox_reload_service: {
+        name: 'sandbox_reload_service',
+        description: '热替换指定服务，支持不中断运行的情况下更新服务代码',
+        parameters: {
+          type: 'object',
+          properties: {
+            serviceName: {
+              type: 'string',
+              description: '服务名称: parser, detector, optimizer, knowledge, llm'
+            },
+            newVersion: {
+              type: 'string',
+              description: '新版本号'
+            }
+          },
+          required: ['serviceName']
+        }
       }
     };
   }
@@ -742,6 +792,39 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
           return { success: true, backups };
         }
         
+        case 'sandbox_status': {
+          const serviceName = p.serviceName || p.name;
+          if (serviceName) {
+            const status = sandboxManager.getServiceStatus(serviceName);
+            if (!status) {
+              return { success: false, message: `服务 ${serviceName} 不存在` };
+            }
+            return { success: true, service: status };
+          }
+          return { success: true, status: sandboxManager.getStatus() };
+        }
+        
+        case 'sandbox_enable': {
+          const result = await this.enableSandbox();
+          return result;
+        }
+        
+        case 'sandbox_disable': {
+          const result = await this.disableSandbox();
+          return result;
+        }
+        
+        case 'sandbox_reload_service': {
+          const serviceName = p.serviceName || p.name;
+          const newVersion = p.newVersion || p.version;
+          
+          if (!serviceName) {
+            return { success: false, message: '服务名称不能为空' };
+          }
+          
+          return await this.hotReloadService(serviceName, newVersion);
+        }
+        
         default:
           return { success: false, message: `未知工具: ${toolName}` };
       }
@@ -755,14 +838,25 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
    * 初始化Agent
    */
   async init() {
+    if (this.config.useSandbox) {
+      try {
+        const result = await sandboxManager.init();
+        this.sandboxStatus = result;
+        logger.info(`沙箱架构已启动，工作模式: ${result.mode}`);
+      } catch (error) {
+        logger.warn('沙箱架构初始化失败，使用传统模式:', error.message);
+        this.sandboxStatus = { mode: 'fallback', error: error.message };
+      }
+    }
+
     await engine.init();
     await providerManager.init();
     await skillManager.init();
     systemMonitor.start();
     analysisEngine.start();
     selfSustainEngine.start();
-    telemetry.recordEvent('agent_initialized', 'agent', {}, 'info');
-    logger.info('Code Optimizer Agent 初始化完成 (AI自持引擎已启动)');
+    telemetry.recordEvent('agent_initialized', 'agent', { sandboxMode: this.sandboxStatus.mode }, 'info');
+    logger.info(`Code Optimizer Agent 初始化完成 (沙箱模式: ${this.sandboxStatus.mode}, AI自持引擎已启动)`);
     return this.getStatus();
   }
 
@@ -1243,8 +1337,33 @@ ${JSON.stringify(analyzeResult.issues, null, 2)}
       config: this.config,
       engine: engine.getStatus(),
       historyCount: this.taskHistory.length,
-      health: systemMonitor.getHealthStatus()
+      health: systemMonitor.getHealthStatus(),
+      sandbox: sandboxManager.getStatus()
     };
+  }
+
+  getSandboxStatus() {
+    return sandboxManager.getStatus();
+  }
+
+  async enableSandbox() {
+    const result = await sandboxManager.enableSandbox();
+    this.config.useSandbox = sandboxManager.isSandboxAvailable();
+    return result;
+  }
+
+  async disableSandbox() {
+    const result = await sandboxManager.disableSandbox();
+    this.config.useSandbox = false;
+    return result;
+  }
+
+  async hotReloadService(serviceName, newVersion) {
+    return await sandboxManager.hotReloadService(serviceName, newVersion);
+  }
+
+  getServiceStatus(serviceName) {
+    return sandboxManager.getServiceStatus(serviceName);
   }
 
   getHealthStatus() {

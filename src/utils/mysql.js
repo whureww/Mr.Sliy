@@ -1128,12 +1128,22 @@ function getCurrentConnectionConfig() {
 }
 
 /**
+ * 验证SQL标识符（表名/列名），防止SQL注入
+ */
+function validateIdentifier(name) {
+  if (typeof name !== 'string' || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(name)) {
+    throw new Error(`无效的SQL标识符: ${name}`);
+  }
+  return name;
+}
+
+/**
  * 确保所有表都存在，用于修复表创建失败的情况
  */
 async function ensureAllTablesExist() {
   const pool = getPool();
   if (!pool) return;
-  
+
   const allTables = [
     'sys_user', 'sys_oper_log', 'sys_config',
     'scan_project', 'scan_task', 'code_issue',
@@ -1179,14 +1189,15 @@ async function ensureAllTablesExist() {
 async function cleanupTempTables() {
   try {
     const tempTables = (await query(`
-      SELECT TABLE_NAME FROM information_schema.TABLES 
-      WHERE TABLE_SCHEMA = DATABASE() 
-      AND TABLE_NAME LIKE '%_sync_temp' OR TABLE_NAME LIKE '%_sync_backup'
+      SELECT TABLE_NAME FROM information_schema.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+      AND (TABLE_NAME LIKE '%_sync_temp' OR TABLE_NAME LIKE '%_sync_backup')
     `)).map(row => row.TABLE_NAME);
-    
+
     for (const table of tempTables) {
-      await query(`DROP TABLE IF EXISTS \`${table}\``);
-      logger.info(`清理临时表: ${table}`);
+      const safeName = validateIdentifier(table);
+      await query(`DROP TABLE IF EXISTS \`${safeName}\``);
+      logger.info(`清理临时表: ${safeName}`);
     }
   } catch (error) {
     logger.debug(`清理临时表失败: ${error.message}`);
@@ -1195,24 +1206,26 @@ async function cleanupTempTables() {
 
 async function syncTableSchemaFromSqlite(tableName) {
   try {
+    const safeName = validateIdentifier(tableName);
     const sqlite = require('./dbAdapter').dbAdapter.getSqlite();
-    const schemaResult = sqlite.prepare(`PRAGMA table_info(${tableName})`).all();
-    
+    const schemaResult = sqlite.prepare(`PRAGMA table_info(${safeName})`).all();
+
     if (!schemaResult || schemaResult.length === 0) {
-      logger.warn(`SQLite表 ${tableName} 不存在，跳过结构同步`);
+      logger.warn(`SQLite表 ${safeName} 不存在，跳过结构同步`);
       return;
     }
-    
+
     const mysqlColumns = (await query(`
-      SELECT COLUMN_NAME FROM information_schema.COLUMNS 
-      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = '${tableName}'
-    `)).map(row => row.COLUMN_NAME);
+      SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+    `, [safeName])).map(row => row.COLUMN_NAME);
     
     let hasChanges = false;
     for (const col of schemaResult) {
+      const safeColName = validateIdentifier(col.name);
       if (!mysqlColumns.includes(col.name)) {
         let mysqlType = col.type.toUpperCase();
-        
+
         if (mysqlType === 'INTEGER') {
           mysqlType = col.pk === 1 ? 'INT' : 'INT';
         } else if (mysqlType === 'TEXT') {
@@ -1226,33 +1239,33 @@ async function syncTableSchemaFromSqlite(tableName) {
         } else if (mysqlType === 'DATETIME') {
           mysqlType = 'DATETIME';
         } else if (mysqlType === 'VARCHAR') {
-          mysqlType = `VARCHAR(${col.dflt_value || 255})`;
+          mysqlType = `VARCHAR(255)`;
         }
-        
+
         let constraint = '';
         if (col.notnull !== 1) {
           constraint += ' NULL';
         }
         if (col.dflt_value !== null && col.dflt_value !== undefined && !['TEXT', 'BLOB', 'JSON'].includes(mysqlType)) {
-          let defaultValue = col.dflt_value;
-          if (typeof defaultValue === 'string' && !defaultValue.startsWith("'")) {
+          let defaultValue = String(col.dflt_value).replace(/'/g, "''");
+          if (!defaultValue.startsWith("'")) {
             defaultValue = `'${defaultValue}'`;
           }
           constraint += ` DEFAULT ${defaultValue}`;
         }
-        
+
         try {
-          await query(`ALTER TABLE \`${tableName}\` ADD COLUMN \`${col.name}\` ${mysqlType}${constraint}`);
-          logger.info(`表 ${tableName} 添加缺失字段: ${col.name}`);
+          await query(`ALTER TABLE \`${safeName}\` ADD COLUMN \`${safeColName}\` ${mysqlType}${constraint}`);
+          logger.info(`表 ${safeName} 添加缺失字段: ${safeColName}`);
           hasChanges = true;
         } catch (alterError) {
-          logger.warn(`添加字段 ${col.name} 失败: ${alterError.message}`);
+          logger.warn(`添加字段 ${safeColName} 失败: ${alterError.message}`);
         }
       }
     }
-    
+
     if (hasChanges) {
-      logger.info(`表 ${tableName} 结构同步完成`);
+      logger.info(`表 ${safeName} 结构同步完成`);
     }
   } catch (error) {
     logger.warn(`同步表结构失败 [${tableName}]: ${error.message}`);
@@ -1261,17 +1274,19 @@ async function syncTableSchemaFromSqlite(tableName) {
 
 async function createMissingTable(tableName) {
   try {
+    const safeName = validateIdentifier(tableName);
     const sqlite = require('./dbAdapter').dbAdapter.getSqlite();
-    const schemaResult = sqlite.prepare(`PRAGMA table_info(${tableName})`).all();
-    
+    const schemaResult = sqlite.prepare(`PRAGMA table_info(${safeName})`).all();
+
     if (!schemaResult || schemaResult.length === 0) {
-      logger.warn(`SQLite表 ${tableName} 也不存在，跳过创建`);
+      logger.warn(`SQLite表 ${safeName} 也不存在，跳过创建`);
       return;
     }
-    
+
     const columns = schemaResult.map(col => {
+      const safeColName = validateIdentifier(col.name);
       let mysqlType = col.type.toUpperCase();
-      
+
       if (mysqlType === 'INTEGER') {
         mysqlType = col.pk === 1 && col.notnull === 1 ? 'INT PRIMARY KEY AUTO_INCREMENT' : 'INT';
       } else if (mysqlType === 'TEXT') {
@@ -1285,16 +1300,16 @@ async function createMissingTable(tableName) {
       } else if (mysqlType === 'DATETIME') {
         mysqlType = 'DATETIME';
       } else if (mysqlType === 'VARCHAR') {
-        mysqlType = `VARCHAR(${col.dflt_value || 255})`;
+        mysqlType = `VARCHAR(255)`;
       }
-      
+
       let constraint = '';
       if (col.notnull === 1 && !mysqlType.includes('PRIMARY KEY')) {
         constraint += ' NOT NULL';
       }
       if (col.dflt_value !== null && col.dflt_value !== undefined && !['TEXT', 'BLOB', 'JSON'].includes(mysqlType)) {
-        let defaultValue = col.dflt_value;
-        if (typeof defaultValue === 'string' && !defaultValue.startsWith("'")) {
+        let defaultValue = String(col.dflt_value).replace(/'/g, "''");
+        if (!defaultValue.startsWith("'")) {
           defaultValue = `'${defaultValue}'`;
         }
         constraint += ` DEFAULT ${defaultValue}`;
@@ -1302,14 +1317,14 @@ async function createMissingTable(tableName) {
       if (col.pk === 1 && !mysqlType.includes('PRIMARY KEY')) {
         constraint += ' PRIMARY KEY';
       }
-      
-      return `\`${col.name}\` ${mysqlType}${constraint}`;
+
+      return `\`${safeColName}\` ${mysqlType}${constraint}`;
     });
-    
-    const createSql = `CREATE TABLE \`${tableName}\` (${columns.join(', ')}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
+
+    const createSql = `CREATE TABLE \`${safeName}\` (${columns.join(', ')}) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`;
     await query(createSql);
-    
-    logger.info(`表 ${tableName} 创建成功`);
+
+    logger.info(`表 ${safeName} 创建成功`);
   } catch (error) {
     logger.error(`创建表 ${tableName} 失败: ${error.message}`);
   }

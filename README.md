@@ -17,6 +17,7 @@
 - **统一错误处理**：标准化错误分类、处理和日志记录，提升系统稳定性
 - **安全增强**：输入验证、参数化查询、JWT认证、密码哈希等安全措施
 - **性能优化**：AST解析缓存、并行规则执行、数据库批量同步、指数退避重试
+- **沙箱服务架构**：基于 Worker Threads 的服务隔离架构，每个功能模块独立运行，支持热替换，单一功能崩溃不影响其他服务
 
 ## 🚀 快速开始
 
@@ -278,6 +279,70 @@ src/
 - **自动记忆**：重启后自动加载上次配置的数据库连接，无需重新切换
 
 ## 📝 更新日志
+
+### v3.8.4
+> 更新日期: 2026-07-28
+
+- **✨ 新增沙箱服务架构（Sandbox Service Architecture）**
+  - 基于 Node.js Worker Threads 的服务隔离架构
+  - 每个功能模块（解析、检测、优化、知识库、LLM）独立运行在独立的 Worker 线程中
+  - 支持服务热替换（Hot Reload），运行时更新代码不影响智能体正常运行
+  - 单一服务崩溃不影响其他服务和主进程，自动重启恢复
+  - 内存隔离：每个服务独立 V8 堆内存，防止内存泄漏扩散
+  - 降级机制：沙箱初始化失败时自动切换到传统模式
+
+  - 新增核心框架文件:
+    - `src/sandbox/serviceRegistry.js` - 服务注册中心，管理所有沙箱服务的生命周期
+    - `src/sandbox/sandboxService.js` - 沙箱服务基类，封装 Worker 线程管理、消息通信
+    - `src/sandbox/workerBootstrap.js` - Worker 引导脚本，动态加载服务实现
+    - `src/sandbox/bootstrap.js` - 服务启动入口和配置管理
+    - `src/sandbox/sandboxManager.js` - 沙箱管理器，提供降级兼容接口
+    - `src/sandbox/test.js` - 集成测试脚本
+
+  - 新增服务实现文件:
+    - `src/sandbox/services/parserService.js` - 代码解析服务
+    - `src/sandbox/services/detectorService.js` - 问题检测服务
+    - `src/sandbox/services/optimizerService.js` - 代码优化服务
+    - `src/sandbox/services/knowledgeService.js` - 知识库服务
+    - `src/sandbox/services/llmService.js` - LLM 调用服务
+
+  - Agent 集成:
+    - 修改 `src/agent/agent.js`，默认启用沙箱模式
+    - 新增 `sandbox_status`、`sandbox_enable`、`sandbox_disable`、`sandbox_reload_service` 工具
+    - 支持在 CLI 中动态切换沙箱模式和热替换服务
+
+- **🐛 修复沙箱服务架构多项关键 Bug**
+  - 修复 `new AbortController?.()` 语法错误，改用 `typeof` 安全检查
+  - 修复 Worker 线程不支持的 `--max-old-space-size` execArgv 参数
+  - 修复 `isReady` 属性与方法名冲突，重命名为 `_isReady`
+  - 修复知识库 tags 和 vector_json 字段的 JSON 解析错误处理
+
+- **✨ 新增日志去重机制**
+  - 新增 `src/utils/logDeduplicator.js`，基于 TTL 的日志缓存和去重
+  - 修复 Worker 线程导致的启动日志重复输出问题（数据库初始化、LLM 提供商注册等）
+  - Worker 内部日志级别降级为 `warn`，重要日志通过 parentPort 转发主进程
+
+- **🐛 修复 CLI 命令选择重复显示问题**
+  - 修复输入 `/` 后使用上下键选择命令时，匹配命令标题行重复渲染的问题
+  - 修正 `updateSelectionHighlight` 中光标移动行数计算（`3 + maxDisplay` → `4 + maxDisplay`）
+
+- **🔒 安全性与健壮性修复**
+  - 修复 `mysql.js` 中 SQL 注入漏洞：表名/列名直接插值到 SQL 语句
+    - 新增 `validateIdentifier()` 标识符验证函数，校验表名和列名合法性
+    - SELECT 查询改用参数化查询（`TABLE_NAME = ?`）
+    - DDL 语句（ALTER TABLE / CREATE TABLE / DROP TABLE）添加标识符验证
+    - 修复默认值插值的单引号转义问题
+  - 修复 `serviceRegistry.js` `executeWithTimeout()` 资源泄漏
+    - 移除未使用的 `AbortController` 创建
+    - 添加 `clearTimeout` 清理，防止超时定时器泄漏
+  - 修复 `sandboxService.js` `getPendingRequests()` 丢失请求参数
+    - handler 存储中添加缺失的 `params` 字段，确保热替换时待处理请求参数完整传递
+  - 修复 `sandboxService.js` `start()` 超时后轮询继续运行的资源泄漏
+    - 添加 `settled` 标志位，超时 reject 后立即停止就绪轮询
+  - 修复 `logDeduplicator.js` `shouldLog()` 逻辑 Bug
+    - TTL 过期后先重置 count=1 再检查 count>1，导致摘要日志永不触发
+    - 调整为先检查旧 count 再重置
+  - 修复 `cleanupTempTables()` SQL 语句中 AND/OR 优先级错误（添加括号分组）
 
 ### v3.8.3
 > 更新日期: 2026-07-28

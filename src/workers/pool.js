@@ -1,6 +1,7 @@
 const { Worker } = require('worker_threads');
 const path = require('path');
 const { logger } = require('../utils/logger');
+const { logDeduplicator } = require('../utils/logDeduplicator');
 
 class WorkerPool {
   constructor(workerPath, options = {}) {
@@ -20,7 +21,14 @@ class WorkerPool {
     for (let i = 0; i < this.poolSize; i++) {
       this._createWorker();
     }
-    logger.info(`Worker线程池初始化完成，池大小: ${this.poolSize}`);
+    
+    // Worker 环境下使用 debug 级别，避免重复日志
+    const isWorker = !!process.env.WORKER_THREAD_ID;
+    if (isWorker) {
+      logger.debug(`Worker线程池初始化完成，池大小: ${this.poolSize}`);
+    } else {
+      logDeduplicator.logWithDeduplication('info', 'worker_pool_init', `Worker线程池初始化完成，池大小: ${this.poolSize}`);
+    }
   }
 
   _createWorker() {

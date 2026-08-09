@@ -6,6 +6,7 @@
 
 const { logger } = require('../../utils/logger');
 const { queryOne } = require('../../utils/database');
+const { logDeduplicator } = require('../../utils/logDeduplicator');
 
 /**
  * 从数据库获取LLM API密钥
@@ -1052,7 +1053,14 @@ class LLMProviderManager {
     }
 
     this.providers.set(name.toLowerCase(), provider);
-    logger.info(`注册LLM提供商: ${name}`);
+    
+    // Worker 环境下使用 debug 级别，避免重复日志
+    const isWorker = !!process.env.WORKER_THREAD_ID;
+    if (isWorker) {
+      logger.debug(`注册LLM提供商: ${name}`);
+    } else {
+      logDeduplicator.logWithDeduplication('info', `llm_register_${name.toLowerCase()}`, `注册LLM提供商: ${name}`);
+    }
     return provider;
   }
 

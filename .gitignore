@@ -105,3 +105,14 @@ knowledge-export.json
 *.p12
 *.pfx
 *.cer
+
+# Test / probe scripts (may contain credentials)
+scripts/test*.js
+scripts/fix*.js
+scripts/tmp*.js
+probe_*.txt
+probe_*.log
+
+# Local database connection config (contains credentials)
+data/
+database_connections.json

@@ -318,14 +318,27 @@ class KnowledgeBase {
     const entries = db.prepare(sql).all(...params);
 
     const results = entries.map(entry => {
-      const entryVector = JSON.parse(entry.vector_json || '{}');
+      let entryVector = {};
+      try {
+        entryVector = JSON.parse(entry.vector_json || '{}');
+      } catch (e) {
+        entryVector = {};
+      }
       const similarity = embedder.cosineSimilarity(queryVector, entryVector);
+      
+      let tags = [];
+      try {
+        tags = entry.tags ? JSON.parse(entry.tags) : [];
+      } catch (e) {
+        tags = entry.tags ? [entry.tags] : [];
+      }
+      
       return {
         id: entry.id,
         content: entry.content,
         type: entry.content_type,
         language: entry.language,
-        tags: entry.tags ? JSON.parse(entry.tags) : [],
+        tags,
         source: entry.source,
         similarity
       };
@@ -363,7 +376,12 @@ class KnowledgeBase {
     const cases = db.prepare(sql).all(...params);
 
     const results = cases.map(c => {
-      const caseVector = JSON.parse(c.vector_json || '{}');
+      let caseVector = {};
+      try {
+        caseVector = JSON.parse(c.vector_json || '{}');
+      } catch (e) {
+        caseVector = {};
+      }
       const similarity = embedder.cosineSimilarity(queryVector, caseVector);
       return {
         id: c.id,
@@ -606,15 +624,23 @@ class KnowledgeBase {
     const exportData = {
       version: '1.0',
       exportedAt: new Date().toISOString(),
-      entries: entries.map(e => ({
-        id: e.id,
-        content: e.content,
-        content_type: e.content_type,
-        language: e.language,
-        tags: e.tags ? JSON.parse(e.tags) : [],
-        source: e.source,
-        created_at: e.created_at
-      })),
+      entries: entries.map(e => {
+        let tags = [];
+        try {
+          tags = e.tags ? JSON.parse(e.tags) : [];
+        } catch (err) {
+          tags = e.tags ? [e.tags] : [];
+        }
+        return {
+          id: e.id,
+          content: e.content,
+          content_type: e.content_type,
+          language: e.language,
+          tags,
+          source: e.source,
+          created_at: e.created_at
+        };
+      }),
       cases: cases.map(c => ({
         id: c.id,
         original_code: c.original_code,

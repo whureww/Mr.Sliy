@@ -3,9 +3,11 @@ const path = require('path');
 const fs = require('fs');
 const { config } = require('../config');
 const { logger } = require('./logger');
+const { logDeduplicator } = require('./logDeduplicator');
 const mysql = require('./mysql');
 
 let sqliteDb = null;
+let dbInitialized = false;
 let retryTimer = null;
 const MAX_RETRY_COUNT = 5;
 const RETRY_INTERVAL = 30000;
@@ -64,7 +66,15 @@ function getSqliteDatabase() {
     initSyncQueueTable();
     createAllTables();
     startRetryTimer();
-    logger.info(`SQLite数据库路径: ${dbPath}`);
+    
+    // 只在首次初始化时输出 info 级别日志，Worker 进程使用 debug 级别
+    const isMainThread = !process.env.WORKER_THREAD_ID;
+    if (isMainThread || !dbInitialized) {
+      logger.info(`SQLite数据库路径: ${dbPath}`);
+      dbInitialized = true;
+    } else {
+      logger.debug(`SQLite数据库已初始化: ${dbPath}`);
+    }
   }
   return sqliteDb;
 }
@@ -577,7 +587,13 @@ function createAllTables() {
   
   migrateSqliteTables();
   
-  logger.info(`SQLite数据库表初始化完成（${tables.length}张表）`);
+  // Worker 环境下使用 debug 级别，避免重复日志
+  const isWorker = !!process.env.WORKER_THREAD_ID;
+  if (isWorker) {
+    logger.debug(`SQLite数据库表初始化完成（${tables.length}张表）`);
+  } else {
+    logDeduplicator.logWithDeduplication('info', 'db_init_complete', `SQLite数据库表初始化完成（${tables.length}张表）`);
+  }
 }
 
 function migrateSqliteTables() {
@@ -601,7 +617,13 @@ function migrateSqliteTables() {
       const pkCol = existingColumns.find(col => col.pk === 1);
       
       if (pkCol && pkCol.type !== 'TEXT') {
-        logger.info(`检测到 ${pkMig.table} 主键类型需要迁移 (${pkCol.type} → TEXT)`);
+        // Worker 环境下使用 debug 级别，避免重复日志
+        const isWorker = !!process.env.WORKER_THREAD_ID;
+        if (isWorker) {
+          logger.debug(`检测到 ${pkMig.table} 主键类型需要迁移 (${pkCol.type} → TEXT)`);
+        } else {
+          logDeduplicator.logWithDeduplication('info', `pk_migrate_${pkMig.table}`, `检测到 ${pkMig.table} 主键类型需要迁移 (${pkCol.type} → TEXT)`);
+        }
         try {
           // 创建临时表
           sqliteDb.exec(`CREATE TABLE IF NOT EXISTS ${pkMig.table}_temp (${pkMig.columns})`);
@@ -612,12 +634,20 @@ function migrateSqliteTables() {
             sqliteDb.exec(`DROP TABLE ${pkMig.table}`);
             // 重命名临时表
             sqliteDb.exec(`ALTER TABLE ${pkMig.table}_temp RENAME TO ${pkMig.table}`);
-            logger.info(`主键类型迁移完成 ${pkMig.table}: 迁移 ${copyResult.changes} 条记录`);
+            if (isWorker) {
+              logger.debug(`主键类型迁移完成 ${pkMig.table}: 迁移 ${copyResult.changes} 条记录`);
+            } else {
+              logDeduplicator.logWithDeduplication('info', `pk_migrate_done_${pkMig.table}`, `主键类型迁移完成 ${pkMig.table}: 迁移 ${copyResult.changes} 条记录`);
+            }
           } else {
             // 无数据，直接删除旧表并重命名
             sqliteDb.exec(`DROP TABLE ${pkMig.table}`);
             sqliteDb.exec(`ALTER TABLE ${pkMig.table}_temp RENAME TO ${pkMig.table}`);
-            logger.info(`主键类型迁移完成 ${pkMig.table}: 空表`);
+            if (isWorker) {
+              logger.debug(`主键类型迁移完成 ${pkMig.table}: 空表`);
+            } else {
+              logDeduplicator.logWithDeduplication('info', `pk_migrate_done_${pkMig.table}`, `主键类型迁移完成 ${pkMig.table}: 空表`);
+            }
           }
         } catch (e) {
           logger.debug(`主键类型迁移 ${pkMig.table} 失败: ${e.message}`);
