@@ -1584,6 +1584,25 @@ class DbAdapter {
           
           await connection.execute(`RENAME TABLE \`${tableName}\` TO \`${backupTable}\`, \`${tempTable}\` TO \`${tableName}\``);
           await connection.execute(`DROP TABLE IF EXISTS \`${backupTable}\``);
+
+          // 修复 LIKE 创建导致的 AUTO_INCREMENT 丢失
+          try {
+            const [pkCols] = await connection.query(`
+              SELECT COLUMN_NAME, COLUMN_TYPE
+              FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_KEY = 'PRI' AND DATA_TYPE = 'int'
+            `, [tableName]);
+            for (const pk of pkCols) {
+              const [check] = await connection.query(`SHOW COLUMNS FROM \`${tableName}\` WHERE Field = ?`, [pk.COLUMN_NAME]);
+              if (check[0] && !check[0].Extra?.includes('auto_increment')) {
+                await connection.execute(`ALTER TABLE \`${tableName}\` MODIFY \`${pk.COLUMN_NAME}\` ${pk.COLUMN_TYPE} NOT NULL AUTO_INCREMENT`);
+                logger.debug(`恢复 AUTO_INCREMENT: ${tableName}.${pk.COLUMN_NAME}`);
+              }
+            }
+          } catch (aiFixError) {
+            logger.debug(`恢复 AUTO_INCREMENT 失败 [${tableName}]: ${aiFixError.message}`);
+          }
+
           syncedCount = rows.length;
           
         } else if (mode === 'append') {

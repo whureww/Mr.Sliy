@@ -280,6 +280,43 @@ src/
 
 ## 📝 更新日志
 
+### v3.8.5
+> 更新日期: 2026-08-12
+
+- **✨ 新增双层混合 AI 自动修复管道**
+  - 运行时错误自动触发：`uncaughtException` / `unhandledRejection` 自动接入修复流程
+  - **第一层（快策略）**：database / network / file_system / memory 类错误走原有预定义修复策略（重连、重建、重装等），零延迟响应
+  - **第二层（AI 管道）**：runtime / dependency / configuration 类错误直接进入 AI 修复，快策略失败时自动降级兜底
+  - 新增核心模块:
+    - `src/services/bootstrap/aiFixPipeline.js` - 错误上下文采集（堆栈定位 + 源码片段）→ LLM 分析 → 生成 replace/append/overwrite 补丁
+    - `src/services/bootstrap/sandboxTrialRunner.js` - 沙箱试运行器：补丁校验 → 临时目录 → 独立 SandboxService 试运行 → 错误复现测试 + AI 冒烟测试
+    - `src/services/bootstrap/autoFixCoordinator.js` - 双层混合路由总控，含错误去重（45s 窗口）和修复循环保护（3 分钟内同错最多 3 次）
+  - AI 修复最多 5 轮迭代，每轮带上一轮失败原因反馈给 LLM 重新生成
+  - 补丁路径白名单：只允许修改 `src/sandbox/services/`、`src/workers/`、`src/services/` 下的文件，核心入口文件不允许动
+  - `replace` 补丁唯一性校验：`oldString` 必须精确匹配 1 处，0 处或多处直接拒绝
+  - 试运行完全隔离：独立临时目录 + 独立 Worker 线程，失败自动清理，不影响运行中的服务
+
+- **🔒 门控确认机制（Gate Control）**
+  - 沙箱试运行通过后，必须经用户显式确认才执行补丁写入和热替换
+  - 新增 `hot_reload_fix` 到 `confirmationGate` 高风险操作列表
+  - CLI 确认框展示：错误摘要、AI 分析、补丁 diff、试运行测试结果（复现+冒烟）
+  - 用户拒绝或超时则放弃修复，不执行任何文件变更
+
+- **🐛 修复云端数据库同步 AUTO_INCREMENT 丢失问题**
+  - 修复覆盖同步（overwrite）使用 `CREATE TABLE ... LIKE` 降级路径时，RENAME 后 INT PRIMARY KEY 表的 AUTO_INCREMENT 属性丢失
+  - 导致增量同步队列 INSERT（不含 id 列）全部报错 `Field 'id' doesn't have a default value`
+  - 修复 `dbAdapter.js` overwrite 路径：RENAME 后自动检查并恢复 INT PK 列的 AUTO_INCREMENT 属性
+  - 修复 `mysql.js` `cleanupTempTables()` SQL 语句中 AND/OR 优先级错误（添加括号分组）
+
+- **🔒 安全强化**
+  - 修复 `mysql.js` 中 SQL 注入漏洞：表名/列名直接插值到 SQL 语句
+    - 新增 `validateIdentifier()` 标识符验证函数
+    - SELECT 查询改用参数化查询，DDL 语句添加标识符验证
+  - 修复 `serviceRegistry.js` `executeWithTimeout()` 资源泄漏（移除未使用的 AbortController，添加 clearTimeout）
+  - 修复 `sandboxService.js` `getPendingRequests()` 丢失请求参数（handler 存储添加 params 字段）
+  - 修复 `sandboxService.js` `start()` 超时后轮询继续运行（添加 settled 标志位）
+  - 修复 `logDeduplicator.js` `shouldLog()` 逻辑 Bug（TTL 过期后先检查旧 count 再重置）
+
 ### v3.8.4
 > 更新日期: 2026-07-28
 

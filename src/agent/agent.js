@@ -1690,11 +1690,11 @@ const agent = new CodeOptimizerAgent();
 
 async function autoRepairHandler(error) {
   const errorType = selfRepairManager.classifyError(error);
-  
+
   if (errorType === 'runtime') {
-    const isCodeIssue = error.message.includes('未使用') || 
-                       error.message.includes('缺少注释') || 
-                       error.message.includes('魔法数字') || 
+    const isCodeIssue = error.message.includes('未使用') ||
+                       error.message.includes('缺少注释') ||
+                       error.message.includes('魔法数字') ||
                        error.message.includes('深度嵌套') ||
                        error.message.includes('函数过长') ||
                        error.message.includes('重复代码');
@@ -1711,7 +1711,7 @@ async function autoRepairHandler(error) {
       'Cannot read properties of undefined',
       'Cannot read properties of null'
     ];
-    
+
     if (harmlessErrors.some(h => error.message.includes(h))) {
       logger.debug('无害的运行时错误，不触发自动修复:', error.message);
       return;
@@ -1719,20 +1719,38 @@ async function autoRepairHandler(error) {
   }
 
   logger.warn(`检测到系统错误 [${errorType}]: ${error.message}`);
-  
-  try {
-    const repairResult = await selfRepairManager.detectAndRepair(error, { 
-      autoConfirm: true,
-      skipSandbox: true
-    });
-    
-    if (repairResult.success) {
-      logger.info(`自动修复成功: ${repairResult.message}`);
-    } else {
-      logger.error(`自动修复失败: ${repairResult.error}`);
+
+  // 第一层：快策略（database / network / file_system / memory）走原有 detectAndRepair
+  const fastCategories = ['database', 'network', 'file_system', 'memory'];
+  if (fastCategories.includes(errorType)) {
+    try {
+      const repairResult = await selfRepairManager.detectAndRepair(error, {
+        autoConfirm: true,
+        skipSandbox: true
+      });
+      if (repairResult.success) {
+        logger.info(`自动修复成功(快策略): ${repairResult.strategy || repairResult.message || ''}`);
+        return;
+      }
+      logger.warn(`快策略失败，降级到 AI 修复管道: ${repairResult.error}`);
+      // 失败则继续往下走第二层
+    } catch (repairError) {
+      logger.error(`快策略过程出错，降级到 AI 修复管道: ${repairError.message}`);
     }
-  } catch (repairError) {
-    logger.error(`自动修复过程出错: ${repairError.message}`);
+  }
+
+  // 第二层：AI 修复管道（runtime/dependency/configuration + 兜底快策略失败）
+  // 包含：AI 生成修复 → 沙箱试运行 → 门控确认 → 补丁写入 → 热替换
+  try {
+    const { autoFixCoordinator } = require('../services/bootstrap/autoFixCoordinator');
+    const coordResult = await autoFixCoordinator.trigger(error, { errorType });
+    if (coordResult.success) {
+      logger.info(`AI修复管道成功: 服务=${coordResult.affectedService}, 迭代=${coordResult.iterations}轮, ${coordResult.summary || ''}`);
+    } else if (!coordResult.skipped) {
+      logger.warn(`AI修复管道未成功: ${coordResult.error || coordResult.reason || coordResult.gateReason || '未知'}`);
+    }
+  } catch (pipelineError) {
+    logger.error(`AI修复管道异常: ${pipelineError.message}`);
   }
 }
 

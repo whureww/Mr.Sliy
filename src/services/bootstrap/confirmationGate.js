@@ -23,7 +23,8 @@ class ConfirmationGate {
       'rollback_repair',
       'system_reboot',
       'module_update',
-      'config_overwrite'
+      'config_overwrite',
+      'hot_reload_fix'
     ];
     this.mediumRiskOperations = [
       'update_config',
