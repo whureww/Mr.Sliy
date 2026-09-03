@@ -181,8 +181,11 @@ function sanitizeString(value, options = {}) {
   }
   
   let sanitized = value;
-  
-  if (options.stripHtml !== false) {
+
+  // escapeHtml 优先于 stripHtml：转义意图是保留内容，剥离会先清空导致转义失效
+  const shouldStripHtml = options.stripHtml === true
+    || (options.stripHtml !== false && !options.escapeHtml);
+  if (shouldStripHtml) {
     sanitized = sanitized.replace(/<[^>]*>/g, '');
   }
   

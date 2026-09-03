@@ -118,7 +118,7 @@ describe('auth', () => {
       const key = generateApiKey('API');
       expect(typeof key).toBe('string');
       expect(key.startsWith('API_')).toBe(true);
-      expect(key.length).toBe(67); // API_ + 64 hex chars
+      expect(key.length).toBe(68); // API_ (4) + 64 hex chars
     });
 
     test('should generate unique API keys', () => {

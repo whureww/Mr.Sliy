@@ -4138,8 +4138,75 @@ async function showNotification(message) {
 }
 
 async function startCLI() {
-  await agent.init();
-  
+  // 冷启动进度反馈：先展示 Banner，再以并行进度条展示各沙箱服务启动
+  printBanner();
+
+  const serviceLabels = {
+    knowledge: '知识库服务',
+    parser: '解析服务',
+    detector: '检测服务',
+    optimizer: '优化服务',
+    llm: '大模型服务'
+  };
+  const serviceStatus = {};
+  const total = Object.keys(serviceLabels).length;
+  const startupStart = Date.now();
+
+  function renderStartupProgress() {
+    // 使用 \x1b[u 回到保存的进度块起点，不受中间 logger 输出干扰
+    const lines = [];
+    let done = 0;
+    for (const [name, label] of Object.entries(serviceLabels)) {
+      const st = serviceStatus[name];
+      if (st === true) {
+        lines.push(c('  [✓] ', 'green') + c(padEndDisplay(label, 10), 'white') + c('就绪', 'green'));
+        done++;
+      } else if (st === false) {
+        lines.push(c('  [✗] ', 'red') + c(padEndDisplay(label, 10), 'white') + c('失败', 'red'));
+        done++;
+      } else {
+        lines.push(c('  [⋯] ', 'yellow') + c(padEndDisplay(label, 10), 'dim') + c('启动中', 'yellow'));
+      }
+    }
+    const pct = Math.round((done / total) * 100);
+    const header = c('  (っ·-·)╮ ', 'magenta') + c('正在启动沙箱服务...', 'white');
+    const footer = c('  进度: ', 'dim') + c(`${done}/${total}`, 'cyan') + c(` (${pct}%)`, 'gray');
+
+    // 回到保存的进度块锚点，清除下方再重绘
+    process.stdout.write('\x1b[u');    // 恢复保存的光标位置
+    process.stdout.write('\x1b[0J');   // 从光标清除到屏幕下方
+    process.stdout.write(header + '\n');
+    process.stdout.write(lines.join('\n') + '\n');
+    process.stdout.write(footer);
+    // 不写最后一个 \n，让 logger 输出不会推挤进度块的高度
+    // 但保存光标为下一次重绘的锚点：每次重绘前重新锚定到当前 footer 结束处
+    // 做法：先向下再向上回到 header 起点并保存
+    process.stdout.write('\x1b[s');    // 保存当前（footer 结尾）位置
+    process.stdout.write('\x1b[' + (lines.length + 1) + 'A'); // 回到 header 前
+    process.stdout.write('\x1b[s');    // 保存 header 起点作为后续重绘锚点
+    process.stdout.write('\n');        // 换行让后续 logger 输出落在进度块之后
+  }
+
+  // 初始占位 + 保存光标锚点
+  process.stdout.write('\x1b[s'); // 保存 banner 后光标位置（进度块的起点锚）
+  process.stdout.write(c('  (っ·-·)╮ ', 'magenta') + c('正在启动沙箱服务...\n', 'white'));
+  for (const name of Object.keys(serviceLabels)) {
+    process.stdout.write(c('  [⋯] ', 'yellow') + c(padEndDisplay(serviceLabels[name], 10), 'dim') + c('等待中\n', 'gray'));
+  }
+  process.stdout.write(c('  进度: ', 'dim') + c(`0/${total}`, 'cyan') + c(' (0%)', 'gray'));
+  // 保存锚点到 header 前，便于后续 logger 推屏后仍能精确回到进度块起点
+  process.stdout.write('\x1b[' + (Object.keys(serviceLabels).length + 1) + 'A'); // 回到 header 行开头
+  process.stdout.write('\x1b[s'); // 保存：下一次 renderStartupProgress 使用 \x1b[u 回来
+  process.stdout.write('\x1b[' + (Object.keys(serviceLabels).length + 1) + 'B\n'); // 回到 footer 后并换行
+
+  await agent.init((serviceName, success, completed, totalcount) => {
+    serviceStatus[serviceName] = success;
+    renderStartupProgress();
+  });
+
+  const startupDuration = ((Date.now() - startupStart) / 1000).toFixed(2);
+  process.stdout.write(c(`\n  (◕ᴗ◕✿) `, 'magenta') + c('启动完成，耗时 ', 'green') + c(`${startupDuration}s`, 'cyan') + '\n\n');
+
   if (process.env.OPENAI_API_KEY) {
     await agent.registerProvider('openai', { apiKey: process.env.OPENAI_API_KEY, model: process.env.OPENAI_MODEL || 'gpt-4' });
   }

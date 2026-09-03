@@ -8,6 +8,7 @@ const { providerManager } = require('../llm/providers');
 const { moduleRegistry } = require('../../utils/moduleRegistry');
 const { eventBus, SYSTEM_EVENTS } = require('../../utils/eventBus');
 const { notificationSystem } = require('../../utils/notificationSystem');
+const { isCommandAllowed } = require('../../utils/securityGuard');
 
 class SelfRepairManager {
   constructor() {
@@ -704,10 +705,21 @@ ${this.classifyError(error)}
         }
         case 'command': {
           const { spawn } = require('child_process');
+          const [cmd, ...args] = (action.command || '').split(' ');
+          // 命令白名单校验，防止执行未授权命令
+          if (!isCommandAllowed(cmd)) {
+            return {
+              success: false,
+              command: action.command,
+              message: `未授权的命令被拒绝: ${cmd}`
+            };
+          }
           return new Promise((resolve) => {
-            const [cmd, ...args] = action.command.split(' ');
-            const process = spawn(cmd, args, { cwd: process.cwd() });
-            process.on('close', (code) => {
+            const child = spawn(cmd, args, { cwd: process.cwd() });
+            child.on('error', (err) => {
+              resolve({ success: false, command: action.command, error: err.message });
+            });
+            child.on('close', (code) => {
               resolve({ success: code === 0, command: action.command, exitCode: code });
             });
           });

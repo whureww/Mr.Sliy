@@ -66,44 +66,62 @@ class SandboxBootstrap {
     this.startupOrder = ['knowledge', 'parser', 'detector', 'optimizer', 'llm'];
   }
 
-  async startAll() {
+  /**
+   * 并行启动所有服务（冷启动优化）
+   * 各服务运行在独立 Worker，无启动期相互依赖，可安全并行
+   * @param {function} onProgress 可选进度回调 (serviceName, success, index, total)
+   */
+  async startAll(onProgress) {
     if (this.initialized) {
       logger.warn('[SandboxBootstrap] 服务已初始化');
       return this.registry.getStatus();
     }
 
-    logger.info('[SandboxBootstrap] 开始初始化所有服务...');
+    logger.info('[SandboxBootstrap] 开始并行初始化所有服务...');
     const startTime = Date.now();
-    const results = [];
+    const total = this.startupOrder.length;
+    const results = new Array(total);
 
-    for (const serviceName of this.startupOrder) {
+    let completed = 0;
+
+    const tasks = this.startupOrder.map((serviceName, index) => {
       const config = serviceConfigs[serviceName];
       if (!config) {
         logger.warn(`[SandboxBootstrap] 未知服务配置: ${serviceName}`);
-        continue;
+        results[index] = { service: serviceName, success: false, error: '未知服务配置' };
+        return Promise.resolve();
       }
 
-      try {
-        logger.info(`[SandboxBootstrap] 启动服务: ${serviceName}...`);
-        const result = await this.registry.registerService(serviceName, config);
-        results.push({ service: serviceName, success: true });
-        logger.info(`[SandboxBootstrap] 服务启动成功: ${serviceName}`);
-      } catch (error) {
-        logger.error(`[SandboxBootstrap] 服务启动失败 [${serviceName}]:`, error.message);
-        results.push({ service: serviceName, success: false, error: error.message });
-      }
-    }
+      logger.info(`[SandboxBootstrap] 启动服务: ${serviceName}...`);
+      return this.registry.registerService(serviceName, config)
+        .then(() => {
+          results[index] = { service: serviceName, success: true };
+          logger.info(`[SandboxBootstrap] 服务启动成功: ${serviceName}`);
+        })
+        .catch(error => {
+          logger.error(`[SandboxBootstrap] 服务启动失败 [${serviceName}]:`, error.message);
+          results[index] = { service: serviceName, success: false, error: error.message };
+        })
+        .then(() => {
+          completed++;
+          if (typeof onProgress === 'function') {
+            try { onProgress(serviceName, results[index].success, completed, total); } catch (_) {}
+          }
+        });
+    });
+
+    await Promise.all(tasks);
 
     this.initialized = true;
     const duration = Date.now() - startTime;
-    
+
     logger.info(`[SandboxBootstrap] 所有服务初始化完成 (耗时 ${duration}ms)`);
-    logger.info(`[SandboxBootstrap] 成功: ${results.filter(r => r.success).length}/${results.length}`);
-    
+    logger.info(`[SandboxBootstrap] 成功: ${results.filter(r => r && r.success).length}/${results.filter(r => r).length}`);
+
     return {
       success: true,
       duration,
-      results,
+      results: results.filter(Boolean),
       status: this.registry.getStatus()
     };
   }

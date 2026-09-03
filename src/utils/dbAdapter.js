@@ -5,6 +5,7 @@ const { config } = require('../config');
 const { logger } = require('./logger');
 const { logDeduplicator } = require('./logDeduplicator');
 const mysql = require('./mysql');
+const { validateIdentifier, validateIdentifiers } = require('./securityGuard');
 
 let sqliteDb = null;
 let dbInitialized = false;
@@ -61,10 +62,17 @@ function getSqliteDatabase() {
       fs.mkdirSync(dbDir, { recursive: true });
     }
     sqliteDb = new Database(dbPath);
+    // 性能调优：WAL 模式 + 同步级别 + 缓存 + 内存映射
     sqliteDb.pragma('foreign_keys = ON');
-    sqliteDb.pragma('journal_mode = DELETE');
+    sqliteDb.pragma('journal_mode = WAL');
+    sqliteDb.pragma('synchronous = NORMAL');
+    sqliteDb.pragma('cache_size = -20000'); // 20MB 缓存
+    sqliteDb.pragma('temp_store = MEMORY');
+    sqliteDb.pragma('mmap_size = 268435456'); // 256MB 内存映射
+    sqliteDb.pragma('wal_autocheckpoint = 1000'); // 每 1000 页自动 checkpoint
     initSyncQueueTable();
     createAllTables();
+    createIndexes();
     startRetryTimer();
     
     // 只在首次初始化时输出 info 级别日志，Worker 进程使用 debug 级别
@@ -593,6 +601,87 @@ function createAllTables() {
     logger.debug(`SQLite数据库表初始化完成（${tables.length}张表）`);
   } else {
     logDeduplicator.logWithDeduplication('info', 'db_init_complete', `SQLite数据库表初始化完成（${tables.length}张表）`);
+  }
+}
+
+/**
+ * 创建数据库索引以加速高频查询。
+ * 全部使用 IF NOT EXISTS，可安全重复执行。
+ * 索引覆盖：外键关联列、时间戳列（用于范围查询/清理）、状态过滤列。
+ */
+function createIndexes() {
+  const indexes = [
+    // code_issue：按任务/项目/文件/严重级别查询
+    'CREATE INDEX IF NOT EXISTS idx_code_issue_task_id ON code_issue(task_id)',
+    'CREATE INDEX IF NOT EXISTS idx_code_issue_project_id ON code_issue(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_code_issue_file_path ON code_issue(file_path)',
+    'CREATE INDEX IF NOT EXISTS idx_code_issue_severity ON code_issue(severity)',
+    'CREATE INDEX IF NOT EXISTS idx_code_issue_fixed ON code_issue(is_fixed)',
+    // scan_task：按项目/状态查询
+    'CREATE INDEX IF NOT EXISTS idx_scan_task_project_id ON scan_task(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_scan_task_status ON scan_task(status)',
+    // ai_optimize_record：按问题/任务查询
+    'CREATE INDEX IF NOT EXISTS idx_ai_opt_issue_id ON ai_optimize_record(issue_id)',
+    'CREATE INDEX IF NOT EXISTS idx_ai_opt_task_id ON ai_optimize_record(task_id)',
+    // code_report / code_analysis_record / analysis_result：按任务/项目查询
+    'CREATE INDEX IF NOT EXISTS idx_code_report_task_id ON code_report(task_id)',
+    'CREATE INDEX IF NOT EXISTS idx_code_analysis_project ON code_analysis_record(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_code_analysis_task ON code_analysis_record(task_id)',
+    'CREATE INDEX IF NOT EXISTS idx_analysis_result_aid ON analysis_result(analysis_id)',
+    'CREATE INDEX IF NOT EXISTS idx_analysis_result_project ON analysis_result(project_id)',
+    // 时间戳列：telemetry / 日志 / 监控（按时间范围查询与定期清理）
+    'CREATE INDEX IF NOT EXISTS idx_telemetry_ts ON telemetry_events(timestamp)',
+    'CREATE INDEX IF NOT EXISTS idx_telemetry_type ON telemetry_events(event_type)',
+    'CREATE INDEX IF NOT EXISTS idx_rule_exec_rule ON rule_execution_log(rule_id)',
+    'CREATE INDEX IF NOT EXISTS idx_rule_exec_ts ON rule_execution_log(timestamp)',
+    'CREATE INDEX IF NOT EXISTS idx_ai_analysis_ts ON ai_analysis_records(timestamp)',
+    'CREATE INDEX IF NOT EXISTS idx_ai_analysis_type ON ai_analysis_records(analysis_type)',
+    'CREATE INDEX IF NOT EXISTS idx_validation_ts ON validation_records(timestamp)',
+    'CREATE INDEX IF NOT EXISTS idx_validation_target ON validation_records(target_id)',
+    'CREATE INDEX IF NOT EXISTS idx_api_req_log_created ON api_request_log(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_api_req_log_provider ON api_request_log(provider_name)',
+    'CREATE INDEX IF NOT EXISTS idx_sys_oper_log_created ON sys_oper_log(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_sys_oper_log_user ON sys_oper_log(user_id)',
+    'CREATE INDEX IF NOT EXISTS idx_system_monitor_ts ON system_monitor(timestamp)',
+    'CREATE INDEX IF NOT EXISTS idx_system_monitor_type ON system_monitor(metric_type)',
+    'CREATE INDEX IF NOT EXISTS idx_project_summary_project ON project_analysis_summary(project_id)',
+    'CREATE INDEX IF NOT EXISTS idx_project_summary_date ON project_analysis_summary(analysis_date)',
+    // 通知：未读查询
+    'CREATE INDEX IF NOT EXISTS idx_notification_user_read ON notification(user_id, is_read)',
+    'CREATE INDEX IF NOT EXISTS idx_notification_created ON notification(created_at)',
+    // 历史/状态查询
+    'CREATE INDEX IF NOT EXISTS idx_update_history_status ON self_update_history(status)',
+    'CREATE INDEX IF NOT EXISTS idx_update_history_created ON self_update_history(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_repair_history_status ON self_repair_history(status)',
+    'CREATE INDEX IF NOT EXISTS idx_repair_history_created ON self_repair_history(created_at)',
+    'CREATE INDEX IF NOT EXISTS idx_confirmation_status ON confirmation_history(status)',
+    'CREATE INDEX IF NOT EXISTS idx_backup_history_status ON backup_history(status)',
+    'CREATE INDEX IF NOT EXISTS idx_kb_import_status ON kb_import_history(status)',
+    // 知识库：按类型/语言过滤
+    'CREATE INDEX IF NOT EXISTS idx_kb_entries_type ON kb_entries(content_type)',
+    'CREATE INDEX IF NOT EXISTS idx_kb_entries_language ON kb_entries(language)',
+    'CREATE INDEX IF NOT EXISTS idx_kb_cases_language ON kb_cases(language)',
+    'CREATE INDEX IF NOT EXISTS idx_kb_cases_issue_type ON kb_cases(issue_type)',
+    // 同步队列：重试调度
+    'CREATE INDEX IF NOT EXISTS idx_sync_queue_next_retry ON sync_queue(next_retry_at)',
+    'CREATE INDEX IF NOT EXISTS idx_sync_queue_table ON sync_queue(table_name)',
+    // LLM 密钥：活跃查询
+    'CREATE INDEX IF NOT EXISTS idx_llm_keys_active ON llm_api_keys(is_active)',
+    'CREATE INDEX IF NOT EXISTS idx_dependency_pkg ON dependency_version(package_name)'
+  ];
+
+  let created = 0;
+  for (const sql of indexes) {
+    try {
+      sqliteDb.exec(sql);
+      created++;
+    } catch (e) {
+      logger.debug(`创建索引失败: ${e.message}`);
+    }
+  }
+  const isWorker = !!process.env.WORKER_THREAD_ID;
+  if (!isWorker) {
+    logDeduplicator.logWithDeduplication('info', 'db_indexes_complete', `数据库索引创建完成（${created}/${indexes.length}）`);
   }
 }
 
@@ -1364,26 +1453,28 @@ class DbAdapter {
   }
 
   insert(tableName, data) {
-    const columns = Object.keys(data);
-    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
+    const safeTable = validateIdentifier(tableName);
+    const columns = validateIdentifiers(Object.keys(data));
+    const placeholders = columns.map(() => `?`).join(', ');
     const values = columns.map(col => data[col]);
-    
-    const sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
+
+    const sql = `INSERT INTO ${safeTable} (${columns.join(', ')}) VALUES (${placeholders})`;
     const result = this._sqlite.prepare(sql).run(values);
-    
+
     if (mysql.isEnabled()) {
-      executeMysqlInsertAsync(tableName, [data]);
+      executeMysqlInsertAsync(safeTable, [data]);
     }
-    
+
     return result;
   }
 
   insertMany(tableName, rows) {
     if (!Array.isArray(rows) || rows.length === 0) return;
-    
-    const columns = Object.keys(rows[0]);
-    const placeholders = columns.map((_, i) => `$${i + 1}`).join(', ');
-    const sql = `INSERT INTO ${tableName} (${columns.join(', ')}) VALUES (${placeholders})`;
+
+    const safeTable = validateIdentifier(tableName);
+    const columns = validateIdentifiers(Object.keys(rows[0]));
+    const placeholders = columns.map(() => `?`).join(', ');
+    const sql = `INSERT INTO ${safeTable} (${columns.join(', ')}) VALUES (${placeholders})`;
     
     const sqlOperations = [];
     
@@ -1409,7 +1500,7 @@ class DbAdapter {
               for (const op of sqlOperations) {
                 const mysqlSql = convertSqlForMysql(op.sql);
                 const params = Array.isArray(op.params[0]) ? op.params[0] : [];
-                const convertedParams = convertTimestampParams(params, tableName);
+                const convertedParams = convertTimestampParams(params, safeTable);
                 await connection.execute(mysqlSql, convertedParams);
               }
               await connection.commit();
@@ -1417,7 +1508,7 @@ class DbAdapter {
               await connection.rollback();
               logger.debug(`MySQL批量插入失败: ${error.message}`);
               for (const op of sqlOperations) {
-                enqueueSyncOperation(tableName, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
+                enqueueSyncOperation(safeTable, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
               }
             } finally {
               connection.release();
@@ -1426,7 +1517,7 @@ class DbAdapter {
         } catch (error) {
           logger.warn(`MySQL批量插入初始化失败: ${error.message}`);
           for (const op of sqlOperations) {
-            enqueueSyncOperation(tableName, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
+            enqueueSyncOperation(safeTable, convertSqlForMysql(op.sql), Array.isArray(op.params[0]) ? op.params[0] : [], 'insert');
           }
         }
       });
@@ -1434,37 +1525,42 @@ class DbAdapter {
   }
 
   update(tableName, data, where) {
-    const setClause = Object.keys(data).map((key, i) => `${key} = $${i + 1}`).join(', ');
-    const whereClause = Object.keys(where).map((key, i) => `${key} = $${Object.keys(data).length + i + 1}`).join(' AND ');
-    
-    const sql = `UPDATE ${tableName} SET ${setClause} WHERE ${whereClause}`;
+    const safeTable = validateIdentifier(tableName);
+    const dataKeys = validateIdentifiers(Object.keys(data));
+    const whereKeys = validateIdentifiers(Object.keys(where));
+    const setClause = dataKeys.map(key => `${key} = ?`).join(', ');
+    const whereClause = whereKeys.map(key => `${key} = ?`).join(' AND ');
+
+    const sql = `UPDATE ${safeTable} SET ${setClause} WHERE ${whereClause}`;
     const values = [...Object.values(data), ...Object.values(where)];
-    
+
     const result = this._sqlite.prepare(sql).run(values);
-    
+
     if (mysql.isEnabled()) {
-      const mysqlSetClause = Object.keys(data).map(key => `\`${key}\` = ?`).join(', ');
-      const mysqlWhereClause = Object.keys(where).map(key => `\`${key}\` = ?`).join(' AND ');
-      const mysqlSql = `UPDATE \`${tableName}\` SET ${mysqlSetClause} WHERE ${mysqlWhereClause}`;
+      const mysqlSetClause = dataKeys.map(key => `\`${key}\` = ?`).join(', ');
+      const mysqlWhereClause = whereKeys.map(key => `\`${key}\` = ?`).join(' AND ');
+      const mysqlSql = `UPDATE \`${safeTable}\` SET ${mysqlSetClause} WHERE ${mysqlWhereClause}`;
       executeMysqlAsync(mysqlSql, [...Object.values(data), ...Object.values(where)]);
     }
-    
+
     return result;
   }
 
   delete(tableName, where) {
-    const whereClause = Object.keys(where).map((key, i) => `${key} = $${i + 1}`).join(' AND ');
-    const sql = `DELETE FROM ${tableName} WHERE ${whereClause}`;
+    const safeTable = validateIdentifier(tableName);
+    const whereKeys = validateIdentifiers(Object.keys(where));
+    const whereClause = whereKeys.map(key => `${key} = ?`).join(' AND ');
+    const sql = `DELETE FROM ${safeTable} WHERE ${whereClause}`;
     const values = Object.values(where);
-    
+
     const result = this._sqlite.prepare(sql).run(values);
-    
+
     if (mysql.isEnabled()) {
-      const mysqlWhereClause = Object.keys(where).map(key => `\`${key}\` = ?`).join(' AND ');
-      const mysqlSql = `DELETE FROM \`${tableName}\` WHERE ${mysqlWhereClause}`;
+      const mysqlWhereClause = whereKeys.map(key => `\`${key}\` = ?`).join(' AND ');
+      const mysqlSql = `DELETE FROM \`${safeTable}\` WHERE ${mysqlWhereClause}`;
       executeMysqlAsync(mysqlSql, values);
     }
-    
+
     return result;
   }
 

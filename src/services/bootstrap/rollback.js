@@ -320,8 +320,13 @@ class RollbackManager {
     try {
       const stats = fs.statSync(dir);
       if (process.platform === 'win32') {
+        // 校验盘符仅为单字母，防止 shell 注入
+        const driveLetter = dir.charAt(0);
+        if (!/^[a-zA-Z]$/.test(driveLetter)) {
+          return null;
+        }
         const { execSync } = require('child_process');
-        const output = execSync(`wmic logicaldisk where "DeviceID='${dir.charAt(0)}:'" get FreeSpace,Size /value`, { encoding: 'utf8' });
+        const output = execSync(`wmic logicaldisk where "DeviceID='${driveLetter}:'" get FreeSpace,Size /value`, { encoding: 'utf8' });
         const freeSpaceMatch = output.match(/FreeSpace=(\d+)/);
         const sizeMatch = output.match(/Size=(\d+)/);
         if (freeSpaceMatch && sizeMatch) {

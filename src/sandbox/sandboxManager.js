@@ -9,7 +9,7 @@ class SandboxManager {
     this.fallbackMode = false;
   }
 
-  async init() {
+  async init(onProgress) {
     if (!this.isEnabled) {
       logger.info('[SandboxManager] 沙箱模式未启用，使用传统模式');
       this.fallbackMode = true;
@@ -17,7 +17,7 @@ class SandboxManager {
     }
 
     try {
-      const result = await this.bootstrap.startAll();
+      const result = await this.bootstrap.startAll(onProgress);
       this.isInitialized = result.success;
       
       if (result.success) {

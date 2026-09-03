@@ -3,6 +3,7 @@ const path = require('path');
 const { EventEmitter } = require('events');
 const { logger } = require('../utils/logger');
 const { generateUUID } = require('../utils/helpers');
+const { AppError, classifyError, ErrorType } = require('../utils/errorHandler');
 
 class SandboxService extends EventEmitter {
   constructor(serviceName, config) {
@@ -33,7 +34,9 @@ class SandboxService extends EventEmitter {
     this.restartCount = 0;
     this.consecutiveErrors = 0;
     this.maxConsecutiveErrors = config.maxConsecutiveErrors || 10;
-    
+    this.maxPendingRequests = config.maxPendingRequests || 100;
+    this._restartCountResetTimer = null;
+
     this._setupAutoRestart();
   }
 
@@ -130,6 +133,11 @@ class SandboxService extends EventEmitter {
       throw new Error(`服务 ${this.serviceName} 不可用`);
     }
 
+    // 背压保护：pending 请求过多时快速失败，避免内存堆积
+    if (this.responseHandlers.size >= this.maxPendingRequests) {
+      throw new Error(`服务 ${this.serviceName} 繁忙，待处理请求已达上限 ${this.maxPendingRequests}`);
+    }
+
     return new Promise((resolve, reject) => {
       const requestId = generateUUID();
       const timeoutMs = this.config.timeout || 30000;
@@ -180,9 +188,20 @@ class SandboxService extends EventEmitter {
         if (handler) {
           clearTimeout(handler.timeout);
           this.responseHandlers.delete(id);
-          
+
           if (error) {
-            handler.reject(new Error(error));
+            // 重建标准化 AppError，保留 type/code/details 便于 AI 修复管道精确分类
+            const errType = message.errorType || classifyError({
+              message: error,
+              code: message.errorCode,
+              name: message.errorName
+            });
+            const err = new AppError(errType, error, message.errorDetails || {});
+            if (message.stack) err.stack = message.stack;
+            if (message.errorCode) err.code = message.errorCode;
+            err.action = handler.action;
+            err.service = this.serviceName;
+            handler.reject(err);
             this.consecutiveErrors++;
           } else {
             handler.resolve(data);
@@ -240,16 +259,28 @@ class SandboxService extends EventEmitter {
         
         await this.start();
         await this.waitUntilReady(10000);
-        
+
         this._isRestarting = false;
         logger.info(`[${this.serviceName}] 重启成功 (第 ${this.restartCount} 次)`);
-        
+
+        // 稳定运行 60s 后重置重启计数，避免累计成功的重启耗尽重启预算
+        if (this._restartCountResetTimer) clearTimeout(this._restartCountResetTimer);
+        this._restartCountResetTimer = setTimeout(() => {
+          if (this._isRunning && this._isReady && !this._isRestarting) {
+            this.restartCount = 0;
+            logger.debug(`[${this.serviceName}] 稳定运行，重置重启计数`);
+          }
+          this._restartCountResetTimer = null;
+        }, 60000);
+
       } catch (error) {
         logger.error(`[${this.serviceName}] 重启失败:`, error.message);
         this._isRestarting = false;
-        
+
         if (this.restartCount < 5) {
           this._attemptRestart();
+        } else {
+          logger.error(`[${this.serviceName}] 已达最大重启次数(5)，停止重试`);
         }
       }
     }, delay);
@@ -257,7 +288,12 @@ class SandboxService extends EventEmitter {
 
   async gracefulShutdown() {
     this._isShuttingDown = true;
-    
+
+    if (this._restartCountResetTimer) {
+      clearTimeout(this._restartCountResetTimer);
+      this._restartCountResetTimer = null;
+    }
+
     this._isReady = false;
     
     const maxWaitTime = 5000;

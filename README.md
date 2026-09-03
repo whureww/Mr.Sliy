@@ -280,6 +280,46 @@ src/
 
 ## 📝 更新日志
 
+### v3.8.6
+> 更新日期: 2026-08-13
+
+- **⚡ 全面性能与架构优化（按优先级分阶段执行）**
+
+- **🔒 阶段1：安全加固**
+  - 新增 `securityGuard.js` 路径遍历防护、工具白名单校验、命令注入防护、SQL 标识符校验（`validateIdentifier` / `validateIdentifiers`）
+  - 修复 `dbAdapter.js` SQLite 占位符 bug：`$N` 占位符改为 `?` 兼容数组参数绑定，修复 "Too many parameter values were provided"
+  - 工具白名单（25）与工具定义（25）与 case 分发（25）完全对齐，移除 10 个无 case 的幽灵项，补齐 `get_providers`/`create_backup`/`list_backups`
+
+- **🗄️ 阶段2：数据库性能优化**
+  - SQLite 改为 WAL 模式 + `synchronous=NORMAL` + 20MB 缓存 + 256MB 内存映射 + 自动 checkpoint
+  - 新增 47 个索引覆盖核心查询路径（code_issue、task、project、file_path、severity 等）
+  - 修复 `insert` 占位符 bug
+
+- **🧵 阶段3：Agent 主线程优化**
+  - 同步文件操作全部转为异步 `fs.promises`
+  - 新增 `taskQueue.js` 并发受限任务队列（`runWithConcurrency` / `runSerial`），支持进度回调与背压保护
+
+- **🔧 阶段4：超长函数拆分 + Agent.js 解耦**
+  - `agent.js` 从 1833 行精简至 1032 行
+  - 提取 `toolDefinitions.js`（25 个工具元数据）与 `toolHandlers.js`（工具处理逻辑）实现纯数据/逻辑分离
+  - 参数归一化：snake_case → camelCase 兼容
+
+- **⚖️ 阶段5：Worker 负载均衡 + 错误处理规范**
+  - 新增 `servicePool.js` 服务实例池，支持 `config.instances` 多实例 + 基于最少连接数（least-connections）的负载均衡路由，并列时轮询打散
+  - 默认单实例保持低资源占用，可按需横向扩展
+  - `ServiceRegistry` 透明切换至 ServicePool，热替换走池级流量切换
+  - **错误标准化传播**：`workerBootstrap.js` 序列化完整错误元信息（type/code/name/details/stack）
+  - `sandboxService.js` 跨 Worker 边界重建 `AppError`，保留 `errorType`/`errorCode`/`errorDetails` 与 `action`/`service` 上下文，供 AI 修复管道精确分类
+  - `ServiceRegistry.execute` 补充 service/action 上下文
+
+- **🚀 阶段6：CLI 冷启动 + 进度反馈 + 测试体系**
+  - 沙箱服务启动由串行改为**并行**（`Promise.all`），冷启动从 3231ms 降至 ~1826ms（提升约 44%）
+  - `startCLI` 新增启动进度反馈：Banner + 各服务实时状态（就绪/失败/启动中）+ 耗时统计
+  - 新增 `jest.config.js`：testMatch 限定 `tests/**/*.test.js`，排除 `backups/`（自更新回滚备份中的过期测试副本）、`test_scan/`、手动脚本
+  - 修复 `auth.test.js` API Key 长度断言 off-by-one（67 → 68）
+  - 修复 `validator.js` `sanitizeString` 的 `escapeHtml`/`stripHtml` 优先级 bug：转义模式下不再先剥离 HTML 导致内容清空
+  - 全部 56 个单元测试通过
+
 ### v3.8.5
 > 更新日期: 2026-08-12
 

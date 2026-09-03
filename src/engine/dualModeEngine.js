@@ -11,6 +11,7 @@ const { logger } = require('../utils/logger');
 const { generateUUID, getFileLanguage } = require('../utils/helpers');
 const { isOnlineMode, checkNetworkConnectivity, getNetworkStatus } = require('../config');
 const { ProgressBar } = require('../utils/progress');
+const { runWithConcurrency } = require('../utils/taskQueue');
 const fs = require('fs');
 const path = require('path');
 
@@ -169,7 +170,7 @@ class DualModeEngine {
       if (onProgress) onProgress({ phase: 'reading', status: '读取文件', filePath });
       await this._delay(150);
 
-      const sourceCode = fs.readFileSync(filePath, 'utf-8');
+      const sourceCode = await fs.promises.readFile(filePath, 'utf-8');
       const language = getFileLanguage(filePath);
 
       if (onProgress) onProgress({ phase: 'parsing', status: `解析语法树 (${language})`, filePath, language });
@@ -343,7 +344,7 @@ class DualModeEngine {
 
     if (onProgress) onProgress({ phase: 'collecting', status: '收集项目文件', projectPath });
 
-    const files = this.collectProjectFiles(projectPath, options.extensions);
+    const files = await this.collectProjectFiles(projectPath, options.extensions);
     
     if (files.length === 0) {
       if (onProgress) onProgress({ phase: 'done', status: '未找到可分析文件', totalFiles: 0 });
@@ -360,13 +361,13 @@ class DualModeEngine {
 
     if (onProgress) onProgress({ phase: 'scanning', status: `分析 ${files.length} 个文件`, totalFiles: files.length, current: 0 });
 
-    const results = [];
+    // 并发受限的批量分析：限制并发以平衡吞吐与 LLM 限流 / 内存占用
+    const SCAN_CONCURRENCY = Math.min(4, Math.max(1, files.length));
     let totalIssues = 0;
-    
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+
+    const results = await runWithConcurrency(files, SCAN_CONCURRENCY, async (file, i) => {
       const fileName = file.split(path.sep).pop();
-      
+
       const fileOnProgress = onProgress ? (p) => {
         onProgress({
           ...p,
@@ -379,22 +380,21 @@ class DualModeEngine {
       } : undefined;
 
       const result = await this.analyzeFile(file, { ...options, onProgress: fileOnProgress });
-      results.push(result);
-      
       if (result.success) {
         totalIssues += result.totalIssues || 0;
       }
 
-      if (onProgress) onProgress({ 
-        phase: 'scanning', 
+      if (onProgress) onProgress({
+        phase: 'scanning',
         status: `分析: ${fileName}`,
-        totalFiles: files.length, 
+        totalFiles: files.length,
         current: i + 1,
         currentFile: file,
         currentFileName: fileName,
         issuesFound: totalIssues
       });
-    }
+      return result;
+    });
 
     const successCount = results.filter(r => r.success).length;
 
@@ -617,32 +617,43 @@ class DualModeEngine {
   }
 
   /**
-   * 收集项目文件
+   * 收集项目文件（异步，避免阻塞事件循环）
    */
-  collectProjectFiles(projectPath, extensions = ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.go']) {
+  async collectProjectFiles(projectPath, extensions = ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.go']) {
     const files = [];
-    const excludeDirs = ['node_modules', 'dist', 'build', 'out', '.git', 'coverage', 'vendor', '__pycache__'];
-    
-    const walk = (dir) => {
+    const excludeDirs = new Set(['node_modules', 'dist', 'build', 'out', '.git', 'coverage', 'vendor', '__pycache__']);
+    const path = require('path');
+
+    const walk = async (dir) => {
       try {
-        const items = fs.readdirSync(dir);
-        for (const item of items) {
-          const fullPath = require('path').join(dir, item);
-          if (excludeDirs.includes(item)) continue;
-          
-          const stat = fs.statSync(fullPath);
-          if (stat.isDirectory()) {
-            walk(fullPath);
-          } else if (extensions.some(ext => item.endsWith(ext))) {
-            files.push(fullPath);
+        const items = await fs.promises.readdir(dir);
+        // 并发收集子项状态，提升扫描吞吐
+        const stats = await Promise.all(
+          items.map(async (item) => {
+            const fullPath = path.join(dir, item);
+            try {
+              const stat = await fs.promises.stat(fullPath);
+              return { item, fullPath, stat };
+            } catch (e) {
+              return null;
+            }
+          })
+        );
+        for (const entry of stats) {
+          if (!entry) continue;
+          if (excludeDirs.has(entry.item)) continue;
+          if (entry.stat.isDirectory()) {
+            await walk(entry.fullPath);
+          } else if (extensions.some(ext => entry.item.endsWith(ext))) {
+            files.push(entry.fullPath);
           }
         }
       } catch (e) {
         // 忽略无权限访问的目录
       }
     };
-    
-    walk(projectPath);
+
+    await walk(projectPath);
     return files;
   }
 

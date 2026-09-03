@@ -61,9 +61,41 @@ function getConnectionConfigFromCustom(customConfig) {
 }
 
 /**
+ * 确保目标数据库存在（不存在则自动创建）
+ * 用于应对云端数据库被意外删除后 ER_BAD_DB_ERROR 连接失败的情况
+ * @returns {Promise<boolean>} true=数据库可用，false=连接或权限错误
+ */
+async function ensureDatabaseExists(mysqlConfig) {
+  if (!mysqlConfig || !mysqlConfig.host || !mysqlConfig.database) {
+    return false;
+  }
+  let conn = null;
+  try {
+    conn = await mysql.createConnection({
+      host: mysqlConfig.host,
+      port: mysqlConfig.port || 3306,
+      user: mysqlConfig.user,
+      password: mysqlConfig.password,
+      connectTimeout: 10000,
+      charset: 'utf8mb4'
+    });
+    // 限定数据库名只允许安全字符，配合反引号避免关键字冲突
+    const safeDb = String(mysqlConfig.database).replace(/[^a-zA-Z0-9_$]/g, '_');
+    await conn.execute(`CREATE DATABASE IF NOT EXISTS \`${safeDb}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+    logger.info(`[MySQL] 确保数据库存在: ${safeDb}`);
+    return true;
+  } catch (error) {
+    logger.warn(`[MySQL] 确保数据库存在失败: ${error.message}`);
+    return false;
+  } finally {
+    if (conn) { try { await conn.end(); } catch (_) { /* ignore */ } }
+  }
+}
+
+/**
  * 获取MySQL连接池
  */
-function getPool() {
+async function getPool() {
   const mysqlConfig = getMySQLConnectionConfig();
 
   if (!mysqlConfig || !mysqlConfig.host) {
@@ -75,11 +107,19 @@ function getPool() {
   if (!pool || currentConnectionConfig !== configKey) {
     if (pool) {
       try {
-        pool.end();
+        await pool.end();
       } catch (e) {
         logger.debug('关闭旧连接池失败:', e.message);
       }
       pool = null;
+    }
+
+    // 先确保数据库存在（避免云端 DB 被删除导致 ER_BAD_DB_ERROR）
+    const ensured = await ensureDatabaseExists(mysqlConfig);
+    if (!ensured) {
+      pool = null;
+      currentConnectionConfig = null;
+      return null;
     }
 
     try {
@@ -111,7 +151,7 @@ function getPool() {
  * 测试MySQL连接
  */
 async function testConnection() {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) {
     return { success: false, message: 'MySQL未启用' };
   }
@@ -130,7 +170,7 @@ async function testConnection() {
  * 执行查询
  */
 async function query(sql, params = []) {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) {
     throw new Error('MySQL未启用');
   }
@@ -148,7 +188,7 @@ async function query(sql, params = []) {
  * 执行插入/更新/删除
  */
 async function execute(sql, params = []) {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) {
     throw new Error('MySQL未启用');
   }
@@ -170,7 +210,7 @@ async function execute(sql, params = []) {
  * 初始化MySQL数据库表
  */
 async function initDatabase() {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) {
     return false;
   }
@@ -963,7 +1003,7 @@ async function checkConnectionHealth() {
     return;
   }
   
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) {
     connectionHealthy = false;
     return;
@@ -1011,7 +1051,8 @@ function isConnectionHealthy() {
  * 检查MySQL是否可用（包含健康检查）
  */
 function isEnabled() {
-  return config.mysql.enabled && getPool() !== null && connectionHealthy;
+  // 用缓存变量代替异步 getPool，避免同步路径阻塞
+  return config.mysql.enabled && pool !== null && connectionHealthy;
 }
 
 /**
@@ -1049,12 +1090,18 @@ function createPoolWithConfig(customConfig) {
  * 使用自定义配置测试连接
  */
 async function testConnectionWithConfig(customConfig) {
+  // 先确保配置的数据库存在（避免 DB 被删后测试直接失败）
+  const mysqlConfig = getConnectionConfigFromCustom(customConfig);
+  if (mysqlConfig) {
+    await ensureDatabaseExists(mysqlConfig);
+  }
+
   const pool = createPoolWithConfig(customConfig);
-  
+
   if (!pool) {
     return { success: false, message: '连接配置无效' };
   }
-  
+
   try {
     const connection = await pool.getConnection();
     await connection.ping();
@@ -1084,6 +1131,15 @@ async function switchConnection(connectionConfig) {
   const mysqlConfig = getConnectionConfigFromCustom(connectionConfig);
   if (!mysqlConfig || !mysqlConfig.host) {
     return { success: false, message: '无效的连接配置' };
+  }
+
+  // 确保目标数据库存在
+  const ensured = await ensureDatabaseExists(mysqlConfig);
+  if (!ensured) {
+    pool = null;
+    currentConnectionConfig = null;
+    connectionHealthy = false;
+    return { success: false, message: '无法确保目标数据库存在（请检查用户权限）' };
   }
 
   try {
@@ -1141,7 +1197,7 @@ function validateIdentifier(name) {
  * 确保所有表都存在，用于修复表创建失败的情况
  */
 async function ensureAllTablesExist() {
-  const pool = getPool();
+  const pool = await getPool();
   if (!pool) return;
 
   const allTables = [

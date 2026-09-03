@@ -20,22 +20,24 @@ class ServiceRegistry {
       throw new Error(`服务 ${serviceName} 已注册`);
     }
 
-    const { SandboxService } = require('./sandboxService');
-    
-    const service = new SandboxService(serviceName, config);
-    
-    service.on('event', (event, payload) => {
+    // 使用 ServicePool 包装（默认单实例，config.instances > 1 时启用多实例负载均衡）
+    const { ServicePool } = require('./servicePool');
+
+    const pool = new ServicePool(serviceName, config);
+
+    pool.on('event', (event, payload) => {
       this._emitServiceEvent(serviceName, event, payload);
     });
 
-    await service.start();
+    await pool.start();
 
-    this.services.set(serviceName, service);
+    this.services.set(serviceName, pool);
     this.serviceConfigs.set(serviceName, config);
     this.metrics.serviceStarts++;
 
-    logger.info(`服务注册成功: ${serviceName} v${config.version || '1.0.0'}`);
-    return { success: true, service: service.getStatus() };
+    const instCount = Math.max(1, config.instances || 1);
+    logger.info(`服务注册成功: ${serviceName} v${config.version || '1.0.0'} (实例数: ${instCount})`);
+    return { success: true, service: pool.getStatus() };
   }
 
   async unregisterService(serviceName) {
@@ -53,54 +55,54 @@ class ServiceRegistry {
   }
 
   async hotReloadService(serviceName, newConfig) {
-    const oldService = this.services.get(serviceName);
-    if (!oldService) {
+    const oldPool = this.services.get(serviceName);
+    if (!oldPool) {
       return { success: false, error: `服务 ${serviceName} 不存在` };
     }
 
     const config = newConfig || this.serviceConfigs.get(serviceName);
-    
+
     logger.info(`开始热替换服务: ${serviceName}`);
-    logger.info(`  旧版本: ${oldService.version}`);
+    logger.info(`  旧版本: ${oldPool.version}`);
     logger.info(`  新版本: ${config.version || 'unknown'}`);
 
-    const { SandboxService } = require('./sandboxService');
-    
-    const newService = new SandboxService(serviceName, config);
-    
-    newService.on('event', (event, payload) => {
+    const { ServicePool } = require('./servicePool');
+
+    const newPool = new ServicePool(serviceName, config);
+
+    newPool.on('event', (event, payload) => {
       this._emitServiceEvent(serviceName, event, payload);
     });
 
     try {
-      await newService.start();
-      await newService.waitUntilReady(config.startupTimeout || 15000);
-      
-      const pendingRequests = oldService.getPendingRequests();
-      newService.takeoverRequests(pendingRequests);
-      
-      await oldService.gracefulShutdown();
-      
-      this.services.set(serviceName, newService);
+      await newPool.start();
+      await newPool.waitUntilReady(config.startupTimeout || 15000);
+
+      const pendingRequests = oldPool.getPendingRequests();
+      newPool.takeoverRequests(pendingRequests);
+
+      await oldPool.gracefulShutdown();
+
+      this.services.set(serviceName, newPool);
       this.serviceConfigs.set(serviceName, config);
       this.metrics.serviceReloads++;
-      
-      logger.info(`服务热替换完成: ${serviceName} v${newService.version}`);
-      
-      return { 
-        success: true, 
-        service: newService.getStatus(),
-        oldVersion: oldService.version,
-        newVersion: newService.version
+
+      logger.info(`服务热替换完成: ${serviceName} v${newPool.version}`);
+
+      return {
+        success: true,
+        service: newPool.getStatus(),
+        oldVersion: oldPool.version,
+        newVersion: newPool.version
       };
-      
+
     } catch (error) {
       logger.error(`热替换失败: ${serviceName}`, error.message);
-      
-      if (newService.isRunning()) {
-        await newService.stop().catch(() => {});
+
+      if (newPool.isRunning()) {
+        await newPool.stop().catch(() => {});
       }
-      
+
       return { success: false, error: error.message };
     }
   }
@@ -112,12 +114,15 @@ class ServiceRegistry {
     }
 
     this.metrics.totalRequests++;
-    
+
     try {
       const result = await service.execute(action, params);
       return result;
     } catch (error) {
       this.metrics.totalErrors++;
+      // 补充调用上下文，便于 AI 修复管道定位
+      if (!error.service) error.service = serviceName;
+      if (!error.action) error.action = action;
       logger.error(`服务调用失败 [${serviceName}.${action}]:`, error.message);
       throw error;
     }

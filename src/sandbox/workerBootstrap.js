@@ -125,11 +125,16 @@ class WorkerBootstrap {
     } catch (error) {
       this.errorCount++;
       const duration = Date.now() - startTime;
-      
+
+      // 序列化完整错误元信息，便于主进程重建 AppError 并精确分类
       parentPort.postMessage({
         type: 'response',
         id,
         error: error.message,
+        errorName: error.name,
+        errorCode: error.code,
+        errorType: error.type,          // AppError 专属
+        errorDetails: error.details,    // AppError 专属
         stack: error.stack,
         duration
       });
