@@ -344,6 +344,9 @@ export interface CheckUpdatePayload {
 /** 检查更新：拉取更新源清单并与当前版本比对（上报 GUI 自身版本，服务端以此为准） */
 declare const __APP_VERSION__: string;
 
+/** GUI 自身版本（vite 构建时从 gui/package.json 注入），供关于卡片等展示 */
+export const APP_VERSION: string = __APP_VERSION__;
+
 export async function checkForUpdate(signal?: AbortSignal): Promise<CheckUpdatePayload> {
   const env = await sidecarRequest<{ success: boolean; data: CheckUpdatePayload }>(
     'POST',

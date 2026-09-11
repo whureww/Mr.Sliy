@@ -8,6 +8,7 @@ import {
   McpStatus,
   MemoryItem,
   UpdateRecord,
+  APP_VERSION,
   activateLlmProvider,
   addCustomProvider,
   addMemory,
@@ -871,7 +872,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       <section className="card" style={{ padding: 18 }}>
         <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 6 }}>{t('settings.about.title')}</div>
         <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
-          {t('about.product')} · v3.15.2
+          {t('about.product')} · v{APP_VERSION}
           <br />
           {t('about.body')}
         </div>
