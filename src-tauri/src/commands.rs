@@ -65,6 +65,43 @@ pub fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// 启动新版本安装器并退出当前应用（自动更新流程的最后一步）。
+/// 安装器路径必须位于 ~/.mr-sliy/updates 目录内且为 .exe，防止任意进程启动。
+#[tauri::command]
+pub fn install_update(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    let updates_dir = std::env::var("USERPROFILE")
+        .map_err(|_| "no USERPROFILE".to_string())
+        .map(std::path::PathBuf::from)?
+        .join(".mr-sliy")
+        .join("updates");
+    let updates_dir = updates_dir.canonicalize().map_err(|e| format!("updates 目录不存在: {e}"))?;
+    let exe = std::path::Path::new(&path)
+        .canonicalize()
+        .map_err(|e| format!("安装包不存在: {e}"))?;
+
+    // canonicalize 在 Windows 返回 \\?\ 前缀路径，两侧统一后再做前缀比对
+    let dir_str = updates_dir.to_string_lossy().to_lowercase();
+    let exe_str = exe.to_string_lossy().to_lowercase();
+    if !exe_str.starts_with(&dir_str) {
+        return Err("安装包路径不在更新目录内".into());
+    }
+    if exe.extension().map(|e| e.to_ascii_lowercase()) != Some("exe".into()) {
+        return Err("仅允许启动 .exe 安装包".into());
+    }
+
+    std::process::Command::new(&exe)
+        .creation_flags(0x0000_0800) // CREATE_NO_WINDOW：避免 cmd 壳闪烁;安装器自身 GUI 不受影响
+        .spawn()
+        .map_err(|e| format!("启动安装器失败: {e}"))?;
+
+    // 给安装器进程留出初始化时间，再退出当前应用（sidecar 由 watchdog 跟随退出）
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app.exit(0);
+    Ok(())
+}
+
 // ---------- 原生文件操作 ----------
 
 #[derive(Serialize)]

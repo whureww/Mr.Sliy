@@ -8,7 +8,7 @@ import Workbench from './routes/Workbench';
 import DiffReview from './routes/DiffReview';
 import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
-import { AnalysisMode, CheckUpdatePayload, OptimizeResult, checkForUpdate, loadState, saveState } from './ipc/client';
+import { AnalysisMode, CheckUpdatePayload, OptimizeResult, checkForUpdate, getUpdateDownloadStatus, loadState, saveState } from './ipc/client';
 import { Appearance, applyAppearance, normalizeAppearance } from './lib/appearance';
 
 export type TabKey = 'workbench' | 'diff' | 'dashboard' | 'settings';
@@ -72,6 +72,33 @@ export default function App() {
     applyAppearance(a);
     saveState('appearance', JSON.stringify(a)).catch(() => {});
   };
+
+  // 启动静默检查更新:上次已下载完成的安装包直接提示安装;否则远程检查,
+  // 发现新版本时设置 updateInfo,横幅挂载后自动开始下载
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      const st = await getUpdateDownloadStatus().catch(() => null);
+      if (cancelled) return;
+      if (st?.status === 'done') {
+        setUpdateInfo({
+          checked: true,
+          currentVersion: '',
+          latestVersion: st.version || '',
+          updateAvailable: true,
+          notes: ''
+        });
+        return;
+      }
+      const r = await checkForUpdate().catch(() => null);
+      if (!cancelled && r?.updateAvailable) setUpdateInfo(r);
+    }, 4000);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
 
   const changeAnalysisMode = (m: AnalysisMode) => {
     setAnalysisMode(m);

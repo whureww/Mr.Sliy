@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   AnalysisMode,
   CheckUpdatePayload,
+  DownloadState,
   LlmKeyInfo,
   LlmProvidersPayload,
   McpStatus,
@@ -19,10 +20,13 @@ import {
   getMcpStatus,
   getMemories,
   getUpdateRecords,
+  getUpdateDownloadStatus,
   getUpdateSource,
+  installUpdate,
   openExternal,
   saveLlmProvider,
-  saveUpdateSource
+  saveUpdateSource,
+  startUpdateDownload
 } from '../ipc/client';
 import { SCALES, THEMES, Appearance } from '../lib/appearance';
 import { Lang, setLang, t, useLang } from '../lib/i18n';
@@ -97,6 +101,9 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   const [currentVersion, setCurrentVersion] = useState('');
   const [checkState, setCheckState] = useState<'idle' | 'checking' | 'done'>('idle');
   const [checkResult, setCheckResult] = useState<CheckUpdatePayload | null>(null);
+  // 安装包下载状态(与顶部横幅共享后端状态)
+  const [dlState, setDlState] = useState<DownloadState | null>(null);
+  const [installing, setInstalling] = useState(false);
 
   const [mcp, setMcp] = useState<McpStatus | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -160,6 +167,34 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       setCheckState('done');
     }
   }, [onUpdateInfoChange]);
+
+  // 进入设置页时恢复安装包下载状态;下载中每 800ms 轮询进度
+  useEffect(() => {
+    getUpdateDownloadStatus().then(setDlState).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (dlState?.status !== 'downloading') return;
+    const timer = setInterval(() => {
+      getUpdateDownloadStatus().then(setDlState).catch(() => {});
+    }, 800);
+    return () => clearInterval(timer);
+  }, [dlState?.status]);
+
+  const beginDownload = async (url: string, version: string) => {
+    const s = await startUpdateDownload(url, version).catch((e) => ({ status: 'error', error: (e as Error).message }) as DownloadState);
+    setDlState(s);
+  };
+
+  const installNow = async () => {
+    if (!dlState?.filePath) return;
+    setInstalling(true);
+    try {
+      await installUpdate(dlState.filePath);
+    } catch (e) {
+      setInstalling(false);
+      setDlState({ ...dlState, status: 'error', error: (e as Error).message });
+    }
+  };
 
   const submitSource = async () => {
     try {
@@ -575,11 +610,44 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <span style={{ fontWeight: 650 }}>发现新版本 v{checkResult.latestVersion}</span>
                   {checkResult.notes && <span style={{ color: 'var(--text-muted)' }}>{checkResult.notes.slice(0, 100)}</span>}
-                  {checkResult.url && (
+                  {dlState?.status === 'downloading' ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
+                      <span style={{ width: 140, height: 5, borderRadius: 3, background: 'var(--border-hairline)', overflow: 'hidden' }}>
+                        <span
+                          style={{
+                            display: 'block',
+                            width: `${dlState.percent || 0}%`,
+                            height: '100%',
+                            borderRadius: 3,
+                            background: 'var(--accent)',
+                            transition: 'width .3s ease'
+                          }}
+                        />
+                      </span>
+                      <span className="muted" style={{ fontSize: 12 }}>下载中 {dlState.percent || 0}%</span>
+                    </span>
+                  ) : dlState?.status === 'done' && dlState.filePath ? (
+                    <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} disabled={installing} onClick={installNow}>
+                      {installing ? '正在启动安装器…' : '安装更新'}
+                    </button>
+                  ) : dlState?.status === 'error' ? (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: 'var(--danger, #C0392B)', fontSize: 12 }}>下载失败:{dlState.error || '未知原因'}</span>
+                      {checkResult.download && (
+                        <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!)}>
+                          重试
+                        </button>
+                      )}
+                    </span>
+                  ) : checkResult.download ? (
+                    <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!)}>
+                      下载并更新
+                    </button>
+                  ) : checkResult.url ? (
                     <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => openExternal(checkResult.url!).catch(() => {})}>
                       前往下载
                     </button>
-                  )}
+                  ) : null}
                 </div>
               ) : (
                 `已是最新版本（v${checkResult.currentVersion}）`

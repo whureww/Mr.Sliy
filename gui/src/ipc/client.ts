@@ -334,6 +334,8 @@ export interface CheckUpdatePayload {
   updateAvailable?: boolean;
   notes?: string;
   url?: string;
+  /** 新版本安装包直链（https）;为空时回退打开下载页 */
+  download?: string;
   /** checked=false 时的原因说明 */
   reason?: string;
 }
@@ -342,6 +344,44 @@ export interface CheckUpdatePayload {
 export async function checkForUpdate(signal?: AbortSignal): Promise<CheckUpdatePayload> {
   const env = await sidecarRequest<{ success: boolean; data: CheckUpdatePayload }>('POST', '/api/check-update', undefined, signal);
   return env?.data || { checked: false, currentVersion: '', reason: '请求失败' };
+}
+
+// ---------- 更新安装包下载（自动下载 + 一键安装） ----------
+
+export interface DownloadState {
+  status: 'idle' | 'downloading' | 'done' | 'error';
+  version?: string;
+  url?: string;
+  received?: number;
+  total?: number;
+  percent?: number;
+  /** 下载完成后的安装包绝对路径 */
+  filePath?: string;
+  error?: string;
+}
+
+/** 开始下载新版本安装包(已有下载进行中时后端返回 409) */
+export async function startUpdateDownload(url: string, version: string): Promise<DownloadState> {
+  const env = await sidecarRequest<{ success: boolean; data: DownloadState }>('POST', '/api/update-download/start', { url, version });
+  return env?.data || { status: 'error', error: '请求失败' };
+}
+
+/** 查询下载状态/进度(轮询) */
+export async function getUpdateDownloadStatus(): Promise<DownloadState> {
+  const env = await sidecarRequest<{ success: boolean; data: DownloadState }>('GET', '/api/update-download/status');
+  return env?.data || { status: 'idle' };
+}
+
+/** 取消当前下载 */
+export async function cancelUpdateDownload(): Promise<boolean> {
+  const env = await sidecarRequest<{ success: boolean; data: { cancelled: boolean } }>('POST', '/api/update-download/cancel');
+  return !!env?.data?.cancelled;
+}
+
+/** 启动已下载的安装器并退出当前应用(Tauri 命令;浏览器调试模式不可用) */
+export async function installUpdate(installerPath: string): Promise<void> {
+  if (!('__TAURI_INTERNALS__' in window)) throw new Error('仅桌面端支持一键安装');
+  await invoke('install_update', { path: installerPath });
 }
 
 export async function getUpdateSource(): Promise<{ url: string; currentVersion: string }> {

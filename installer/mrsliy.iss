@@ -3,7 +3,7 @@
 
 #define MyAppName "MR·SLIY 代码优化智能体"
 #define MyAppExeName "mrsliy-desktop.exe"
-#define MyAppVersion "0.0.1"
+#define MyAppVersion "0.0.2"
 #define ProjRoot "d:\Final\final"
 
 [Setup]
@@ -62,11 +62,15 @@ Filename: "taskkill"; Parameters: "/f /im {#MyAppExeName}"; RunOnceId: "KillApp"
 
 [Code]
 // 安装/卸载前结束主程序；sidecar 携带父进程 watchdog，主程序退出后 3 秒内自动退出
+procedure Sleep(ms: Integer); external 'Sleep@kernel32.dll stdcall';
+
 procedure KillRunningApp();
 var
   ResultCode: Integer;
 begin
   Exec('taskkill', '/f /im {#MyAppExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  // 等待 sidecar watchdog 退出，避免覆盖 runtime\node.exe 时撞文件锁
+  Sleep(3500);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

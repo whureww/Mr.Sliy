@@ -91,9 +91,26 @@ function compareVersions(a, b) {
   return 0;
 }
 
+const GITHUB_LATEST_API = 'https://api.github.com/repos/whureww/Mr.Sliy/releases/latest';
+const INSTALLER_ASSET_RE = /^MRSLIY-Setup-.*\.exe$/i;
+
+/** 从 GitHub Releases 解析最新安装包资产直链；任何异常静默返回空串（不阻塞检查流程） */
+async function resolveGithubReleaseAsset() {
+  try {
+    const release = await fetchJson(GITHUB_LATEST_API);
+    const assets = Array.isArray(release && release.assets) ? release.assets : [];
+    const hit = assets.find((a) => INSTALLER_ASSET_RE.test(String(a.name || '')));
+    const url = String((hit && hit.browser_download_url) || '');
+    return /^https:\/\//i.test(url) ? url : '';
+  } catch (e) {
+    return '';
+  }
+}
+
 /**
  * 执行一次远程检查。
- * 返回 { checked, currentVersion, latestVersion?, updateAvailable?, notes?, url?, reason? }
+ * 返回 { checked, currentVersion, latestVersion?, updateAvailable?, notes?, url?, download?, reason? }
+ * download 为安装包直链（优先取清单 download 字段，否则从 GitHub Releases 解析），为空时前端回退打开下载页。
  */
 async function checkRemoteUpdate() {
   const currentVersion = pkg.version;
@@ -108,13 +125,18 @@ async function checkRemoteUpdate() {
       return { checked: false, currentVersion, reason: '清单中的版本号无效' };
     }
     const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
+    let download = String((manifest && manifest.download) || '');
+    if (updateAvailable && !/^https:\/\//i.test(download)) {
+      download = await resolveGithubReleaseAsset();
+    }
     return {
       checked: true,
       currentVersion,
       latestVersion,
       updateAvailable,
       notes: String((manifest && manifest.notes) || ''),
-      url: String((manifest && manifest.url) || '')
+      url: String((manifest && manifest.url) || ''),
+      download: /^https:\/\//i.test(download) ? download : ''
     };
   } catch (e) {
     return { checked: false, currentVersion, reason: `无法连接更新源（${e.message}）` };

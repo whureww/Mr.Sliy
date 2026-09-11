@@ -10,6 +10,7 @@ const { selfUpdateManager } = require('../services/bootstrap/selfUpdateManager')
 const { selfRepairManager } = require('../services/bootstrap/selfRepairManager');
 const { confirmationGate } = require('../services/bootstrap/confirmationGate');
 const { checkRemoteUpdate, getUpdateSourceUrl, saveUpdateSourceUrl, SOURCE_FILE, CURRENT_VERSION } = require('../services/bootstrap/versionCheck');
+const downloader = require('../services/bootstrap/updateDownloader');
 const { logger } = require('../utils/logger');
 
 router.get('/updates', async (req, res) => {
@@ -258,6 +259,27 @@ router.post('/update-source', (req, res) => {
   } catch (e) {
     res.status(400).json({ success: false, error: e.message });
   }
+});
+
+/** 开始下载新版本安装包（https 直链;已有下载进行中返回 409） */
+router.post('/update-download/start', (req, res) => {
+  try {
+    const state = downloader.startDownload(req.body && req.body.url, req.body && req.body.version);
+    res.json({ success: true, data: state });
+  } catch (e) {
+    const busy = e.code === 'BUSY';
+    res.status(busy ? 409 : 400).json({ success: false, error: e.message });
+  }
+});
+
+/** 查询下载进度/状态（前端轮询） */
+router.get('/update-download/status', (req, res) => {
+  res.json({ success: true, data: downloader.getStatus() });
+});
+
+/** 取消当前下载 */
+router.post('/update-download/cancel', (req, res) => {
+  res.json({ success: true, data: { cancelled: downloader.cancelDownload() } });
 });
 
 /** 用系统默认浏览器打开下载页（仅允许 http/https） */

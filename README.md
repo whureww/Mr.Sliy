@@ -7,7 +7,7 @@
 | 产品 | 版本 | 说明 |
 |------|------|------|
 | CLI | v3.9.0 | 命令行智能体(`package.json` 根) |
-| 桌面 GUI | v0.0.1 | Tauri 桌面应用(`gui/package.json`,自 v0.0.1 起独立版本化) |
+| 桌面 GUI | v0.0.2 | Tauri 桌面应用(`gui/package.json`,自 v0.0.1 起独立版本化) |
 
 ### 版本号规则
 
@@ -161,6 +161,17 @@ npm run test:coverage # 覆盖率报告
 - 不上传任何代码或数据到第三方服务器
 
 ## 更新日志
+
+### 桌面 GUI v0.0.2
+> 发布日期: 2026-09-11
+
+- **检查更新完整闭环**:发现新版本后自动从 GitHub Releases 下载安装包(顶部横幅实时进度条),下载完成一键"安装更新"——启动安装器并自动退出当前应用
+- 新增后端下载服务 `updateDownloader.js`:仅 https、跟随 GitHub 302 重定向(CDN)、`.part` 临时文件防半包、版本号白名单防路径穿越、500MB 上限;重启后自动恢复"已下载未安装"状态
+- 版本清单支持可选 `download` 字段;缺省时自动调 GitHub Releases API 解析 `MRSLIY-Setup-*.exe` 资产
+- Tauri 新增 `install_update` 命令:校验安装包必须位于 `~/.mr-sliy/updates` 内方可启动
+- 设置页"检查更新"卡片同步显示下载进度,失败可重试
+- 安装器(iss)安装/卸载前等待 sidecar watchdog 退出,避免覆盖 runtime 撞文件锁
+- 新增 API:`POST /api/update-download/start`、`GET /api/update-download/status`、`POST /api/update-download/cancel`
 
 ### 桌面 GUI v0.0.1
 > 发布日期: 2026-09-11

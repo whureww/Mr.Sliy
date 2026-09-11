@@ -87,7 +87,8 @@ fn main() {
             commands::optimize_issue,
             commands::issue_stats,
             commands::minimize_to_tray,
-            commands::exit_app
+            commands::exit_app,
+            commands::install_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
