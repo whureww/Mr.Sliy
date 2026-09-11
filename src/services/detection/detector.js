@@ -896,21 +896,20 @@ async function saveDetectionResults(taskId, projectId, results) {
 
     const insertSql = `
       INSERT INTO code_issue
-      (id, task_id, project_id, file_path, file_name, language, issue_type,
+      (task_id, project_id, file_path, file_name, language, issue_type,
        severity, message, suggestion, line_start, line_end, column_start,
        column_end, code_snippet, ast_node_type)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
 
     // 使用统一适配器，同时写入本地SQLite和云端MySQL
     const { getDatabase } = require('../../utils/database');
     const db = getDatabase();
-    
+
     const stmt = db.prepare(insertSql);
     const insertMany = db.transaction((issues) => {
       for (const issue of issues) {
         stmt.run(
-          issue.id,
           taskId,
           projectId,
           issue.filePath,

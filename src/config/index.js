@@ -223,7 +223,8 @@ const config = {
 
   // CORS配置
   cors: {
-    origins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000,http://localhost:1420')
+    // 桌面端 Tauri WebView 生产 origin 为 http://tauri.localhost（Windows）/ tauri://localhost
+    origins: (process.env.CORS_ORIGINS || 'http://localhost:5173,http://localhost:3000,http://localhost:1420,http://tauri.localhost,tauri://localhost')
       .split(',')
       .map(origin => origin.trim()),
     credentials: true

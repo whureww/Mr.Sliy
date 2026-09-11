@@ -116,3 +116,10 @@ probe_*.log
 # Local database connection config (contains credentials)
 data/
 database_connections.json
+
+# Personal documents
+开题报告_*.docx
+
+# Installer build artifacts (rebuildable)
+installer/*.exe
+installer/staging/

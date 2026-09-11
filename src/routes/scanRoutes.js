@@ -37,7 +37,7 @@ router.post('/file', async (req, res) => {
     // 如果为在线模式，执行AI优化
     if (mode === 'online' && detectionResult.issues.length > 0) {
       const optimizationResults = [];
-      
+
       for (const issue of detectionResult.issues.slice(0, 5)) { // 限制优化数量
         const optimization = await optimizeWithRAG(issue, {
           language: getFileLanguage(filePath),
@@ -45,11 +45,36 @@ router.post('/file', async (req, res) => {
           message: issue.message,
           taskId: null
         });
-        
+
         optimizationResults.push(optimization);
       }
-      
+
       detectionResult.optimizations = optimizationResults;
+
+      // 汇总本次云端大模型用量（token 与缓存命中）
+      const okResults = optimizationResults.filter((o) => o && o.success && o.usage);
+      if (okResults.length > 0) {
+        const agg = okResults.reduce(
+          (acc, o) => {
+            acc.totalTokens += o.usage.totalTokens || 0;
+            acc.promptTokens += o.usage.promptTokens || 0;
+            acc.completionTokens += o.usage.completionTokens || 0;
+            acc.cacheHitTokens += o.usage.cacheHitTokens || 0;
+            acc.cacheMissTokens += o.usage.cacheMissTokens || 0;
+            return acc;
+          },
+          { totalTokens: 0, promptTokens: 0, completionTokens: 0, cacheHitTokens: 0, cacheMissTokens: 0 }
+        );
+        const cacheTotal = agg.cacheHitTokens + agg.cacheMissTokens;
+        const active = require('../services/llm/providers').providerManager.getActiveProvider();
+        detectionResult.llmUsage = {
+          ...agg,
+          requests: okResults.length,
+          model: okResults.find((o) => o.model)?.model || null,
+          provider: active ? active.name : null,
+          cacheHitRate: cacheTotal > 0 ? Math.round((agg.cacheHitTokens / cacheTotal) * 1000) / 10 : null
+        };
+      }
     }
     
     logger.info(`扫描文件完成: ${filePath}`);
@@ -61,6 +86,7 @@ router.post('/file', async (req, res) => {
       issueCounts: detectionResult.issueCounts,
       issues: detectionResult.issues,
       optimizations: detectionResult.optimizations || [],
+      llmUsage: detectionResult.llmUsage || null,
       durationMs: Date.now() - startTime
     }));
   } catch (err) {
@@ -87,9 +113,12 @@ router.post('/project', async (req, res) => {
     
     if (filesToScan.length === 0) {
       return res.json(success({
+        projectPath,
         totalFiles: 0,
         scannedFiles: 0,
+        failedFiles: 0,
         totalIssues: 0,
+        results: [],
         durationMs: Date.now() - startTime
       }));
     }
@@ -221,15 +250,17 @@ async function createProjectRecord(projectPath) {
  */
 async function createTaskRecord(taskId, projectId, data) {
   const db = getDatabase();
-  
+
+  // scan_task.id 为 INTEGER 自增主键，外部 taskId 仅用于业务关联，不写入主键列
+  // task_name 在旧库结构中为 NOT NULL，统一提供项目目录名作为任务名
   const stmt = db.prepare(`
-    INSERT INTO scan_task (id, project_id, scan_mode, scan_type, target_path, 
+    INSERT INTO scan_task (task_name, project_id, scan_mode, scan_type, target_path,
                            file_count, scanned_files, issue_count, duration_ms, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  
+
   stmt.run(
-    taskId,
+    data.taskName || path.basename(data.targetPath || '') || taskId,
     projectId,
     data.scanMode,
     data.scanType,
@@ -243,3 +274,8 @@ async function createTaskRecord(taskId, projectId, data) {
 }
 
 module.exports = router;
+
+// 供 MCP 工具层复用（项目扫描的文件收集与落库逻辑单一来源）
+module.exports.collectFiles = collectFiles;
+module.exports.createProjectRecord = createProjectRecord;
+module.exports.createTaskRecord = createTaskRecord;

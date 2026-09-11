@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "MRSLIY Code Optimizer",
+  "version": "3.16.0",
+  "identifier": "com.mrsliy.optimizer",
+  "build": {
+    "beforeDevCommand": "npm run dev --prefix gui",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "npm run build --prefix gui",
+    "frontendDist": "../gui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "MR·SLIY 代码优化智能体",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "center": true,
+        "decorations": false,
+        "shadow": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": ["icons/icon.ico"]
+  }
+}

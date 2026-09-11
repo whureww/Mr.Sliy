@@ -7,7 +7,11 @@ const { config } = require('../../config');
 const { logger } = require('../../utils/logger');
 const { generateUUID, retry } = require('../../utils/helpers');
 const { getDatabase } = require('../../utils/database');
-const { providerManager } = require('../llm/providers');
+const {
+  providerManager,
+  OPTIMIZATION_SYSTEM_PROMPT,
+  buildOptimizationPrompt
+} = require('../llm/providers');
 const { knowledgeBase } = require('../vector/knowledgeBase');
 
 // 代码片段向量存储（简化版）
@@ -27,6 +31,7 @@ class AIClient {
 
   /**
    * 调用真实AI API进行代码优化
+   * 提示词与 providers.js 共用同一稳定前缀（前缀缓存命中的前提）
    */
   async optimizeCode(codeSnippet, context) {
     const provider = this.providerManager.getActiveProvider();
@@ -38,15 +43,16 @@ class AIClient {
     }
 
     try {
-      const prompt = this.buildOptimizationPrompt(codeSnippet, context);
+      const prompt = buildOptimizationPrompt(codeSnippet, context);
       const messages = [
-        { role: 'system', content: '你是一个代码优化专家，擅长代码重构、性能优化和最佳实践建议。请严格按照JSON格式返回结果。' },
+        { role: 'system', content: OPTIMIZATION_SYSTEM_PROMPT },
         { role: 'user', content: prompt }
       ];
 
       const result = await provider.chat(messages, {
         temperature: 0.3,
-        maxTokens: 2000
+        maxTokens: 2000,
+        jsonMode: true
       });
 
       // 解析AI返回的结果
@@ -82,7 +88,9 @@ class AIClient {
         optimizedCode,
         explanation,
         suggestions,
-        tokensUsed: result.tokensUsed || 0
+        tokensUsed: result.tokensUsed || 0,
+        usage: result.usage || null,
+        model: result.model || null
       };
     } catch (error) {
       logger.error('AI优化调用失败:', error);
@@ -91,34 +99,6 @@ class AIClient {
         message: error.message
       };
     }
-  }
-
-  /**
-   * 构建优化提示词
-   */
-  buildOptimizationPrompt(codeSnippet, context) {
-    return `请分析以下代码片段并提供优化建议。
-
-代码语言: ${context.language || '未知'}
-代码类型: ${context.issueType || 'general'}
-问题描述: ${context.message || '一般性优化'}
-
-原始代码:
-\`\`\`${context.language || ''}
-${codeSnippet}
-\`\`\`
-
-请提供以下内容：
-1. 优化后的代码（完整可运行的代码）
-2. 优化说明（为什么这样优化，解决了什么问题）
-3. 最佳实践建议（通用的编码建议）
-
-请以JSON格式返回：
-{
-  "optimizedCode": "优化后的完整代码",
-  "explanation": "优化说明",
-  "suggestions": ["建议1", "建议2"]
-}`;
   }
 }
 
@@ -315,6 +295,8 @@ async function optimizeWithRAG(issue, context) {
       suggestions: aiResult.suggestions,
       similarSnippets: similarSnippets,
       tokensUsed: aiResult.tokensUsed,
+      usage: aiResult.usage || null,
+      model: aiResult.model || null,
       durationMs: Date.now() - startTime
     };
   } catch (error) {

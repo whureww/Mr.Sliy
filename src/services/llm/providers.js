@@ -33,6 +33,301 @@ async function getLLMKeyFromDB(providerName) {
 }
 
 /**
+ * 统一提取各格式 API 响应的 token 用量与缓存命中信息
+ * 兼容：OpenAI 兼容(prompt_tokens_details.cached_tokens)、DeepSeek(prompt_cache_hit_tokens)、
+ *      Claude(input_tokens/cache_read_input_tokens)、Ollama(eval_count)、Gemini(usageMetadata)
+ */
+function extractUsage(data) {
+  const u = data?.usage || data?.usageMetadata || {};
+  const promptTokens = u.prompt_tokens ?? u.input_tokens ?? u.prompt_tokens_count ?? u.promptTokenCount ?? 0;
+  const completionTokens = u.completion_tokens ?? u.output_tokens ?? u.eval_count ?? u.candidatesTokenCount ?? 0;
+  let cacheHit = u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens ?? u.cache_read_input_tokens ?? 0;
+  let cacheMiss = u.prompt_cache_miss_tokens ?? u.cache_creation_input_tokens ?? 0;
+  if (!cacheMiss && promptTokens > 0) {
+    cacheMiss = Math.max(0, promptTokens - cacheHit);
+  }
+  const totalTokens = u.total_tokens ?? u.totalTokenCount ?? ((promptTokens + completionTokens) || 0);
+  return {
+    promptTokens: promptTokens || 0,
+    completionTokens: completionTokens || 0,
+    totalTokens: totalTokens || 0,
+    cacheHitTokens: cacheHit || 0,
+    cacheMissTokens: cacheMiss || 0
+  };
+}
+
+/**
+ * 优化请求的稳定系统提示词。
+ * 前缀缓存关键：DeepSeek 等厂商按请求前缀（64 token 块）自动缓存，
+ * 本段与 buildOptimizationPrompt 的固定前缀部分在所有请求间保持逐字一致才能命中缓存，
+ * 修改措辞会导致缓存全量失效，请谨慎调整。
+ */
+const OPTIMIZATION_SYSTEM_PROMPT = `你是一个专业的代码优化专家，擅长代码重构、性能优化、安全加固和最佳实践建议。你将收到一段待优化代码及其问题上下文，需要输出严格符合约定格式的 JSON 结果。
+
+优化总则：
+1. 保持外部行为不变：不改变函数签名、返回值语义和可观察的副作用，除非上下文明确说明问题本身就是行为缺陷。
+2. 优先最小改动：选择风险最低、收益明确的改法，避免大范围重写。
+3. 保持原代码风格与缩进，注释语言与原代码一致。
+4. 若代码已足够好，optimizedCode 可与原代码相同，并在 explanation 中说明原因。
+
+按问题类型的专项策略：
+【安全类】SQL 与命令拼接改为参数化查询或白名单校验；硬编码密钥、账号密码改为环境变量或配置读取；外部输入增加类型与长度校验；eval、new Function 等动态执行替换为静态实现。
+【性能类】循环内不变的计算外提到循环外；频繁的数组 includes/find 改用 Set/Map；循环内字符串拼接改用数组 join 或模板字符串；避免在循环中重复编译正则；多次链式 filter/map 合并为单次遍历。
+【可读性类】var 改为 const/let 并优先 const；魔法数字与魔法字符串提取为具名常量；嵌套超过三层时用提前返回拍平；过长函数按单一职责拆分；重复逻辑提取为公共函数；删除注释掉的死代码与无用变量。
+【现代语法类】回调改为 async/await；对象与数组取值使用解构赋值；字符串拼接使用模板字符串；判空使用可选链 ?. 与空值合并 ??；集合拷贝与合并使用展开运算符。
+【资源与健壮类】文件句柄、数据库连接使用 try/finally 确保释放；异步操作补充错误处理；定时器与事件监听不再使用时及时注销。
+
+输出格式（严格遵守）：
+- 只输出一个 JSON 对象，禁止使用 markdown 代码块包裹，禁止输出 JSON 之外的任何内容。
+- optimizedCode 必须是完整可运行的代码；其中的换行写成 \\n，双引号转义为 \\"，确保 JSON 可被直接解析。
+- explanation 使用简体中文，说明改了什么、为什么、解决了什么问题。
+- suggestions 给出 2~4 条与本次优化相关的最佳实践建议。
+
+输出示例（仅作格式参考，内容必须按实际问题生成）：
+{"optimizedCode": "const MAX_RETRY = 3;\\nfor (let i = 0; i < MAX_RETRY; i++) {\\n  await run(i);\\n}", "explanation": "将魔法数字 3 提取为具名常量 MAX_RETRY，循环计数改用 let 声明，提升可读性与作用域安全性。", "suggestions": ["常量命名使用全大写下划线风格", "声明变量时优先使用 const"]}`;
+
+/**
+ * 构建优化提示词。
+ * 前缀缓存关键：开头到"以下是本次请求的具体上下文"之前的所有内容均为固定文本，
+ * 变化内容（语言/问题/代码）一律放在尾部，确保跨请求前缀逐字一致。
+ */
+function buildOptimizationPrompt(codeSnippet, context) {
+  const MAX_SNIPPET_CHARS = 1500;
+  let snippet = typeof codeSnippet === 'string' ? codeSnippet : '';
+  const notes = [];
+
+  // 大文件按问题行开窗：优先展示问题行附近 ±25 行，替代无差别硬截断
+  const issueLine = context && Number(context.issueLine) > 0 ? Number(context.issueLine) : null;
+  if (issueLine) {
+    const lines = snippet.split('\n');
+    if (lines.length > 60) {
+      const half = 25;
+      const start = Math.max(0, issueLine - 1 - half);
+      const end = Math.min(lines.length, issueLine - 1 + half + 1);
+      snippet = lines.slice(start, end).join('\n');
+      notes.push(`注：文件较长，已围绕第 ${issueLine} 行开窗，仅展示第 ${start + 1}-${end} 行`);
+    }
+  }
+
+  // 超长片段仍做截断兜底：过长的代码既增加调用成本，也是缓存 miss 的主要来源
+  if (snippet.length > MAX_SNIPPET_CHARS) {
+    snippet = snippet.slice(0, MAX_SNIPPET_CHARS);
+    notes.push('原代码过长，以上仅保留前 1500 字符，已截断');
+  }
+
+  return `请分析以下代码片段并提供优化建议。
+
+任务说明：
+- 阅读待优化代码与问题上下文，按照系统提示中的优化总则与专项策略给出最优改法。
+- optimizedCode 必须是完整可运行的代码，不要用省略号或注释截断。
+- explanation 使用简体中文，聚焦主要改动点。
+- suggestions 给出 2~4 条与本次优化相关的最佳实践建议。
+- 返回结果必须是一个可直接被 JSON.parse 解析的 json 对象。
+
+以下是本次请求的具体上下文：
+代码语言: ${context.language || '未知'}
+问题类型: ${context.issueType || 'general'}
+问题描述: ${context.message || '一般性优化'}
+
+待优化代码:
+\`\`\`${context.language || ''}
+${snippet}
+\`\`\`${notes.length ? `\n（${notes.join('；')}）` : ''}`;
+}
+
+/**
+ * 消息规范化：严格对齐官方 OpenAI Chat Completions 的 messages schema。
+ * 只保留 role/content 两个字段，role 限定 system|user|assistant，
+ * content 统一为字符串——任何调用方传入的多余字段都会被剥离，
+ * 保证所有调用路径序列化后的请求逐字节一致（前缀缓存命中的前提）。
+ */
+function normalizeMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  const out = [];
+  for (const m of messages) {
+    if (!m || typeof m !== 'object') continue;
+    const role = m.role === 'system' || m.role === 'user' || m.role === 'assistant' ? m.role : 'user';
+    let content = m.content;
+    if (typeof content !== 'string') {
+      // 官方多模态数组格式 → 拼接其中的 text 段
+      if (Array.isArray(content)) content = content.filter(p => p && typeof p.text === 'string').map(p => p.text).join('\n');
+      else if (content != null) content = String(content);
+      else continue;
+    }
+    out.push({ role, content });
+  }
+  return out;
+}
+
+/**
+ * 构建官方 OpenAI Chat Completions 请求体。
+ * 字段与顺序严格对齐官方文档示例：model → messages → temperature → top_p
+ * → max_tokens → stream → response_format，所有 OpenAI 兼容提供商共用，
+ * 确保字节级一致的请求构造（前缀缓存命中的前提）。
+ * @param {object} p
+ * @param {string} p.model        模型名
+ * @param {Array}  p.messages     已规范化消息
+ * @param {object} p.options      temperature/topP/maxTokens/stream/jsonMode
+ * @param {boolean} p.jsonMode    追加官方 response_format: {type:'json_object'}
+ */
+function buildChatCompletionsBody({ model, messages, options = {}, jsonMode = false }) {
+  const body = {
+    model,
+    messages,
+    temperature: options.temperature ?? 0.7,
+    top_p: options.topP ?? 1,
+    max_tokens: options.maxTokens ?? 2000,
+    stream: options.stream ?? false
+  };
+  if (jsonMode) body.response_format = { type: 'json_object' };
+  return body;
+}
+
+/**
+ * 统一执行 OpenAI 兼容 /chat/completions 调用。
+ * 所有 OpenAI 协议提供商（OpenAI/DeepSeek/智谱/Moonshot/豆包/自定义）共用：
+ * - 请求体由 buildChatCompletionsBody 统一构造（官方格式）
+ * - 错误按官方 schema 解析（error.message）
+ * - 响应按官方 schema 提取（choices[0].message.content + usage）
+ * - json 模式下若网关返回 400（不支持 response_format），自动降级重试一次
+ * - 返回值附带 extractUsage 的缓存命中统计
+ */
+async function postChatCompletions({ url, apiKey, model, messages, options = {}, jsonMode = false, label = 'LLM' }) {
+  const send = async (withJsonMode) => {
+    const body = buildChatCompletionsBody({ model, messages: normalizeMessages(messages), options, jsonMode: withJsonMode });
+    return fetchWithRetry(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(body)
+    }, label);
+  };
+
+  let response = await send(jsonMode);
+  // 部分 OpenAI 兼容网关不支持 response_format：400 时去掉该字段重试一次
+  if (!response.ok && response.status === 400 && jsonMode) {
+    response = await send(false);
+  }
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`${label}错误: ${errorData.error?.message || errorData.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content || '';
+
+  // 按官方语义解析 JSON 输出（json 模式或模型自律输出时直接得到对象）
+  let parsed = null;
+  try {
+    const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
+    if (jsonMatch) parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+  } catch (e) { /* 保持 null，调用方按原文处理 */ }
+
+  return {
+    // 仅在调用方明确要求 JSON 输出（jsonMode）时才把解析结果作为 content；
+    // 普通聊天回复可能包含 JSON 示例/代码块，绝不能自动解析成对象（否则前端收到 [object Object]）
+    content: jsonMode && parsed ? parsed : content,
+    rawContent: content,
+    tokensUsed: data.usage?.total_tokens || 0,
+    usage: extractUsage(data),
+    model: data.model || model
+  };
+}
+
+/**
+ * 带指数退避的 fetch 重试：429 限流、5xx 服务端错误、网络抖动自动重试（最多 2 次）。
+ * 4xx 业务错误（401/400 等）不重试；AbortError（用户主动取消）立即抛出。
+ */
+async function fetchWithRetry(url, options = {}, label = 'LLM', maxRetries = 2) {
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if ((res.status === 429 || res.status >= 500) && attempt < maxRetries) {
+        logger.warn(`${label} 请求被限流/服务异常(${res.status})，${Math.round(800 * Math.pow(2, attempt))}ms 后重试 (${attempt + 1}/${maxRetries})`);
+        await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt)));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      if (e && e.name === 'AbortError') throw e;
+      if (attempt < maxRetries) {
+        logger.warn(`${label} 网络错误(${e.message})，${Math.round(800 * Math.pow(2, attempt))}ms 后重试 (${attempt + 1}/${maxRetries})`);
+        await new Promise((r) => setTimeout(r, 800 * Math.pow(2, attempt)));
+        continue;
+      }
+      throw e;
+    }
+  }
+  throw lastErr;
+}
+
+/**
+ * OpenAI 兼容协议的 SSE 流式对话：逐 delta 回调 onDelta，返回完整聚合结果。
+ * body 由 buildChatCompletionsBody 统一构造（stream: true）。
+ */
+async function streamChatCompletions({ url, apiKey, model, messages, options = {}, label = 'LLM', onDelta = () => {}, signal }) {
+  const body = buildChatCompletionsBody({ model, messages: normalizeMessages(messages), options: { ...options, stream: true }, jsonMode: false });
+  const response = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(body),
+    signal
+  }, label);
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`${label}错误: ${errorData.error?.message || errorData.message || response.statusText}`);
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+  let usage = null;
+  let modelUsed = model;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const lines = buf.split('\n');
+    buf = lines.pop() || '';
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t.startsWith('data:')) continue;
+      const payload = t.slice(5).trim();
+      if (!payload || payload === '[DONE]') continue;
+      try {
+        const j = JSON.parse(payload);
+        const delta = j.choices?.[0]?.delta?.content || '';
+        if (delta) {
+          full += delta;
+          onDelta(delta);
+        }
+        if (j.usage) usage = extractUsage(j);
+        if (j.model) modelUsed = j.model;
+      } catch (e) { /* 忽略无法解析的心跳/杂项行 */ }
+    }
+  }
+
+  return {
+    content: full,
+    rawContent: full,
+    tokensUsed: usage?.total_tokens || 0,
+    usage,
+    model: modelUsed
+  };
+}
+
+/**
  * LLM提供商基类
  */
 class LLMProvider {
@@ -41,6 +336,21 @@ class LLMProvider {
     this.config = config;
     this.cachedKey = null;
     this.cacheTime = 0;
+    // 由 providerManager.register 注入，用于记录 token 用量
+    this.usageRecorder = null;
+  }
+
+  /**
+   * 记录一次调用的用量（注入的 usageRecorder 由管理器实现）
+   */
+  trackUsage(data) {
+    try {
+      if (typeof this.usageRecorder === 'function' && data) {
+        this.usageRecorder(extractUsage(data), data.model);
+      }
+    } catch (e) {
+      // 记录失败不影响主流程
+    }
   }
 
   async getKeyFromDB() {
@@ -48,7 +358,7 @@ class LLMProvider {
     if (this.cachedKey && now - this.cacheTime < 300000) {
       return this.cachedKey;
     }
-    
+
     const key = await getLLMKeyFromDB(this.name);
     if (key) {
       this.cachedKey = key;
@@ -61,38 +371,45 @@ class LLMProvider {
     throw new Error('子类必须实现chat方法');
   }
 
-  async optimizeCode(codeSnippet, context, options = {}) {
-    const prompt = this.buildOptimizationPrompt(codeSnippet, context);
-    const messages = [
-      { role: 'system', content: '你是一个专业的代码优化专家，擅长代码重构、性能优化和最佳实践建议。' },
-      { role: 'user', content: prompt }
-    ];
-    return this.chat(messages, options);
+  /**
+   * 流式对话：OpenAI 兼容协议提供商（openaiProtocol 标记）走 SSE 真·逐字输出，
+   * 其余提供商回落为一次性返回（模拟单次增量）。signal 用于用户中断。
+   */
+  async chatStream(messages, options = {}, onDelta = () => {}, signal) {
+    if (!this.openaiProtocol) {
+      const result = await this.chat(messages, { ...options, jsonMode: false });
+      const content = typeof result.content === 'string' ? result.content : String(result.content || '');
+      if (content) onDelta(content);
+      return result;
+    }
+
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key) {
+      throw new Error(`${this.name} API Key未配置`);
+    }
+    const apiKey = dbKey.api_key;
+    const baseUrl = (dbKey.api_url || this.baseURL).replace(/\/+$/, '');
+    const url = baseUrl.endsWith('/chat/completions') ? baseUrl : baseUrl + '/chat/completions';
+    return streamChatCompletions({
+      url,
+      apiKey,
+      model: options.model || dbKey.model_name || this.model,
+      messages,
+      options,
+      label: `${this.name} API`,
+      onDelta,
+      signal
+    });
   }
 
-  buildOptimizationPrompt(codeSnippet, context) {
-    return `请分析以下代码片段并提供优化建议。
-
-代码语言: ${context.language || '未知'}
-问题类型: ${context.issueType || '一般优化'}
-问题描述: ${context.message || ''}
-
-原始代码:
-\`\`\`${context.language || ''}
-${codeSnippet}
-\`\`\`
-
-请提供以下内容：
-1. 优化后的代码（完整可运行的代码）
-2. 优化说明（为什么这样优化，解决了什么问题）
-3. 最佳实践建议（通用的编码建议）
-
-请以JSON格式返回：
-{
-  "optimizedCode": "优化后的完整代码",
-  "explanation": "优化说明",
-  "suggestions": ["建议1", "建议2"]
-}`;
+  async optimizeCode(codeSnippet, context, options = {}) {
+    const prompt = buildOptimizationPrompt(codeSnippet, context);
+    const messages = [
+      { role: 'system', content: OPTIMIZATION_SYSTEM_PROMPT },
+      { role: 'user', content: prompt }
+    ];
+    // jsonMode → 官方 response_format: {type:'json_object'}，提升 JSON 输出可靠性
+    return this.chat(messages, { ...options, jsonMode: true });
   }
 }
 
@@ -102,6 +419,7 @@ ${codeSnippet}
 class OpenAIProvider extends LLMProvider {
   constructor(config) {
     super('openai', config);
+    this.openaiProtocol = true;
     this.baseURL = config.baseURL || 'https://api.openai.com/v1';
     this.model = config.model || 'gpt-4';
   }
@@ -118,48 +436,19 @@ class OpenAIProvider extends LLMProvider {
     }
 
     const apiKey = dbKey.api_key;
-    const url = (dbKey.api_url || this.baseURL) + '/chat/completions';
-    const body = {
-      model: options.model || dbKey.model_name || this.model,
-      messages,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens || 2000,
-      top_p: options.topP || 1,
-      stream: options.stream || false
-    };
+    const baseUrl = (dbKey.api_url || this.baseURL).replace(/\/+$/, '');
+    const url = baseUrl.endsWith('/chat/completions') ? baseUrl : baseUrl + '/chat/completions';
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(body)
+      return await postChatCompletions({
+        url,
+        apiKey,
+        model: options.model || dbKey.model_name || this.model,
+        messages,
+        options,
+        jsonMode: !!options.jsonMode,
+        label: 'OpenAI API'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`OpenAI API错误: ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      const content = data.choices[0]?.message?.content || '';
-      
-      let parsed = null;
-      try {
-        const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-        }
-      } catch (e) {}
-
-      return {
-        content: parsed || content,
-        rawContent: content,
-        tokensUsed: data.usage?.total_tokens || 0,
-        model: data.model
-      };
     } catch (error) {
       logger.error('OpenAI调用失败:', error);
       throw error;
@@ -207,7 +496,7 @@ class ClaudeProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -215,7 +504,7 @@ class ClaudeProvider extends LLMProvider {
           'anthropic-version': '2023-06-01'
         },
         body: JSON.stringify(body)
-      });
+      }, 'Claude API');
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -234,9 +523,10 @@ class ClaudeProvider extends LLMProvider {
       } catch (e) {}
 
       return {
-        content: parsed || content,
+        content: options.jsonMode && parsed ? parsed : content,
         rawContent: content,
         tokensUsed: data.usage?.input_tokens + data.usage?.output_tokens || 0,
+        usage: extractUsage(data),
         model: data.model
       };
     } catch (error) {
@@ -310,9 +600,10 @@ class OllamaProvider extends LLMProvider {
       } catch (e) {}
 
       return {
-        content: parsed || content,
+        content: options.jsonMode && parsed ? parsed : content,
         rawContent: content,
         tokensUsed: data.eval_count || 0,
+        usage: extractUsage(data),
         model: data.model
       };
     } catch (error) {
@@ -363,11 +654,11 @@ class GeminiProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(`${url}?key=${apiKey}`, {
+      const response = await fetchWithRetry(`${url}?key=${apiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-      });
+      }, 'Gemini API');
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -386,9 +677,10 @@ class GeminiProvider extends LLMProvider {
       } catch (e) {}
 
       return {
-        content: parsed || content,
+        content: options.jsonMode && parsed ? parsed : content,
         rawContent: content,
         tokensUsed: data.usageMetadata?.totalTokenCount || 0,
+        usage: extractUsage(data),
         model: data.model
       };
     } catch (error) {
@@ -434,14 +726,14 @@ class TongyiProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify(body)
-      });
+      }, '通义千问');
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -460,9 +752,10 @@ class TongyiProvider extends LLMProvider {
       } catch (e) {}
 
       return {
-        content: parsed || content,
+        content: options.jsonMode && parsed ? parsed : content,
         rawContent: content,
         tokensUsed: data.usage?.total_tokens || 0,
+        usage: extractUsage(data),
         model: data.model
       };
     } catch (error) {
@@ -478,6 +771,7 @@ class TongyiProvider extends LLMProvider {
 class DoubaoProvider extends LLMProvider {
   constructor(config) {
     super('doubao', config);
+    this.openaiProtocol = true;
     this.baseURL = config.baseURL || 'https://api.doubao.com/v1';
     this.model = config.model || 'Doubao-7B';
   }
@@ -494,47 +788,19 @@ class DoubaoProvider extends LLMProvider {
     }
 
     const apiKey = dbKey.api_key;
-    const baseUrl = dbKey.api_url || this.baseURL;
-    const url = `${baseUrl}/chat/completions`;
-    const body = {
-      model: options.model || dbKey.model_name || this.model,
-      messages,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens || 2000
-    };
+    const baseUrl = (dbKey.api_url || this.baseURL).replace(/\/+$/, '');
+    const url = baseUrl.endsWith('/chat/completions') ? baseUrl : baseUrl + '/chat/completions';
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(body)
+      return await postChatCompletions({
+        url,
+        apiKey,
+        model: options.model || dbKey.model_name || this.model,
+        messages,
+        options,
+        jsonMode: !!options.jsonMode,
+        label: '豆包 API'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`豆包 API错误: ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      const content = data.choices[0]?.message?.content || '';
-
-      let parsed = null;
-      try {
-        const jsonMatch = content.match(/```json\s*([\s\S]*?)\s*```/) || content.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-        }
-      } catch (e) {}
-
-      return {
-        content: parsed || content,
-        rawContent: content,
-        tokensUsed: data.usage?.total_tokens || 0,
-        model: data.model
-      };
     } catch (error) {
       logger.error('豆包调用失败:', error);
       throw error;
@@ -574,7 +840,7 @@ class WenxinProvider extends LLMProvider {
     }
 
     const url = `https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id=${apiKey}&client_secret=${secretKey}`;
-    const response = await fetch(url);
+    const response = await fetchWithRetry(url, {}, '文心一言Token');
     const data = await response.json();
     
     this.accessToken = data.access_token;
@@ -616,11 +882,11 @@ class WenxinProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
-      });
+      }, '文心一言');
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -639,9 +905,10 @@ class WenxinProvider extends LLMProvider {
       } catch (e) {}
 
       return {
-        content: parsed || content,
+        content: options.jsonMode && parsed ? parsed : content,
         rawContent: content,
         tokensUsed: data.usage?.total_tokens || 0,
+        usage: extractUsage(data),
         model: model
       };
     } catch (error) {
@@ -684,14 +951,14 @@ class AzureOpenAIProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'api-key': apiKey
         },
         body: JSON.stringify(body)
-      });
+      }, 'Azure OpenAI');
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -710,9 +977,10 @@ class AzureOpenAIProvider extends LLMProvider {
       } catch (e) {}
 
       return {
-        content: parsed || content,
+        content: options.jsonMode && parsed ? parsed : content,
         rawContent: content,
         tokensUsed: data.usage?.total_tokens || 0,
+        usage: extractUsage(data),
         model: data.model
       };
     } catch (error) {
@@ -728,6 +996,7 @@ class AzureOpenAIProvider extends LLMProvider {
 class DeepSeekProvider extends LLMProvider {
   constructor(config) {
     super('deepseek', config);
+    this.openaiProtocol = true;
     this.baseURL = config.baseURL || 'https://api.deepseek.com/v1';
     this.model = config.model || 'deepseek-chat';
   }
@@ -744,40 +1013,19 @@ class DeepSeekProvider extends LLMProvider {
     }
 
     const apiKey = dbKey.api_key;
-    const url = (dbKey.api_url || this.baseURL) + '/chat/completions';
-    const body = {
-      model: options.model || dbKey.model_name || this.model,
-      messages,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens || 2000,
-      top_p: options.topP || 1,
-      stream: options.stream || false
-    };
+    const baseUrl = (dbKey.api_url || this.baseURL).replace(/\/+$/, '');
+    const url = baseUrl.endsWith('/chat/completions') ? baseUrl : baseUrl + '/chat/completions';
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(body)
+      return await postChatCompletions({
+        url,
+        apiKey,
+        model: options.model || dbKey.model_name || this.model,
+        messages,
+        options,
+        jsonMode: !!options.jsonMode,
+        label: 'DeepSeek'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`DeepSeek错误: ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      const content = data.choices[0]?.message?.content || '';
-
-      return {
-        content,
-        rawContent: content,
-        tokensUsed: data.usage?.total_tokens || 0,
-        model: data.model
-      };
     } catch (error) {
       logger.error('DeepSeek调用失败:', error);
       throw error;
@@ -818,14 +1066,14 @@ class ZhipuProvider extends LLMProvider {
     };
 
     try {
-      const response = await fetch(url, {
+      const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${apiKey}`
         },
         body: JSON.stringify(body)
-      });
+      }, '智谱AI');
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
@@ -839,6 +1087,7 @@ class ZhipuProvider extends LLMProvider {
         content,
         rawContent: content,
         tokensUsed: data.usage?.total_tokens || 0,
+        usage: extractUsage(data),
         model: data.model
       };
     } catch (error) {
@@ -854,6 +1103,7 @@ class ZhipuProvider extends LLMProvider {
 class MoonshotProvider extends LLMProvider {
   constructor(config) {
     super('moonshot', config);
+    this.openaiProtocol = true;
     this.baseURL = config.baseURL || 'https://api.moonshot.cn/v1';
     this.model = config.model || 'moonshot-v1-8k';
   }
@@ -870,43 +1120,65 @@ class MoonshotProvider extends LLMProvider {
     }
 
     const apiKey = dbKey.api_key;
-    const baseUrl = dbKey.api_url || this.baseURL;
-    const url = `${baseUrl}/chat/completions`;
-    const body = {
-      model: options.model || dbKey.model_name || this.model,
-      messages,
-      temperature: options.temperature ?? 0.7,
-      max_tokens: options.maxTokens || 2000,
-      top_p: options.topP || 1,
-      stream: options.stream || false
-    };
+    const baseUrl = (dbKey.api_url || this.baseURL).replace(/\/+$/, '');
+    const url = baseUrl.endsWith('/chat/completions') ? baseUrl : baseUrl + '/chat/completions';
 
     try {
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${apiKey}`
-        },
-        body: JSON.stringify(body)
+      return await postChatCompletions({
+        url,
+        apiKey,
+        model: options.model || dbKey.model_name || this.model,
+        messages,
+        options,
+        jsonMode: !!options.jsonMode,
+        label: 'Moonshot'
       });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Moonshot错误: ${errorData.error?.message || response.statusText}`);
-      }
-
-      const data = await response.json();
-      const content = data.choices[0]?.message?.content || '';
-
-      return {
-        content,
-        rawContent: content,
-        tokensUsed: data.usage?.total_tokens || 0,
-        model: data.model
-      };
     } catch (error) {
       logger.error('Moonshot调用失败:', error);
+      throw error;
+    }
+  }
+}
+
+/**
+ * 自定义提供商（OpenAI 兼容协议）
+ * 适配任意兼容 /chat/completions 的服务：国产模型代理、OneAPI、vLLM、私有部署等
+ * name 以 custom- 开头，配置从 llm_api_keys 表按名读取
+ */
+class CustomProvider extends LLMProvider {
+  constructor(name, config) {
+    super(name, config);
+    this.openaiProtocol = true;
+    this.model = config.model || '';
+  }
+
+  async isAvailable() {
+    const key = await this.getKeyFromDB();
+    return !!key && !!key.api_key && !!key.api_url;
+  }
+
+  async chat(messages, options = {}) {
+    const dbKey = await this.getKeyFromDB();
+    if (!dbKey || !dbKey.api_key || !dbKey.api_url) {
+      throw new Error(`自定义提供商 ${this.name} 配置不完整（需 API Key 与 API 地址）`);
+    }
+
+    const apiKey = dbKey.api_key;
+    const base = dbKey.api_url.replace(/\/+$/, '');
+    const url = base.endsWith('/chat/completions') ? base : base + '/chat/completions';
+
+    try {
+      return await postChatCompletions({
+        url,
+        apiKey,
+        model: options.model || dbKey.model_name || this.model || 'default',
+        messages,
+        options,
+        jsonMode: !!options.jsonMode,
+        label: this.name
+      });
+    } catch (error) {
+      logger.error(`自定义提供商 ${this.name} 调用失败:`, error);
       throw error;
     }
   }
@@ -920,7 +1192,16 @@ class LLMProviderManager {
     this.providers = new Map();
     this.activeProvider = null;
     this._cachedProviders = [];
-    
+    // 会话级用量统计（实时），历史累计持久化在 api_request_log
+    this.sessionUsage = {
+      totalTokens: 0,
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+      requests: 0
+    };
+
     this.register('openai', {});
     this.register('deepseek', {});
     this.register('zhipu', {});
@@ -928,10 +1209,87 @@ class LLMProviderManager {
     this.register('moonshot', {});
     this.register('ollama', {});
   }
+
+  /**
+   * 记录一次调用用量：更新会话统计 + 持久化到 api_request_log
+   */
+  recordUsage(usage, providerName, model) {
+    if (!usage || typeof usage !== 'object') return;
+    const s = this.sessionUsage;
+    s.requests += 1;
+    s.totalTokens += usage.totalTokens || 0;
+    s.promptTokens += usage.promptTokens || 0;
+    s.completionTokens += usage.completionTokens || 0;
+    s.cacheHitTokens += usage.cacheHitTokens || 0;
+    s.cacheMissTokens += usage.cacheMissTokens || 0;
+    try {
+      const { getDatabase } = require('../../utils/database');
+      const db = getDatabase();
+      db.prepare(
+        `INSERT INTO api_request_log (provider_name, endpoint, request_method, response_status, tokens_used, is_success)
+         VALUES (?, ?, 'POST', 200, ?, 1)`
+      ).run(providerName || 'unknown', model || 'chat/completions', usage.totalTokens || 0);
+    } catch (e) {
+      logger.debug(`记录API用量失败: ${e.message}`);
+    }
+  }
+
+  /**
+   * 查询用量：会话实时 + 历史累计（api_request_log 聚合）
+   */
+  getUsageStats() {
+    let history = { totalTokens: 0, requests: 0 };
+    try {
+      const { getDatabase } = require('../../utils/database');
+      const db = getDatabase();
+      const row = db.prepare(
+        `SELECT COALESCE(SUM(tokens_used), 0) AS totalTokens, COUNT(*) AS requests
+         FROM api_request_log WHERE is_success = 1`
+      ).get();
+      if (row) history = { totalTokens: row.totalTokens || 0, requests: row.requests || 0 };
+    } catch (e) {
+      logger.debug(`查询历史用量失败: ${e.message}`);
+    }
+    const active = this.getActiveProvider();
+    const s = this.sessionUsage;
+    const cacheTotal = s.cacheHitTokens + s.cacheMissTokens;
+    return {
+      active: active ? { name: active.name, model: active.model || null } : null,
+      session: {
+        ...s,
+        cacheHitRate: cacheTotal > 0 ? Math.round((s.cacheHitTokens / cacheTotal) * 1000) / 10 : null
+      },
+      history
+    };
+  }
   
   async init() {
+    await this.loadCustomProviders();
     await this.refreshProviderStatus();
     await this.restoreActiveProvider();
+  }
+
+  /**
+   * 从数据库加载自定义提供商（provider_name 以 custom- 开头）
+   */
+  async loadCustomProviders() {
+    try {
+      const { dbAdapter } = require('../../utils/dbAdapter');
+      const sqlite = dbAdapter.getSqlite();
+      const rows = sqlite.prepare("SELECT provider_name, api_url, model_name FROM llm_api_keys WHERE provider_name LIKE 'custom-%'").all();
+      for (const row of rows) {
+        try {
+          this.register(row.provider_name, {});
+        } catch (e) {
+          logger.warn(`加载自定义提供商 ${row.provider_name} 失败: ${e.message}`);
+        }
+      }
+      if (rows.length > 0) {
+        logger.info(`已加载 ${rows.length} 个自定义LLM提供商`);
+      }
+    } catch (error) {
+      logger.warn(`加载自定义提供商失败: ${error.message}`);
+    }
   }
   
   async restoreActiveProvider() {
@@ -1049,10 +1407,29 @@ class LLMProviderManager {
         provider = new MoonshotProvider(config);
         break;
       default:
-        throw new Error(`不支持的提供商: ${name}`);
+        if (name.toLowerCase().startsWith('custom-')) {
+          provider = new CustomProvider(name.toLowerCase(), config);
+        } else {
+          throw new Error(`不支持的提供商: ${name}`);
+        }
     }
 
-    this.providers.set(name.toLowerCase(), provider);
+    // 包装 chat：统一记录 token 用量与缓存命中（覆盖所有调用路径）
+    const providerName = name.toLowerCase();
+    const originalChat = provider.chat.bind(provider);
+    provider.chat = async (messages, options) => {
+      const result = await originalChat(messages, options);
+      try {
+        if (result && result.usage) {
+          this.recordUsage(result.usage, providerName, result.model);
+        }
+      } catch (e) {
+        // 记录失败不影响调用
+      }
+      return result;
+    };
+
+    this.providers.set(providerName, provider);
     
     // Worker 环境下使用 debug 级别，避免重复日志
     const isWorker = !!process.env.WORKER_THREAD_ID;
@@ -1146,6 +1523,21 @@ class LLMProviderManager {
   }
 
   /**
+   * 注销提供商（删除自定义提供商时调用）
+   */
+  unregister(name) {
+    const key = name.toLowerCase();
+    const provider = this.providers.get(key);
+    if (provider) {
+      this.providers.delete(key);
+      if (this.activeProvider === provider) {
+        this.activeProvider = null;
+      }
+      logger.info(`注销LLM提供商: ${key}`);
+    }
+  }
+
+  /**
    * 更新提供商配置
    */
   updateProviderConfig(name, config) {
@@ -1177,5 +1569,8 @@ module.exports = {
   TongyiProvider,
   DoubaoProvider,
   WenxinProvider,
+  CustomProvider,
+  OPTIMIZATION_SYSTEM_PROMPT,
+  buildOptimizationPrompt,
   providerManager
 };

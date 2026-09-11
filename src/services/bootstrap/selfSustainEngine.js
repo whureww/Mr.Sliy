@@ -56,7 +56,7 @@ class SelfSustainEngine {
     }
 
     this.isRunning = true;
-    logger.info('🚀 AI自持引擎已启动 - 进入自主运行模式');
+    logger.info('AI自持引擎已启动 - 进入自主运行模式');
 
     this.sustainCycleTimer = setInterval(() => {
       this.runSustainCycle().catch(err => {
@@ -274,7 +274,7 @@ class SelfSustainEngine {
       return;
     }
     
-    logger.info('🔄 检测到系统空闲，开始自动执行更新和修复...');
+    logger.info('检测到系统空闲，开始自动执行更新和修复...');
     this.lastAutoActionTime = Date.now();
     
     // 发出开始事件
@@ -291,7 +291,7 @@ class SelfSustainEngine {
         await this.runAutoUpdateCheck();
       }
       
-      logger.info('✅ 自动更新修复完成');
+      logger.info('自动更新修复完成');
       telemetry.recordEvent('auto_maintenance_complete', 'sustain_engine', {}, 'info');
       
       // 发出结束事件（成功）
@@ -311,7 +311,7 @@ class SelfSustainEngine {
    * 自动执行修复
    */
   async runAutoRepair() {
-    logger.info('🔧 开始自动修复检查...');
+    logger.info('开始自动修复检查...');
     
     try {
       // 获取系统健康状态
@@ -332,12 +332,12 @@ class SelfSustainEngine {
             });
             
             if (result.success) {
-              logger.info(`✅ 自动修复成功: ${issue}`);
+              logger.info(`自动修复成功: ${issue}`);
               telemetry.recordEvent('auto_repair_success', 'sustain_engine', {
                 issue
               }, 'info');
             } else {
-              logger.warn(`❌ 自动修复失败: ${issue}`);
+              logger.warn(`自动修复失败: ${issue}`);
               telemetry.recordEvent('auto_repair_failure', 'sustain_engine', {
                 issue,
                 reason: result.message
@@ -359,7 +359,7 @@ class SelfSustainEngine {
    * 自动执行更新检查
    */
   async runAutoUpdateCheck() {
-    logger.info('🔍 开始自动更新检查...');
+    logger.info('开始自动更新检查...');
     
     try {
       // 检查是否有待处理的更新建议
@@ -382,13 +382,13 @@ class SelfSustainEngine {
             });
             
             if (result.success) {
-              logger.info(`✅ 更新成功: ${updateDescription}`);
+              logger.info(`更新成功: ${updateDescription}`);
               telemetry.recordEvent('auto_update_success', 'sustain_engine', {
                 updateType: update.updateType,
                 description: updateDescription
               }, 'info');
             } else {
-              logger.warn(`❌ 更新失败: ${updateDescription}`);
+              logger.warn(`更新失败: ${updateDescription}`);
             }
           } catch (updateError) {
             logger.error(`执行更新 ${update.id} 时发生异常: ${updateError.message}`);

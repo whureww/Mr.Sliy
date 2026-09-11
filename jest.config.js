@@ -11,7 +11,6 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/backups/',
-    '/test_scan/',
     '/src/sandbox/test\\.js$'
   ],
   collectCoverageFrom: [

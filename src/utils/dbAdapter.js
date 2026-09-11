@@ -46,7 +46,7 @@ function getSqliteDatabase() {
         
         // 简单的控制台提示（非交互式，避免阻塞启动）
         console.log('\n' + '='.repeat(60));
-        console.log(' ⚠️  检测到旧数据库文件');
+        console.log('  检测到旧数据库文件');
         console.log(`    旧位置: ${oldDbPath}`);
         console.log(`    新位置: ${dbPath}`);
         console.log('='.repeat(60));
@@ -1565,56 +1565,60 @@ class DbAdapter {
   }
 
   transaction(fn) {
-    let result;
-    const sqlOperations = [];
-    const originalPrepare = this._sqlite.prepare.bind(this._sqlite);
-    
-    try {
-      this._sqlite.prepare = (sql) => {
-        const stmt = originalPrepare(sql);
-        const originalRun = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const tableName = extractTableName(sql);
-          sqlOperations.push({ sql, params: args, tableName });
-          return originalRun(...args);
+    // 兼容 better-sqlite3 语义：返回可调用函数，调用时才真正执行事务并转发参数
+    return (...args) => {
+      const sqlOperations = [];
+      const originalPrepare = this._sqlite.prepare.bind(this._sqlite);
+      let result;
+
+      try {
+        this._sqlite.prepare = (sql) => {
+          const stmt = originalPrepare(sql);
+          const originalRun = stmt.run.bind(stmt);
+          stmt.run = (...runArgs) => {
+            const tableName = extractTableName(sql);
+            sqlOperations.push({ sql, params: runArgs, tableName });
+            return originalRun(...runArgs);
+          };
+          return stmt;
         };
-        return stmt;
-      };
-      
-      result = this._sqlite.transaction(fn)();
-    } finally {
-      this._sqlite.prepare = originalPrepare;
-    }
-    
-    if (mysql.isEnabled() && sqlOperations.length > 0) {
-      setImmediate(async () => {
-        try {
-          const pool = mysql.getPool();
-          if (pool) {
-            const connection = await pool.getConnection();
-            await connection.beginTransaction();
-            try {
-              for (const op of sqlOperations) {
-                const mysqlSql = convertSqlForMysql(op.sql);
-                const params = Array.isArray(op.params[0]) ? op.params[0] : [];
-                const convertedParams = convertTimestampParams(params, op.tableName);
-                await connection.execute(mysqlSql, convertedParams);
+
+        const tx = this._sqlite.transaction(fn);
+        result = tx(...args);
+      } finally {
+        this._sqlite.prepare = originalPrepare;
+      }
+
+      if (mysql.isEnabled() && sqlOperations.length > 0) {
+        setImmediate(async () => {
+          try {
+            const pool = mysql.getPool();
+            if (pool) {
+              const connection = await pool.getConnection();
+              await connection.beginTransaction();
+              try {
+                for (const op of sqlOperations) {
+                  const mysqlSql = convertSqlForMysql(op.sql);
+                  const params = Array.isArray(op.params[0]) ? op.params[0] : [];
+                  const convertedParams = convertTimestampParams(params, op.tableName);
+                  await connection.execute(mysqlSql, convertedParams);
+                }
+                await connection.commit();
+              } catch (error) {
+                await connection.rollback();
+                logger.warn(`MySQL事务失败: ${error.message}`);
+              } finally {
+                connection.release();
               }
-              await connection.commit();
-            } catch (error) {
-              await connection.rollback();
-              logger.warn(`MySQL事务失败: ${error.message}`);
-            } finally {
-              connection.release();
             }
+          } catch (error) {
+            logger.warn(`MySQL事务初始化失败: ${error.message}`);
           }
-        } catch (error) {
-          logger.warn(`MySQL事务初始化失败: ${error.message}`);
-        }
-      });
-    }
-    
-    return result;
+        });
+      }
+
+      return result;
+    };
   }
 
   async syncLocalToRemote(tableName, mode = 'merge') {

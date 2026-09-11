@@ -9,12 +9,13 @@ const router = express.Router();
 const { selfUpdateManager } = require('../services/bootstrap/selfUpdateManager');
 const { selfRepairManager } = require('../services/bootstrap/selfRepairManager');
 const { confirmationGate } = require('../services/bootstrap/confirmationGate');
+const { checkRemoteUpdate, getUpdateSourceUrl, saveUpdateSourceUrl, SOURCE_FILE, CURRENT_VERSION } = require('../services/bootstrap/versionCheck');
 const { logger } = require('../utils/logger');
 
 router.get('/updates', async (req, res) => {
   try {
     const { limit = 20, status } = req.query;
-    const updates = await selfUpdateManager.listUpdates(parseInt(limit), status);
+    const updates = await selfUpdateManager.listUpdates(status || null, parseInt(limit));
     
     res.json({
       success: true,
@@ -231,8 +232,7 @@ router.get('/confirmations', async (req, res) => {
 
 router.post('/check-update', async (req, res) => {
   try {
-    const result = await selfUpdateManager.checkForUpdates();
-    
+    const result = await checkRemoteUpdate();
     res.json({
       success: true,
       data: result
@@ -243,6 +243,38 @@ router.post('/check-update', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+/** 更新源地址：读取 / 保存（保存到 ~/.mr-sliy/update_source.json） */
+router.get('/update-source', (req, res) => {
+  res.json({ success: true, data: { url: getUpdateSourceUrl(), file: SOURCE_FILE, currentVersion: CURRENT_VERSION } });
+});
+
+router.post('/update-source', (req, res) => {
+  try {
+    const url = saveUpdateSourceUrl(req.body && req.body.url);
+    res.json({ success: true, data: { url } });
+  } catch (e) {
+    res.status(400).json({ success: false, error: e.message });
+  }
+});
+
+/** 用系统默认浏览器打开下载页（仅允许 http/https） */
+router.post('/open-url', (req, res) => {
+  const url = String((req.body && req.body.url) || '');
+  if (!/^https?:\/\//i.test(url)) {
+    return res.status(400).json({ success: false, error: '仅允许打开 http/https 链接' });
+  }
+  try {
+    const { spawn } = require('child_process');
+    // explorer.exe 打开 URL 会使用系统默认浏览器
+    const child = spawn('explorer.exe', [url], { detached: true, stdio: 'ignore' });
+    child.on('error', (e) => logger.warn('打开链接失败:', e.message));
+    child.unref();
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
   }
 });
 

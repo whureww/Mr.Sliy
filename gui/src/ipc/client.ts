@@ -1,0 +1,447 @@
+import { invoke } from '@tauri-apps/api/core';
+
+const IS_TAURI = '__TAURI_INTERNALS__' in window;
+const DEV_PORT = 3000; // 浏览器调试时直连本地 server
+
+export interface FileNode {
+  name: string;
+  path: string;
+  is_dir: boolean;
+}
+
+export interface Issue {
+  id?: number;
+  issueType: string;
+  message: string;
+  line?: number;
+  severity?: string;
+  ruleId?: string;
+  [k: string]: unknown;
+}
+
+export interface LlmUsage {
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  cacheHitTokens: number;
+  cacheMissTokens: number;
+  requests: number;
+  model: string | null;
+  provider: string | null;
+  cacheHitRate: number | null;
+}
+
+export interface AnalyzeResult {
+  filePath: string;
+  language: string;
+  totalIssues: number;
+  issues: Issue[];
+  optimizations?: unknown[];
+  llmUsage?: LlmUsage | null;
+}
+
+export interface OptimizeResult {
+  optimizationId?: number | null;
+  optimizedCode: string;
+  explanation?: string;
+  suggestions?: string[];
+  similarSnippets?: unknown[];
+}
+
+async function httpGet<T>(path: string): Promise<T> {
+  const res = await fetch(`http://127.0.0.1:${DEV_PORT}${path}`);
+  return res.json() as Promise<T>;
+}
+
+async function httpPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`http://127.0.0.1:${DEV_PORT}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+    signal
+  });
+  return res.json() as Promise<T>;
+}
+
+/** sidecar 动态端口缓存（Tauri 模式下由 Rust 注入空闲端口） */
+let sidecarPortCache: number | null = null;
+
+async function sidecarPort(): Promise<number> {
+  if (sidecarPortCache) return sidecarPortCache;
+  sidecarPortCache = await invoke<number>('sidecar_port');
+  return sidecarPortCache;
+}
+
+/** Tauri 模式下直连 sidecar HTTP（绕过 Rust 命令转发，便于扩展业务接口） */
+export async function sidecarRequest<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const port = IS_TAURI ? await sidecarPort() : DEV_PORT;
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    signal
+  });
+  return res.json() as Promise<T>;
+}
+
+export async function health(): Promise<{ success: boolean }> {
+  if (IS_TAURI) return invoke('sidecar_health');
+  return httpGet('/health');
+}
+
+export async function listDir(path: string): Promise<FileNode[]> {
+  return invoke<FileNode[]>('list_dir', { path });
+}
+
+export async function readFile(path: string): Promise<{ content: string; language: string }> {
+  return invoke('read_file', { path });
+}
+
+export async function saveFile(path: string, content: string): Promise<void> {
+  return invoke('save_file', { path, content });
+}
+
+/** 前端状态文件读写：~/.mr-sliy/gui-state/<name>.json（浏览器调试时回落 localStorage） */
+export async function loadState(name: string): Promise<string | null> {
+  if (!IS_TAURI) return localStorage.getItem(`mrsliy.${name}`);
+  const file = await invoke<string>('state_file_path', { name });
+  try {
+    const { content } = await invoke<{ content: string }>('read_file', { path: file });
+    return content;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveState(name: string, content: string): Promise<void> {
+  if (!IS_TAURI) {
+    localStorage.setItem(`mrsliy.${name}`, content);
+    return;
+  }
+  const file = await invoke<string>('state_file_path', { name });
+  await invoke('save_file', { path: file, content });
+}
+
+/** sidecar 业务接口返回 {success, code, message, data} 信封；解包 data 并在失败时抛错 */
+function unwrapData<T>(raw: unknown): T {
+  const env = raw as { success?: boolean; message?: string; data?: unknown } | null;
+  if (env && typeof env === 'object' && 'success' in env) {
+    if (env.success === false) throw new Error(env.message || '请求失败');
+    if (env.data && typeof env.data === 'object') return env.data as T;
+  }
+  return raw as T;
+}
+
+export type AnalysisMode = 'local' | 'cloud';
+
+export async function analyzeFile(
+  filePath: string,
+  sourceCode: string,
+  mode: AnalysisMode = 'local',
+  signal?: AbortSignal
+): Promise<AnalyzeResult> {
+  const body = { filePath, sourceCode, mode: mode === 'cloud' ? 'online' : 'offline' };
+  const raw = IS_TAURI
+    ? await sidecarRequest<unknown>('POST', '/api/scan/file', body, signal)
+    : await httpPost<unknown>('/api/scan/file', body, signal);
+  return unwrapData<AnalyzeResult>(raw);
+}
+
+export async function optimizeCode(
+  code: string,
+  filePath: string,
+  language: string,
+  issueType?: string,
+  message?: string,
+  line?: number
+): Promise<OptimizeResult> {
+  const body = { code, filePath, language, issueType, message, line };
+  const raw = IS_TAURI
+    ? await sidecarRequest<unknown>('POST', '/api/ai/optimize', body)
+    : await httpPost<unknown>('/api/ai/optimize', body);
+  return unwrapData<OptimizeResult>(raw);
+}
+
+/** AI 助手对话：发送历史（user/assistant），返回模型回复 */
+export interface ChatMsg {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ChatResult {
+  reply: string;
+  usage?: unknown;
+}
+
+export async function chatWithAI(messages: ChatMsg[], context?: ChatContext | null, signal?: AbortSignal): Promise<ChatResult> {
+  const raw = IS_TAURI
+    ? await sidecarRequest<unknown>('POST', '/api/ai/chat', { messages, context }, signal)
+    : await httpPost<unknown>('/api/ai/chat', { messages, context });
+  return unwrapData<ChatResult>(raw);
+}
+
+/** 随聊天请求注入的工作区上下文（文件、问题概览），服务端拼入系统提示词 */
+export interface ChatContext {
+  fileName?: string;
+  language?: string;
+  totalIssues?: number;
+  topIssues?: { type?: string; message?: string; line?: number }[];
+}
+
+/**
+ * AI 流式对话（SSE）：逐 delta 回调，返回完整回复。
+ * 支持通过 AbortSignal 中断（用户点击"停止"）。
+ */
+export async function chatWithAIStream(
+  messages: ChatMsg[],
+  context: ChatContext | null,
+  opts: { onDelta: (delta: string) => void; signal?: AbortSignal }
+): Promise<{ reply: string; usage?: unknown }> {
+  const port = IS_TAURI ? await sidecarPort() : DEV_PORT;
+  const res = await fetch(`http://127.0.0.1:${port}/api/ai/chat/stream`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages, context }),
+    signal: opts.signal
+  });
+  if (!res.ok || !res.body) {
+    const env = await res.json().catch(() => null);
+    throw new Error((env && (env.message || env.error)) || `HTTP ${res.status}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  let full = '';
+  let usage: unknown;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop() || '';
+    for (const part of parts) {
+      const line = part.split('\n').find((l) => l.startsWith('data:'));
+      if (!line) continue;
+      let parsed: { delta?: string; done?: boolean; usage?: unknown; error?: string };
+      try {
+        parsed = JSON.parse(line.slice(5).trim());
+      } catch {
+        continue;
+      }
+      if (parsed.error) throw new Error(parsed.error);
+      if (parsed.delta) {
+        full += parsed.delta;
+        opts.onDelta(parsed.delta);
+      }
+      if (parsed.done) usage = parsed.usage;
+    }
+  }
+  return { reply: full, usage };
+}
+
+// ---------- 跨会话记忆 ----------
+
+export interface MemoryItem {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+export async function getMemories(): Promise<MemoryItem[]> {
+  const r = unwrapData<{ memories: MemoryItem[] }>(await sidecarRequest('GET', '/api/ai/memory/list'));
+  return r.memories;
+}
+
+export async function addMemory(text: string): Promise<MemoryItem> {
+  return unwrapData<MemoryItem>(await sidecarRequest('POST', '/api/ai/memory', { text }));
+}
+
+export async function deleteMemory(id: string): Promise<void> {
+  unwrapData(await sidecarRequest('DELETE', `/api/ai/memory/${id}`));
+}
+
+export async function clearMemories(): Promise<void> {
+  unwrapData(await sidecarRequest('DELETE', '/api/ai/memory'));
+}
+
+// ---------- 项目级扫描与分析报告 ----------
+
+export interface ProjectScanFileResult {
+  filePath?: string;
+  path?: string;
+  file?: string;
+  language?: string;
+  success?: boolean;
+  message?: string;
+  totalIssues?: number;
+  issues?: Issue[];
+}
+
+export interface ProjectScanResult {
+  taskId?: string;
+  projectPath: string;
+  totalFiles: number;
+  scannedFiles: number;
+  failedFiles: number;
+  totalIssues: number;
+  results: ProjectScanFileResult[];
+  durationMs: number;
+}
+
+/** 扫描整个项目（后端聚合检测） */
+export async function projectScan(projectPath: string, mode: AnalysisMode = 'local'): Promise<ProjectScanResult> {
+  const raw = await sidecarRequest<unknown>('POST', '/api/scan/project', { projectPath, mode: mode === 'cloud' ? 'online' : 'offline' });
+  return unwrapData<ProjectScanResult>(raw);
+}
+
+export interface ReportPayload {
+  title?: string;
+  projectPath?: string;
+  summary?: { totalFiles?: number; scannedFiles?: number; failedFiles?: number; totalIssues?: number; durationMs?: number };
+  files: unknown[];
+  format?: 'html' | 'md';
+}
+
+/** 生成分析报告（落盘 ~/.mr-sliy/reports/） */
+export async function generateReport(payload: ReportPayload): Promise<{ reportId: string; path: string; format: string }> {
+  const raw = await sidecarRequest<unknown>('POST', '/api/reports/generate', payload);
+  return unwrapData<{ reportId: string; path: string; format: string }>(raw);
+}
+
+// ---------- 更新记录（自更新/自修复历史） ----------
+
+export interface UpdateRecord {
+  id?: string;
+  updateType?: string;
+  updateContent?: string;
+  status?: string;
+  createdAt?: string;
+  [k: string]: unknown;
+}
+
+export async function getUpdateRecords(limit = 10): Promise<UpdateRecord[]> {
+  const env = await sidecarRequest<{ success: boolean; data: UpdateRecord[] }>('GET', `/api/updates?limit=${limit}`);
+  return env?.data || [];
+}
+
+// ---------- 检查更新（远程版本清单比对） ----------
+
+export interface CheckUpdatePayload {
+  /** 是否完成远程检查（未配置更新源/网络失败时为 false） */
+  checked: boolean;
+  currentVersion: string;
+  latestVersion?: string;
+  updateAvailable?: boolean;
+  notes?: string;
+  url?: string;
+  /** checked=false 时的原因说明 */
+  reason?: string;
+}
+
+/** 检查更新：拉取更新源清单并与当前版本比对 */
+export async function checkForUpdate(signal?: AbortSignal): Promise<CheckUpdatePayload> {
+  const env = await sidecarRequest<{ success: boolean; data: CheckUpdatePayload }>('POST', '/api/check-update', undefined, signal);
+  return env?.data || { checked: false, currentVersion: '', reason: '请求失败' };
+}
+
+export async function getUpdateSource(): Promise<{ url: string; currentVersion: string }> {
+  const env = await sidecarRequest<{ success: boolean; data: { url: string; currentVersion: string } }>('GET', '/api/update-source');
+  return env?.data || { url: '', currentVersion: '' };
+}
+
+export async function saveUpdateSource(url: string): Promise<string> {
+  const env = await sidecarRequest<{ success: boolean; data: { url: string } }>('POST', '/api/update-source', { url });
+  return env?.data?.url || '';
+}
+
+/** 用系统默认浏览器打开链接（后端 explorer.exe 转发） */
+export async function openExternal(url: string): Promise<void> {
+  await sidecarRequest('POST', '/api/open-url', { url });
+}
+
+export async function issueStats(): Promise<{ success: boolean; data: unknown }> {
+  return sidecarRequest('GET', '/api/issues/stats');
+}
+
+// ---------- MCP 接入（设置页） ----------
+
+export interface McpToolInfo {
+  name: string;
+  description: string;
+}
+
+export interface McpStatus {
+  protocolVersion: string;
+  supportedProtocolVersions: string[];
+  serverInfo: { name: string; version: string };
+  httpUrl: string;
+  stdio: { command: string; args: string[] };
+  tools: McpToolInfo[];
+}
+
+/** 读取 MCP 接入信息（stdio 命令 / HTTP 端点 / 工具清单） */
+export async function getMcpStatus(): Promise<McpStatus> {
+  return unwrapData<McpStatus>(await sidecarRequest('GET', '/api/mcp/status'));
+}
+
+// ---------- LLM 提供商管理（设置页） ----------
+
+export interface LlmProviderInfo {
+  name: string;
+  available: boolean;
+  model?: string;
+}
+
+export interface LlmKeyInfo {
+  provider: string;
+  maskedKey: string;
+  hasKey: boolean;
+  apiUrl: string;
+  model: string;
+  isActive: boolean;
+}
+
+export interface LlmProvidersPayload {
+  providers: LlmProviderInfo[];
+  active: string | null;
+}
+
+export async function getLlmProviders(): Promise<LlmProvidersPayload> {
+  return unwrapData<LlmProvidersPayload>(await sidecarRequest('GET', '/api/llm/providers'));
+}
+
+export async function getLlmKeys(): Promise<LlmKeyInfo[]> {
+  const r = unwrapData<{ keys: LlmKeyInfo[] }>(await sidecarRequest('GET', '/api/llm/keys'));
+  return r.keys;
+}
+
+export async function saveLlmProvider(
+  name: string,
+  cfg: { apiKey: string; apiUrl?: string; model?: string }
+): Promise<void> {
+  unwrapData(await sidecarRequest('POST', `/api/llm/providers/${name}`, cfg));
+}
+
+export async function deleteLlmProvider(name: string): Promise<void> {
+  unwrapData(await sidecarRequest('DELETE', `/api/llm/providers/${name}`));
+}
+
+export async function activateLlmProvider(name: string): Promise<void> {
+  unwrapData(await sidecarRequest('POST', `/api/llm/providers/${name}/activate`));
+}
+
+/** 添加自定义提供商（OpenAI 兼容协议，命名 custom-<slug>） */
+export async function addCustomProvider(cfg: { name: string; apiKey?: string; apiUrl: string; model?: string }): Promise<void> {
+  unwrapData(await sidecarRequest('POST', '/api/llm/custom', cfg));
+}
+
+/** 查询大模型用量（活跃提供商 / 会话实时 / 历史累计） */
+export async function getLlmUsage(): Promise<LlmUsagePayload> {
+  return unwrapData<LlmUsagePayload>(await sidecarRequest('GET', '/api/llm/usage'));
+}
+
+export interface LlmUsagePayload {
+  active: { name: string; model: string | null } | null;
+  session: LlmUsage;
+  history: { totalTokens: number; requests: number };
+}

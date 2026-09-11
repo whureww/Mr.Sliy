@@ -13,8 +13,10 @@ const projectRoutes = require('./projectRoutes');
 const scanRoutes = require('./scanRoutes');
 const issueRoutes = require('./issueRoutes');
 const aiRoutes = require('./aiRoutes');
+const llmRoutes = require('./llmRoutes');
 const reportRoutes = require('./reportRoutes');
 const updateRoutes = require('./updateRoutes');
+const mcpRoutes = require('./mcpRoutes');
 
 // 注册路由
 router.use('/users', userRoutes);
@@ -23,7 +25,9 @@ router.use('/projects', projectRoutes);
 router.use('/scan', scanRoutes);
 router.use('/issues', issueRoutes);
 router.use('/ai', aiRoutes);
+router.use('/llm', llmRoutes);
 router.use('/reports', reportRoutes);
+router.use('/mcp', mcpRoutes);
 router.use('/', updateRoutes);
 
 // API文档路由

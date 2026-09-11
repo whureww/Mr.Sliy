@@ -165,47 +165,47 @@ class ConfirmationGate {
 
     console.log('\n');
     console.log('═══════════════════════════════════════════════════════════════════════');
-    console.log('                    🔒 确认门控 - 操作审批                              ');
+    console.log('                    确认门控 - 操作审批                              ');
     console.log('═══════════════════════════════════════════════════════════════════════');
     
     if (stepNumber > 0 && totalSteps > 0) {
-      console.log(`\n📋 步骤 ${stepNumber}/${totalSteps}: ${stepName}`);
+      console.log(`\n步骤 ${stepNumber}/${totalSteps}: ${stepName}`);
     }
     
-    console.log(`\n🔧 操作类型: ${operationType}`);
+    console.log(`\n操作类型: ${operationType}`);
     
     const riskColors = {
-      high: '🔴 高风险',
-      medium: '🟡 中风险',
-      low: '🟢 低风险'
+      high: '高风险',
+      medium: '中风险',
+      low: '低风险'
     };
-    console.log(`⚠️  风险等级: ${riskColors[riskLevel] || '⚪ 未知'}`);
+    console.log(` 风险等级: ${riskColors[riskLevel] || '未知'}`);
     
-    console.log(`\n📝 描述: ${description}`);
+    console.log(`\n描述: ${description}`);
     
     if (impact) {
-      console.log(`\n💥 影响范围: ${impact}`);
+      console.log(`\n影响范围: ${impact}`);
     }
     
     if (filesAffected && filesAffected.length > 0) {
-      console.log(`\n📂 受影响文件:`);
+      console.log(`\n受影响文件:`);
       filesAffected.forEach(file => {
         console.log(`   - ${file}`);
       });
     }
     
     if (backupAvailable) {
-      console.log(`\n✅ 备份已创建，可以回滚`);
+      console.log(`\n备份已创建，可以回滚`);
     } else {
-      console.log(`\n⚠️  未创建备份，无法自动回滚`);
+      console.log(`\n 未创建备份，无法自动回滚`);
     }
     
     if (rollbackPossible) {
-      console.log(`✅ 支持回滚到更新前状态`);
+      console.log(`支持回滚到更新前状态`);
     }
     
     if (details) {
-      console.log(`\n🔍 详细信息:`);
+      console.log(`\n详细信息:`);
       if (typeof details === 'object') {
         console.log(JSON.stringify(details, null, 2));
       } else {
@@ -218,11 +218,11 @@ class ConfirmationGate {
     console.log('\n───────────────────────────────────────────────────────────────────────');
     console.log(`请确认是否执行此操作? (${timeoutMinutes}分钟超时自动加入队列)`);
     console.log('');
-    console.log('  1. ✅ 确认执行');
-    console.log('  2. ❌ 拒绝执行');
-    console.log('  3. 📖 查看完整详情');
-    console.log('  4. 🔄 请求修改方案');
-    console.log('  5. 📥 暂存到队列（稍后处理）');
+    console.log('  1. 确认执行');
+    console.log('  2. 拒绝执行');
+    console.log('  3. 查看完整详情');
+    console.log('  4. 请求修改方案');
+    console.log('  5. 暂存到队列（稍后处理）');
     console.log('');
 
     return new Promise((resolve) => {
@@ -259,7 +259,7 @@ class ConfirmationGate {
             break;
           case '3':
           case '详情':
-            console.log('\n📋 完整信息:');
+            console.log('\n完整信息:');
             console.log(JSON.stringify(request, null, 2));
             console.log('\n请再次选择:');
             process.stdin.once('data', handleInput);
@@ -275,18 +275,18 @@ class ConfirmationGate {
           case '5':
           case '暂存':
           case '队列':
-            console.log('\n📥 操作已暂存到待处理队列，您可以稍后使用 /pending 命令处理');
+            console.log('\n操作已暂存到待处理队列，您可以稍后使用 /pending 命令处理');
             resolve({ confirmed: false, reason: 'queue' });
             break;
           case 'q':
           case 'quit':
           case 'exit':
           case '返回':
-            console.log('\n📥 操作已暂存到待处理队列，您可以稍后使用 /pending 命令处理');
+            console.log('\n操作已暂存到待处理队列，您可以稍后使用 /pending 命令处理');
             resolve({ confirmed: false, reason: 'queue' });
             break;
           default:
-            console.log('\n❌ 无效输入，请输入 1、2、3、4、5 或 q(暂存)');
+            console.log('\n无效输入，请输入 1、2、3、4、5 或 q(暂存)');
             process.stdin.once('data', handleInput);
             break;
         }
@@ -413,7 +413,7 @@ class ConfirmationGate {
   notifyPendingRequests() {
     const queuedRequests = this.getQueuedRequests();
     if (queuedRequests.length > 0) {
-      console.log(`\n📋 有待处理的确认请求 (${queuedRequests.length} 条)，使用 /pending 命令查看`);
+      console.log(`\n有待处理的确认请求 (${queuedRequests.length} 条)，使用 /pending 命令查看`);
     }
   }
 

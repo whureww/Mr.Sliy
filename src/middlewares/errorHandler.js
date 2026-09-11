@@ -44,6 +44,10 @@ const corsMiddleware = cors({
 const rateLimitMiddleware = rateLimit({
   windowMs: config.rateLimit.windowMs,
   max: config.rateLimit.max,
+  // 轮询类轻量接口豁免：状态栏每 5s 拉取用量，不能挤占常规配额
+  skip: (req) =>
+    (req.path === '/llm/usage' || req.path === '/health' || req.path === '/healthz') &&
+    (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'),
   message: {
     success: false,
     code: 429,

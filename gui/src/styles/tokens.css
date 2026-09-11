@@ -1,0 +1,228 @@
+:root {
+  --bg-canvas: #F6F6F4;
+  --bg-card: #FFFFFF;
+  --bg-recessed: #F0EFEC;
+  --border-hairline: #E9E7E2;
+  --text-primary: #262523;
+  --text-muted: #8B8985;
+  --accent: #E8870A;
+  --accent-tint: #FEF3E2;
+  --accent-hover: #D07808;
+  --success: #3D9A6C;
+  --warning: #D9930D;
+  --danger: #C75450;
+  --radius: 14px;
+  --radius-sm: 8px;
+  --shadow-soft: 0 12px 40px rgba(38, 37, 35, 0.08);
+  --shadow-lift: 0 4px 16px rgba(38, 37, 35, 0.06);
+  --font-ui: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  overflow: hidden;
+  /* 桌面应用观感：全局禁止文本拖选，仅复制场景白名单（.selectable / 输入框 / 代码编辑器）可选中 */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+input, textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 可选中白名单：代码对比、聊天气泡、AI 回复内容等复制场景 */
+.selectable, .selectable * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+button {
+  font-family: var(--font-ui);
+  cursor: pointer;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  padding: 7px 14px;
+  transition: background 0.35s ease, box-shadow 0.35s ease, transform 0.35s ease;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #FFFFFF;
+  font-weight: 600;
+}
+.btn-primary:hover { background: var(--accent-hover); }
+.btn-primary:disabled { background: #F0D9B8; cursor: not-allowed; }
+
+.btn-ghost {
+  background: var(--bg-card);
+  color: var(--text-primary);
+  border: 1px solid var(--border-hairline);
+}
+.btn-ghost:hover { background: var(--bg-recessed); }
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-soft);
+}
+
+.mono { font-family: var(--font-mono); }
+.muted { color: var(--text-muted); }
+
+/* AI 打字指示圆点 */
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #CFCDC7;
+  display: inline-block;
+  animation: typingBounce 1.4s infinite ease-in-out;
+}
+
+/* 流式输出光标（AI 回复逐字生成时显示） */
+.stream-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 14px;
+  margin-left: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  vertical-align: -2px;
+  animation: streamBlink 0.9s steps(2, start) infinite;
+}
+@keyframes streamBlink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.15; }
+}
+
+/* 分析流水线当前执行步骤呼吸光环 */
+@keyframes stepPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 135, 10, 0.35); }
+  50% { box-shadow: 0 0 0 5px rgba(232, 135, 10, 0.08); }
+}
+.step-active-ring {
+  animation: stepPulse 1.6s infinite ease-in-out;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #D8D6D0; border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* 自定义右键菜单（屏蔽 WebView2 默认菜单） */
+@keyframes ctxIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.ctx-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 172px;
+  max-width: 260px;
+  padding: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lift), 0 10px 32px rgba(38, 37, 35, 0.10);
+  animation: ctxIn 0.2s ease;
+}
+.ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border-radius: 7px;
+  padding: 7px 11px;
+  font-size: 13px;
+  color: var(--text-primary);
+  line-height: 1.4;
+  transition: background 0.25s ease;
+}
+.ctx-item:hover:not(:disabled) { background: var(--bg-recessed); }
+.ctx-item:disabled { color: #C4C2BC; cursor: default; }
+.ctx-danger { color: var(--danger); }
+.ctx-danger:hover:not(:disabled) { background: #FBF0EE; }
+.ctx-sep {
+  height: 1px;
+  background: var(--border-hairline);
+  margin: 5px 9px;
+}
+
+/* 分析会话一体化输入条 */
+.ask-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  background: var(--bg-card);
+  padding: 5px 5px 5px 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.ask-bar:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(232, 135, 10, 0.10);
+}
+.ask-bar.disabled { opacity: 0.55; }
+.ask-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 13.5px;
+  font-family: var(--font-ui);
+  color: var(--text-primary);
+  padding: 6px 0;
+}
+.ask-input::placeholder { color: var(--text-muted); }
+.ask-send {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #FFFFFF;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.2s ease, transform 0.15s ease;
+}
+.ask-send:hover:not(:disabled) { background: var(--accent-hover); }
+.ask-send:active:not(:disabled) { transform: scale(0.93); }
+.ask-send:disabled { background: #F0D9B8; cursor: not-allowed; }
+.ask-send.stopping { background: var(--danger); }
+.ask-send.stopping:hover { background: #B03F3B; }
+
+/* 输入条下方的快捷提示 */
+.ask-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 0 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.ask-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-hairline);
+  border-radius: 4px;
+  padding: 1px 5px;
+}

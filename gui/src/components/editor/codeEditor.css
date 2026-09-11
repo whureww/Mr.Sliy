@@ -1,0 +1,255 @@
+/* ========== 代码编辑器（编辑模式） ==========
+   结构：行号槽 | 滚动视口[ 当前行高亮 + 高亮层 pre + 透明输入层 textarea ]
+   pre 与 textarea 使用完全相同的字体度量（13px / 21px），保证字符级对齐 */
+
+.code-editor {
+  --ce-font: var(--font-mono);
+  --ce-size: 13px;
+  --ce-lh: 21px;
+  --ce-pad-t: 10px;
+  --ce-pad-x: 16px;
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  position: relative;
+  font-family: var(--ce-font);
+  font-size: var(--ce-size);
+  line-height: var(--ce-lh);
+}
+
+/* ---------- 查找/替换条 & 跳转行 ---------- */
+.ce-findbar {
+  position: absolute;
+  top: 8px;
+  right: 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 300px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-hairline);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(30, 28, 24, 0.14);
+}
+
+.ce-find-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ce-find-input {
+  flex: 1;
+  min-width: 120px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-size: 12.5px;
+  outline: none;
+  background: var(--bg-recessed);
+  color: var(--text-primary);
+}
+
+.ce-find-count {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  min-width: 46px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ce-find-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  padding: 3px 7px;
+  border-radius: 6px;
+  white-space: nowrap;
+}
+
+.ce-find-btn:hover:not(:disabled) {
+  background: var(--bg-recessed);
+  color: var(--accent);
+}
+
+.ce-find-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ---------- 行号槽 ---------- */
+.ce-gutter-wrap {
+  flex: none;
+  overflow: hidden;
+  user-select: none;
+  border-right: 1px solid var(--border-hairline);
+  background: var(--bg-recessed);
+}
+
+.ce-gutter {
+  padding-top: var(--ce-pad-t);
+  will-change: transform;
+}
+
+.ce-ln {
+  height: var(--ce-lh);
+  min-width: 44px;
+  padding-right: 12px;
+  box-sizing: border-box;
+  text-align: right;
+  color: var(--text-muted);
+  font-size: 11.5px;
+  opacity: 0.75;
+  transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.ce-ln.active {
+  color: var(--accent);
+  font-weight: 700;
+  opacity: 1;
+}
+
+/* ---------- 滚动视口（唯一滚动容器） ---------- */
+.ce-viewport {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  position: relative;
+}
+
+.ce-inner {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+  /* 短文件时撑满视口高度，点击文字下方空白处光标可落到行尾 */
+  min-height: 100%;
+}
+
+/* 当前行高亮条（跟随内容滚动） */
+.ce-line-hl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--ce-lh);
+  background: var(--accent-tint);
+  border-left: 2.5px solid var(--accent);
+  pointer-events: none;
+  transition: top 0.12s ease;
+}
+
+/* 高亮层：padding 定义在自身（与输入层完全一致），内容框原点对齐。
+   代码编辑器是核心选中场景，显式放开文本选择（全局默认禁选） */
+.ce-highlight {
+  margin: 0;
+  font: inherit;
+  white-space: pre;
+  pointer-events: none;
+  color: var(--text);
+  position: relative;
+  z-index: 1;
+  padding: var(--ce-pad-t) var(--ce-pad-x) 32px 14px;
+  box-sizing: border-box;
+  tab-size: 2;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 透明输入层（承载光标/选择/输入）
+   对齐关键：与 .ce-highlight 使用相同的 padding + box-sizing，
+   inset:0 铺满 .ce-inner 后两层内容框原点完全重合 */
+.ce-input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: var(--ce-pad-t) var(--ce-pad-x) 32px 14px;
+  box-sizing: border-box;
+  border: none;
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--accent);
+  font: inherit;
+  z-index: 2;
+  tab-size: 2;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 选区背景必须半透明：实色会盖住下层彩色文字 */
+.ce-input::selection {
+  background: var(--accent-tint); /* 老引擎回退 */
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: transparent;
+}
+
+.ce-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* ---------- Prism 语法配色（GitHub Light 派生，适配浅色暖纸背景） ---------- */
+.code-editor .token.comment,
+.code-editor .token.prolog,
+.code-editor .token.doctype,
+.code-editor .token.cdata {
+  color: #8B949E;
+  font-style: italic;
+}
+
+.code-editor .token.punctuation,
+.code-editor .token.operator {
+  color: #57606A;
+}
+
+.code-editor .token.string,
+.code-editor .token.char,
+.code-editor .token.attr-value,
+.code-editor .token.regex {
+  color: #0A7C42;
+}
+
+.code-editor .token.number,
+.code-editor .token.boolean,
+.code-editor .token.constant,
+.code-editor .token.symbol {
+  color: #B06400;
+}
+
+.code-editor .token.keyword,
+.code-editor .token.important,
+.code-editor .token.atrule,
+.code-editor .token.rule {
+  color: #CF222E;
+}
+
+.code-editor .token.function {
+  color: #8250DF;
+}
+
+.code-editor .token.class-name,
+.code-editor .token.builtin {
+  color: #953800;
+}
+
+.code-editor .token.tag {
+  color: #116329;
+}
+
+.code-editor .token.attr-name,
+.code-editor .token.property {
+  color: #0550AE;
+}
+
+.code-editor .token.deleted {
+  color: #82071E;
+}
+
+.code-editor .token.inserted {
+  color: #116329;
+}

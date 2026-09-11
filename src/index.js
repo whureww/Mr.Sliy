@@ -48,6 +48,9 @@ app.use(requestLogger);
 const reportsDir = path.join(__dirname, '..', 'reports');
 app.use('/reports', express.static(reportsDir));
 
+// MCP (Model Context Protocol) HTTP 传输：外部程序可 POST JSON-RPC 到 /mcp 接入智能体
+app.use('/mcp', require('./mcp/httpRouter'));
+
 // ============================================
 // API路由
 // ============================================

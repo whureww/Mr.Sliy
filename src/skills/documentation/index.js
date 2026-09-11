@@ -198,11 +198,11 @@ ${typeof projectInfo === 'object' ? JSON.stringify(projectInfo, null, 2) : proje
       let changelog = '# 更新日志\n\n';
       
       const groupedChanges = {
-        '✨ 新功能': changes.filter(c => c.type === 'feature'),
-        '🔧 优化': changes.filter(c => c.type === 'optimization'),
-        '🐛 修复': changes.filter(c => c.type === 'bugfix'),
-        '📝 文档': changes.filter(c => c.type === 'documentation'),
-        '🚨 安全': changes.filter(c => c.type === 'security')
+        '新功能': changes.filter(c => c.type === 'feature'),
+        '优化': changes.filter(c => c.type === 'optimization'),
+        '修复': changes.filter(c => c.type === 'bugfix'),
+        '文档': changes.filter(c => c.type === 'documentation'),
+        '安全': changes.filter(c => c.type === 'security')
       };
 
       for (const [category, items] of Object.entries(groupedChanges)) {

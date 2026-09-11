@@ -36,7 +36,7 @@ class ProgressBar {
     this._lastRender = '';
     this._lastStatus = '';
     this._animationIndex = 0;
-    this._animationChars = ['(●' , '(◕', '(◔', '(◕', '(●'];
+    this._animationChars = ['◐', '◓', '◑', '◒'];
     this._animationTimer = null;
     this._isActive = false;
     this._fillChars = ['░', '▒', '▓', '█'];
@@ -132,7 +132,7 @@ class ProgressBar {
 
     if (this.description) {
       const desc = this.description.length > 20 ? this.description.substring(0, 19) + '…' : this.description;
-      line += colors.brightCyan + animationChar + 'ω' + '`' + ') ' + desc.padEnd(20) + colors.reset + ' ';
+      line += colors.brightCyan + animationChar + ' ' + desc.padEnd(20) + colors.reset + ' ';
     }
 
     line += colors.brightMagenta + bar + colors.reset + ' ';
@@ -151,7 +151,7 @@ class ProgressBar {
     }
 
     if (this.showETA) {
-      line += colors.dim + '⏱️ ' + formatTime(elapsed) + colors.reset;
+      line += colors.dim + '⏱' + formatTime(elapsed) + colors.reset;
     }
 
     const clearPad = Math.max(0, (this._lastRender.length || 0) - line.length);

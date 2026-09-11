@@ -76,6 +76,88 @@ router.get('/', (req, res) => {
 });
 
 /**
+ * 获取缺陷统计信息
+ * 注意：必须注册在 GET /:id 之前，否则 "stats" 会被当作缺陷 id 捕获
+ */
+router.get('/stats', (req, res) => {
+  try {
+    const db = getDatabase();
+
+    // 一次性回填历史遗留的空语言字段（按文件扩展名推断），幂等
+    try {
+      db.prepare(`
+        UPDATE code_issue SET language = CASE
+          WHEN file_path LIKE '%.ts' OR file_path LIKE '%.tsx' THEN 'typescript'
+          WHEN file_path LIKE '%.js' OR file_path LIKE '%.jsx' OR file_path LIKE '%.mjs' OR file_path LIKE '%.cjs' THEN 'javascript'
+          WHEN file_path LIKE '%.py' THEN 'python'
+          WHEN file_path LIKE '%.java' THEN 'java'
+          WHEN file_path LIKE '%.go' THEN 'go'
+          WHEN file_path LIKE '%.rs' THEN 'rust'
+          WHEN file_path LIKE '%.c' OR file_path LIKE '%.h' THEN 'c'
+          WHEN file_path LIKE '%.cpp' OR file_path LIKE '%.cc' OR file_path LIKE '%.hpp' THEN 'cpp'
+          WHEN file_path LIKE '%.html' OR file_path LIKE '%.htm' THEN 'html'
+          WHEN file_path LIKE '%.css' OR file_path LIKE '%.scss' THEN 'css'
+          WHEN file_path LIKE '%.json' THEN 'json'
+          WHEN file_path LIKE '%.md' THEN 'markdown'
+          WHEN file_path LIKE '%.vue' THEN 'vue'
+          WHEN file_path LIKE '%.php' THEN 'php'
+          ELSE 'other'
+        END
+        WHERE language IS NULL OR language = '' OR language = '未知'
+      `).run();
+    } catch (backfillErr) {
+      logger.warn(`回填语言字段失败: ${backfillErr.message}`);
+    }
+
+    // 按类型统计
+    const typeStmt = db.prepare(`
+      SELECT issue_type, COUNT(*) as count
+      FROM code_issue
+      GROUP BY issue_type
+      ORDER BY count DESC
+    `);
+    const typeStats = typeStmt.all();
+
+    // 按严重程度统计
+    const severityStmt = db.prepare(`
+      SELECT severity, COUNT(*) as count
+      FROM code_issue
+      GROUP BY severity
+    `);
+    const severityStats = severityStmt.all();
+
+    // 按语言统计
+    const languageStmt = db.prepare(`
+      SELECT language, COUNT(*) as count
+      FROM code_issue
+      GROUP BY language
+      ORDER BY count DESC
+    `);
+    const languageStats = languageStmt.all();
+
+    // 总数统计
+    const totalStmt = db.prepare('SELECT COUNT(*) as total FROM code_issue');
+    const totalResult = totalStmt.get();
+
+    // 已修复统计
+    const fixedStmt = db.prepare('SELECT COUNT(*) as fixed FROM code_issue WHERE is_fixed = 1');
+    const fixedResult = fixedStmt.get();
+
+    return res.json(success({
+      total: totalResult.total,
+      fixed: fixedResult.fixed,
+      unfixed: totalResult.total - fixedResult.fixed,
+      typeStats,
+      severityStats,
+      languageStats
+    }));
+  } catch (err) {
+    logger.error('获取缺陷统计失败:', err);
+    return res.status(500).json(error(err.message));
+  }
+});
+
+/**
  * 获取缺陷详情
  */
 router.get('/:id', (req, res) => {
@@ -133,61 +215,6 @@ router.put('/:id/fix', (req, res) => {
     }));
   } catch (err) {
     logger.error('更新缺陷状态失败:', err);
-    return res.status(500).json(error(err.message));
-  }
-});
-
-/**
- * 获取缺陷统计信息
- */
-router.get('/stats', (req, res) => {
-  try {
-    const db = getDatabase();
-    
-    // 按类型统计
-    const typeStmt = db.prepare(`
-      SELECT issue_type, COUNT(*) as count
-      FROM code_issue
-      GROUP BY issue_type
-      ORDER BY count DESC
-    `);
-    const typeStats = typeStmt.all();
-    
-    // 按严重程度统计
-    const severityStmt = db.prepare(`
-      SELECT severity, COUNT(*) as count
-      FROM code_issue
-      GROUP BY severity
-    `);
-    const severityStats = severityStmt.all();
-    
-    // 按语言统计
-    const languageStmt = db.prepare(`
-      SELECT language, COUNT(*) as count
-      FROM code_issue
-      GROUP BY language
-      ORDER BY count DESC
-    `);
-    const languageStats = languageStmt.all();
-    
-    // 总数统计
-    const totalStmt = db.prepare('SELECT COUNT(*) as total FROM code_issue');
-    const totalResult = totalStmt.get();
-    
-    // 已修复统计
-    const fixedStmt = db.prepare('SELECT COUNT(*) as fixed FROM code_issue WHERE is_fixed = 1');
-    const fixedResult = fixedStmt.get();
-    
-    return res.json(success({
-      total: totalResult.total,
-      fixed: fixedResult.fixed,
-      unfixed: totalResult.total - fixedResult.fixed,
-      typeStats,
-      severityStats,
-      languageStats
-    }));
-  } catch (err) {
-    logger.error('获取缺陷统计失败:', err);
     return res.status(500).json(error(err.message));
   }
 });

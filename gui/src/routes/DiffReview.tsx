@@ -1,0 +1,183 @@
+import { useState } from 'react';
+import { DiffPayload } from '../App';
+import { optimizeCode, saveFile } from '../ipc/client';
+import { openContextMenu, copyText } from '../lib/contextMenu';
+
+interface Props {
+  payload: DiffPayload | null;
+  onBack: () => void;
+}
+
+/** 行级差异（LCS）：' '='相同 '+'新增 '-'删除 */
+function diffLines(before: string, after: string): { type: ' ' | '+' | '-'; text: string }[] {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  const n = a.length;
+  const m = b.length;
+  // LCS 动态规划（代码片段规模有限，可接受）
+  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out: { type: ' ' | '+' | '-'; text: string }[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ type: ' ', text: a[i] });
+      i++;
+      j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: '-', text: a[i] });
+      i++;
+    } else {
+      out.push({ type: '+', text: b[j] });
+      j++;
+    }
+  }
+  while (i < n) out.push({ type: '-', text: a[i++] });
+  while (j < m) out.push({ type: '+', text: b[j++] });
+  return out;
+}
+
+export default function DiffReview({ payload, onBack }: Props) {
+  const [explanation, setExplanation] = useState<string>('');
+  const [regenerating, setRegenerating] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [applied, setApplied] = useState(false);
+  const [err, setErr] = useState('');
+
+  if (!payload) {
+    return (
+      <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+        <div className="muted" style={{ marginBottom: 16 }}>还没有待审查的优化结果</div>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 16 }}>在主工作区点击问题卡片上的"修复"按钮，即可在这里对比原始代码与 AI 优化后的代码。</div>
+        <button className="btn-ghost" onClick={onBack}>返回主工作区</button>
+      </div>
+    );
+  }
+
+  const { filePath, language, originalCode, result } = payload;
+  const lines = diffLines(originalCode, result.optimizedCode || '');
+  const added = lines.filter((l) => l.type === '+').length;
+  const removed = lines.filter((l) => l.type === '-').length;
+
+  const regenerate = async () => {
+    setRegenerating(true);
+    setErr('');
+    try {
+      const opt = await optimizeCode(originalCode, filePath, language, 'general', '重新生成优化方案');
+      setExplanation(opt.explanation || '');
+      result.optimizedCode = opt.optimizedCode;
+      setApplied(false);
+    } catch (e) {
+      setErr((e as Error).message || '重新生成失败');
+    } finally {
+      setRegenerating(false);
+    }
+  };
+
+  const apply = async () => {
+    if (!result.optimizedCode) return;
+    setApplying(true);
+    setErr('');
+    try {
+      await saveFile(filePath, result.optimizedCode);
+      setApplied(true);
+    } catch (e) {
+      setErr((e as Error).message || '应用失败');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  const lineColor = (t: ' ' | '+' | '-') =>
+    t === '+' ? 'rgba(61, 154, 108, 0.14)' : t === '-' ? 'rgba(199, 84, 80, 0.12)' : 'transparent';
+  const lineMark = (t: ' ' | '+' | '-') => (t === '+' ? '+ ' : t === '-' ? '- ' : '  ');
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, height: '100%', minHeight: 0 }}>
+      {/* 左 · AI 审查说明 */}
+      <aside className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, overflow: 'auto' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <strong>AI 审查</strong>
+          <span style={{ background: 'var(--accent-tint)', color: 'var(--accent)', fontSize: 11, fontWeight: 650, padding: '2px 9px', borderRadius: 6 }}>
+            [大模型]
+          </span>
+        </div>
+        <div className="mono muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{filePath}</div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <span style={{ fontSize: 12, color: 'var(--success)', background: '#EDF7F1', borderRadius: 8, padding: '3px 9px' }}>+{added} 行</span>
+          <span style={{ fontSize: 12, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '3px 9px' }}>-{removed} 行</span>
+        </div>
+        {err && (
+          <div style={{ fontSize: 12.5, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '9px 12px', lineHeight: 1.6 }}>
+            {err}
+          </div>
+        )}
+        <div style={{ background: 'var(--accent-tint)', borderLeft: '3px solid var(--accent)', borderRadius: 8, padding: 12, fontSize: 13, lineHeight: 1.7 }}
+          onContextMenu={(e) => {
+            const exp = result.explanation || explanation;
+            openContextMenu(e, [
+              { label: '复制 AI 说明', disabled: !exp, onClick: () => copyText(exp || '') },
+              { label: '复制优化后代码', disabled: !result.optimizedCode, onClick: () => copyText(result.optimizedCode || '') }
+            ]);
+          }}
+        >
+          {result.explanation || explanation || '此优化基于 AST 检测结果与知识库模式生成。'}
+        </div>
+        {result.suggestions && result.suggestions.length > 0 && (
+          <div>
+            <div className="muted" style={{ fontSize: 11, letterSpacing: 1.2, marginBottom: 8 }}>建议</div>
+            {result.suggestions.map((s, i) => (
+              <div key={i} style={{ fontSize: 12.5, marginBottom: 6, lineHeight: 1.6 }}>· {s}</div>
+            ))}
+          </div>
+        )}
+        <div style={{ flex: 1 }} />
+        <button className="btn-ghost" onClick={regenerate} disabled={regenerating}>
+          {regenerating ? '重新生成中…' : '重新生成'}
+        </button>
+        <button className="btn-ghost" onClick={onBack}>返回</button>
+      </aside>
+
+      {/* 右 · 差异对比 */}
+      <section className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+        <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-hairline)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
+          优化对比
+          <span className="muted" style={{ fontSize: 11 }}>(原始 → 优化后，绿色为新增 / 红色为删除)</span>
+          <div style={{ flex: 1 }} />
+          {applied && <span style={{ fontSize: 12, color: 'var(--success)' }}>已写入文件 ✓</span>}
+        </div>
+        <pre
+          className="mono selectable"
+          style={{ flex: 1, overflow: 'auto', margin: 0, padding: 14, fontSize: 12.5, lineHeight: 1.75 }}
+          onContextMenu={(e) => {
+            const sel = String(window.getSelection() || '');
+            openContextMenu(e, [
+              { label: '复制选中内容', disabled: !sel, onClick: () => copyText(sel) },
+              { label: '复制优化后代码', disabled: !result.optimizedCode, onClick: () => copyText(result.optimizedCode || '') },
+              { separator: true },
+              { label: applied ? '已应用到文件' : '应用到文件', disabled: applying || applied || !result.optimizedCode, onClick: apply }
+            ]);
+          }}
+        >
+          {lines.map((l, i) => (
+            <div key={i} style={{ background: lineColor(l.type), whiteSpace: 'pre-wrap' }}>
+              {lineMark(l.type)}
+              {l.text}
+            </div>
+          ))}
+        </pre>
+        <div style={{ padding: 12, borderTop: '1px solid var(--border-hairline)', display: 'flex', gap: 10 }}>
+          <button className="btn-primary" onClick={apply} disabled={applying || applied || !result.optimizedCode}>
+            {applying ? '写入中…' : applied ? '已应用' : '应用到文件'}
+          </button>
+          <button className="btn-ghost" onClick={onBack}>放弃</button>
+        </div>
+      </section>
+    </div>
+  );
+}

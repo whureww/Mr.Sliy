@@ -1,282 +1,141 @@
-# Mr.Sliy
+# MR·SLIY 代码优化智能体
 
-基于 Tree-sitter 与 RAG 的多语言代码优化智能体，支持代码分析、问题检测、智能优化等功能。
+基于 Tree-sitter 与 RAG 的多语言代码优化智能体。桌面端采用 Tauri 架构(React 前端 + Node.js Sidecar 服务 + Rust 外壳),同时保留完整的 CLI 交互模式。
 
-## ✨ 特性
+## 特性
 
-- **多语言支持**：支持 JavaScript、TypeScript、Python、Java、Go、C++、C#、Rust、Swift、Kotlin、PHP、Ruby、Scala 等 15+ 种编程语言
-- **Tree-sitter 解析**：基于 Tree-sitter 的 WASM 解析器，深度分析代码结构
-- **问题检测**：内置 14+ 种检测规则，自动检测代码中的潜在问题
-- **智能优化**：结合大语言模型提供专业的代码优化建议
-- **离线优化**：无网络时基于本地知识库和规则引擎进行代码优化（50+规则、20+模式）
-- **知识库管理**：内置 RAG 知识库，支持自定义知识扩展，支持云端数据库同步，包含3000+条知识条目和2100+条优化案例
-- **进度可视化**：所有操作都有实时进度条展示，显示实际已用时间
-- **CLI 交互**：友好的命令行界面，支持多种交互方式
-- **双数据库支持**：支持 SQLite（本地）和 MySQL（云端），自动回退机制，重启后自动记忆连接状态
-- **AI自持引擎**：实现完整的"监控→分析→决策→执行→验证"闭环，系统能持续自我改进，空闲时自动执行更新和修复
-- **统一错误处理**：标准化错误分类、处理和日志记录，提升系统稳定性
-- **安全增强**：输入验证、参数化查询、JWT认证、密码哈希等安全措施
-- **性能优化**：AST解析缓存、并行规则执行、数据库批量同步、指数退避重试
-- **沙箱服务架构**：基于 Worker Threads 的服务隔离架构，每个功能模块独立运行，支持热替换，单一功能崩溃不影响其他服务
+- **多语言支持**:支持 JavaScript、TypeScript、Python、Java、Go、C++、C#、Rust、Swift、Kotlin、PHP、Ruby、Scala 等 15+ 种编程语言
+- **Tree-sitter 解析**:基于 Tree-sitter 的 WASM 解析器,深度分析代码结构
+- **问题检测**:内置 14+ 种检测规则,自动检测代码中的潜在问题
+- **智能优化**:结合大语言模型提供专业的代码优化建议,流式输出、可中断
+- **离线优化**:无网络时基于本地知识库和规则引擎进行代码优化(50+ 规则、20+ 模式)
+- **RAG 知识库**:包含 3000+ 条知识条目和 2100+ 条优化案例,支持云端数据库同步
+- **双工作模式**:分析模式(对话 + 检测流水线为主)/ 编辑模式(代码编辑为主,AI 收纳为悬浮助手)
+- **分析报告**:一键导出 HTML / Markdown 格式的项目分析报告
+- **检查更新**:启动时静默检查新版本,顶部提示条通知;设置页支持手动检查与更新源配置
+- **自持引擎**:完整的"监控 → 分析 → 决策 → 执行 → 验证"闭环,支持自更新、自修复与回滚
+- **MCP 接入**:外部程序可通过 Model Context Protocol 调用智能体能力
+- **沙箱服务架构**:基于 Worker Threads 的服务隔离,单一功能崩溃不影响其他服务
+- **双数据库支持**:SQLite(本地)与 MySQL(云端)双向同步,自动回退
 
-## 🚀 快速开始
+## 架构
+
+```
++----------------------------------------------------------+
+|  mrsliy-desktop.exe (Tauri / Rust 外壳)                   |
+|    +------------------------------------------------+    |
+|    |  React GUI (gui/)                              |    |
+|    |    主工作区 / 优化对比 / 质量概览 / 设置          |    |
+|    +------------------------+-----------------------+    |
+|                             | HTTP (127.0.0.1:随机端口)  |
+|    +------------------------v-----------------------+    |
+|    |  Node.js Sidecar (src/)                        |    |
+|    |    Express API + Tree-sitter + RAG + LLM       |    |
+|    +------------------------------------------------+    |
++----------------------------------------------------------+
+```
+
+- **gui/**:React + TypeScript + Vite 前端,经 Tauri IPC 获取 sidecar 端口
+- **src/**:Node.js 后端(Express 路由、检测服务、优化引擎、知识库、自更新)
+- **src-tauri/**:Rust 外壳,负责窗口管理、sidecar 拉起与健康检查
+- **installer/**:Inno Setup 安装包脚本(部署到 `C:\Program Files\MRSLIY`)
+
+## 快速开始
 
 ### 环境要求
 
 - Node.js >= 18.0.0
-- Windows / macOS / Linux
-- MySQL 5.7+（可选，用于云端数据库）
+- Rust 工具链(仅桌面端打包需要)
+- Windows 10/64 位(桌面端);CLI 支持 Windows / macOS / Linux
 
-### 安装
+### 开发运行
 
 ```bash
+# 安装依赖(自动下载 Tree-sitter WASM)
+npm install
+
+# 仅启动后端 API(默认 3210 端口)
+npm run server
+
+# 启动 GUI 开发服务器
+cd gui && npm install && npm run dev
+
+# 打包桌面应用(前端构建 + Rust 编译 + NSIS 安装包)
+npx @tauri-apps/cli build
+```
+
+### 桌面端使用
+
+安装后启动 `MR·SLIY`:
+
+1. 左侧选择工作区与文件
+2. 分析模式下输入"分析"触发检测流水线(解析 → AST → 规则检测 → 知识库比对 → 结论)
+3. 对问题卡片点击"修复"生成 AI 优化方案,确认后应用
+4. 设置页可配置 LLM 提供商(DeepSeek / 智谱 / 通义 / OpenAI / Ollama / 自定义 OpenAI 兼容接口)
+
+### CLI 模式
+
+```bash
+# 全局安装后
 npm install -g mr-sliy
-```
-
-安装过程中会自动完成：
-- 创建配置文件（`~/.mr-sliy/database_connections.json`）
-- 初始化数据库（`~/.mr-sliy/database/code_optimizer.db`）
-- 下载必要的 Tree-sitter WASM 文件
-
-### 启动
-
-```bash
-mr-sliy
-```
-
-启动后界面会显示：
-- 当前工作模式（离线/在线/自动）
-- 已注册的 LLM 提供商数量
-- 知识库条目数量
-- 当前数据库存储类型（SQLite/MySQL）
-- 上次云端同步时间
-
-### 首次使用
-
-启动后输入 `/config` 进入配置管理：
-
-1. 选择 `1) 提供商管理` → `2) 注册新提供商`
-2. 输入提供商名称（如 `deepseek`、`zhipu`、`tongyi`）
-3. 输入 API Key
-4. 选择 `1) 切换` 到新注册的提供商
-5. 开始使用 AI 功能！
-
-### 配置云端数据库
-
-启动后输入 `/config` 进入配置管理：
-
-1. 选择 `2) 知识库管理`
-2. 选择数据库连接配置选项
-3. 输入 MySQL 连接信息（主机、端口、用户名、密码、数据库名）
-4. 测试连接并设置为默认连接
-5. **重启后自动使用云端数据库，无需重新切换**
-
-### 离线使用
-
-如果不想使用云端大模型，可以：
-1. 输入 `/config` → `3) 模式切换` 切换到"离线模式"
-2. 使用本地 RAG 知识库进行代码分析和优化建议
-3. 离线模式下完全不依赖网络
-
-## 📖 命令
-
-### 启动方式
-
-```bash
-# 交互式启动
 mr-sliy
 
-# 分析单个文件
-mr-sliy analyze <file>
-
-# 扫描项目
-mr-sliy scan <path>
+# 或仓库内直接运行
+npm start
 ```
 
-### 智能体命令
+常用命令:
 
 | 命令 | 说明 |
 |------|------|
-| `/analyze` | 代码分析（分析文件 / 扫描项目） |
+| `/analyze` | 代码分析(分析文件 / 扫描项目) |
 | `/optimize` | 交互式代码优化 |
-| `/sustain` | AI自持引擎（仪表盘 / 引擎控制 / AI分析 / 手动更新 / 手动修复 / 规则管理 / 遥测数据 / 验证统计） |
-| `/config` | 配置管理（提供商管理 / 知识库管理 / 模式切换） |
-| `/status` | 系统状态（查看状态 / 健康检查） |
-| `/pending` | 待处理确认队列 |
-| `/help` | 显示帮助文档 |
-| `/clear` | 清空屏幕 |
-| `/exit` | 退出程序 |
+| `/sustain` | AI 自持引擎(仪表盘 / 引擎控制 / 手动更新 / 手动修复) |
+| `/config` | 配置管理(提供商 / 知识库 / 模式切换) |
+| `/status` | 系统状态与健康检查 |
+| `/help` | 帮助文档 |
 
-### 交互方式
+交互细节:输入 `/` 快速搜索命令,方向键选择,Tab 补全;子菜单中输入 `q` 或 `quit` 返回主菜单。
 
-- 输入 `/` 可快速搜索命令
-- 使用 `↑↓` 方向键选择命令
-- 按 `Tab` 自动补全
-- 按 `Enter` 确认执行
-- 直接输入文字与 AI 聊天
-- 在子菜单中输入 `q` 或 `quit` 返回主菜单
+## 配置
 
-## ⚙️ 配置
+所有运行时数据位于用户主目录 `~/.mr-sliy/`:
 
-配置文件位于用户主目录：
+```
+~/.mr-sliy/
+├── database/            # SQLite 数据库
+├── reports/             # 导出的分析报告
+├── logs/                # 运行日志
+├── chat_memory.json     # 对话记忆(用户偏好与项目约定)
+├── update_source.json   # 检查更新源地址
+└── database_connections.json  # 云端数据库连接配置
+```
+
+LLM API Key 推荐在应用"设置"页配置,存储在本地数据库,不落明文。环境变量方式参见 `.env.example`。
+
+### 检查更新
+
+在托管平台(Gitee Pages / GitHub Raw / 自有服务器)放置版本清单 JSON:
+
+```json
+{ "version": "3.16.1", "notes": "更新说明", "url": "下载页地址" }
+```
+
+在"设置 → 检查更新"中填入清单地址并保存。此后应用启动时会自动检查,发现新版本在顶部显示提示条;同一版本的提示关闭后不再重复出现。
+
+## 测试
 
 ```bash
-# 数据库连接配置
-~/.mr-sliy/database_connections.json
-
-# SQLite数据库文件
-~/.mr-sliy/database/code_optimizer.db
+npm test              # 运行 tests/ 下单元测试
+npm run test:coverage # 覆盖率报告
 ```
 
-环境变量配置（`.env`）：
+## 安全
 
-```bash
-# LLM API Keys（可选，不设置则使用离线模式）
-OPENAI_API_KEY=your-openai-key
-OPENAI_MODEL=gpt-4
-
-DEEPSEEK_API_KEY=your-deepseek-key
-DEEPSEEK_MODEL=deepseek-chat
-
-ZHIPU_API_KEY=your-zhipu-key
-ZHIPU_MODEL=glm-4
-
-# 本地模型（Ollama）
-OLLAMA_URL=http://localhost:11434
-OLLAMA_MODEL=codellama
-
-# MySQL 配置（可选，用于云数据库）
-MYSQL_ENABLED=false
-MYSQL_HOST=localhost
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=password
-MYSQL_DATABASE=code_optimizer
-```
-
-## 🔧 支持的 LLM 提供商
-
-| 提供商 | 模型示例 | 说明 |
-|--------|----------|------|
-| OpenAI | gpt-4, gpt-3.5-turbo | OpenAI 官方 API |
-| DeepSeek | deepseek-chat, deepseek-coder | 深度求索 |
-| 智谱 AI | glm-4, glm-3-turbo | 清华智谱 |
-| 通义千问 | qwen-plus, qwen-max | 阿里云 |
-| Moonshot | kimi-chat, moonshot-v1-8k | 月之暗面 |
-| Ollama | codellama, llama2 | 本地部署模型 |
-
-## 🗂️ 项目结构
-
-```
-src/
-├── agent/                  # 智能体核心逻辑
-│   ├── agent.js            # 智能体主类
-│   └── startup.js          # 启动初始化
-├── cli/                    # 命令行界面
-│   └── index.js            # CLI入口和交互逻辑
-├── config/                 # 配置管理
-│   └── index.js            # 配置加载和管理
-├── core/                   # 核心组件
-│   └── agentInitializer.js # Agent初始化器
-├── engine/                 # 双模式引擎
-│   ├── dualModeEngine.js   # 在线/离线双模引擎
-│   └── sustainCycle.js     # 自持周期管理
-├── middlewares/            # Express 中间件
-├── routes/                 # API 路由
-├── scheduler/              # 任务调度
-│   └── taskScheduler.js    # 定时任务调度器
-├── services/
-│   ├── ast/                # Tree-sitter AST 解析
-│   ├── bootstrap/          # 自更新与自修复
-│   │   ├── confirmationGate.js  # 门控确认
-│   │   ├── rollback.js          # 回滚机制
-│   │   ├── selfRepairManager.js # 自修复管理
-│   │   ├── selfUpdateManager.js # 自更新管理
-│   │   ├── selfSustainEngine.js # 自持引擎核心
-│   │   ├── analysisEngine.js    # AI分析引擎
-│   │   ├── ruleEngine.js        # 规则引擎
-│   │   ├── telemetry.js         # 遥测数据收集
-│   │   └── validator.js         # 效果验证器
-│   ├── detection/          # 问题检测器
-│   ├── llm/                # LLM 提供商适配
-│   ├── optimization/       # 优化引擎
-│   ├── rag/                # RAG 知识库
-│   └── vector/             # 向量数据库
-├── skills/                 # 技能模块
-│   ├── code-analysis/      # 代码分析子技能
-│   │   ├── index.js                    # 主入口
-│   │   ├── complexityAnalysis.js       # 复杂度分析（圈复杂度、认知复杂度）
-│   │   ├── securityDetection.js        # 安全检测（XSS、SQL注入、硬编码密钥）
-│   │   └── performanceOptimization.js  # 性能优化分析（循环效率、内存问题）
-│   ├── code-detection/     # 代码问题检测
-│   │   ├── index.js
-│   │   └── rules/          # 检测规则（14+规则）
-│   ├── code-optimization/  # 代码优化子技能
-│   │   └── index.js        # 自动修复策略（8+策略）
-│   ├── code-generation/    # 代码生成（参考 superpowers）
-│   │   └── index.js        # 需求→代码、单元测试、模拟数据
-│   ├── code-refactoring/   # 代码重构（参考 superpowers）
-│   │   └── index.js        # 提取方法、内联、重命名、简化条件
-│   ├── code-debugging/     # 代码调试（参考 superpowers）
-│   │   └── index.js        # 错误分析、问题诊断、潜在bug检测
-│   ├── documentation/      # 文档生成（参考 superpowers）
-│   │   └── index.js        # 代码文档、API文档、README、架构文档
-│   ├── database/           # 数据库开发（参考 supabase/agent-skills）
-│   │   └── index.js        # 表结构生成、SQL查询、数据库迁移、ER图
-│   ├── security-audit/     # 安全审计（参考 auditor-skill）
-│   │   └── index.js        # 全面安全审计、深度分析、审计报告
-│   ├── Skill.js            # 技能基类
-│   └── index.js            # 技能管理器
-├── utils/                  # 工具函数
-│   ├── crypto.js           # 加密工具
-│   ├── database.js         # 数据库抽象层
-│   ├── dbAdapter.js        # 数据库适配器（双写同步）
-│   ├── eventBus.js         # 事件总线
-│   ├── helpers.js          # 辅助函数
-│   ├── logger.js           # 日志系统
-│   ├── memoryManager.js    # 内存管理
-│   ├── moduleRegistry.js   # 模块注册中心
-│   ├── mysql.js            # MySQL 连接工具
-│   ├── notificationSystem.js # 通知系统
-│   ├── progress.js         # 进度条
-│   ├── response.js         # 响应处理
-│   ├── systemMonitor.js    # 系统监控
-│   └── telemetry.js        # 遥测数据
-├── workers/                # Worker 线程池
-├── agent.js                # CLI 入口
-└── index.js                # Web 服务入口
-```
-
-## 🛡️ 安全
-
-- API Key 存储在本地数据库中，不暴露在代码或配置文件中
-- 使用 `.npmignore` 和 `.gitignore` 排除敏感文件（数据库文件、日志、备份目录等）
-- 支持加密配置存储
+- API Key 存储在本地数据库,不暴露在代码或配置文件中
+- 检查更新仅拉取版本清单;打开外部链接仅允许 http/https
+- 代码修改类操作经确认门控(按风险分级),支持一键回滚
 - 不上传任何代码或数据到第三方服务器
-- 历史提交中的敏感文件已清理
-
-## 📊 数据库架构
-
-### 支持的数据库
-
-| 数据库类型 | 适用场景 | 特性 |
-|------------|----------|------|
-| SQLite | 本地开发、离线使用 | 无需额外安装，文件存储 |
-| MySQL | 云端部署、多实例同步 | 支持远程连接，数据同步 |
-
-### 自动回退机制
-
-当 MySQL 连接不可用时，系统会自动回退到 SQLite，确保服务正常运行：
-
-1. MySQL 连接池创建失败 → 使用 SQLite
-2. MySQL 查询失败 → 记录日志并使用 SQLite
-3. MySQL 表初始化失败 → 使用 SQLite
-
-### 双向同步
-
-- **上传到云端**：将本地 SQLite 数据同步到云端 MySQL
-- **从云端下载**：将云端 MySQL 数据同步回本地 SQLite
-- **自动记忆**：重启后自动加载上次配置的数据库连接，无需重新切换
 
 ## 📝 更新日志
 
