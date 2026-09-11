@@ -1,4 +1,4 @@
-﻿//! Tauri IPC 命令：原生文件操作 + 转发到 Node sidecar 的 REST API。
+//! Tauri IPC 命令：原生文件操作 + 转发到 Node sidecar 的 REST API。
 
 use crate::sidecar::SidecarState;
 use serde::Serialize;
@@ -67,9 +67,20 @@ pub fn exit_app(app: tauri::AppHandle) {
 
 /// 启动新版本安装器并退出当前应用（自动更新流程的最后一步）。
 /// 安装器路径必须位于 ~/.mr-sliy/updates 目录内且为 .exe，防止任意进程启动。
+///
+/// 启动健壮性(实测 os error 193 偶发于 AV 实时扫描锁住镜像读取/系统层对 verbatim
+/// 路径的兼容性问题——文件本身 sha256 完好):
+/// 1. PE 头校验,损坏直接报错而非给出误导性的系统错误
+/// 2. canonicalize 的 \\?\ 前缀去除后再 spawn
+/// 3. 直接启动失败 → 短暂等待重试(缓解 AV 扫描窗口) → cmd start 兜底(ShellExecute 语义)
+/// 4. 每次尝试写入 installer.log,失败可事后诊断
 #[tauri::command]
 pub fn install_update(app: tauri::AppHandle, path: String) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
+    use std::io::Read;
+    use std::process::Command;
+
+    const CREATE_NO_WINDOW: u32 = 0x0000_0800;
 
     let updates_dir = std::env::var("USERPROFILE")
         .map_err(|_| "no USERPROFILE".to_string())
@@ -91,15 +102,86 @@ pub fn install_update(app: tauri::AppHandle, path: String) -> Result<(), String>
         return Err("仅允许启动 .exe 安装包".into());
     }
 
-    std::process::Command::new(&exe)
-        .creation_flags(0x0000_0800) // CREATE_NO_WINDOW：避免 cmd 壳闪烁;安装器自身 GUI 不受影响
-        .spawn()
-        .map_err(|e| format!("启动安装器失败: {e}"))?;
+    // 去除 \\?\ verbatim 前缀(CreateProcess 对该前缀在部分系统层存在兼容性问题)
+    fn deverbatim(p: &std::path::Path) -> std::path::PathBuf {
+        let s = p.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            std::path::PathBuf::from(format!(r"\\{rest}"))
+        } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+            std::path::PathBuf::from(rest)
+        } else {
+            p.to_path_buf()
+        }
+    }
+    let exe_plain = deverbatim(&exe);
 
-    // 给安装器进程留出初始化时间，再退出当前应用（sidecar 由 watchdog 跟随退出）
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    app.exit(0);
-    Ok(())
+    // PE 头校验:文件损坏时给出明确指引,不浪费重试
+    let mut head = [0u8; 2];
+    fs::File::open(&exe_plain)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .map_err(|e| format!("安装包无法读取: {e}"))?;
+    if &head != b"MZ" {
+        return Err("安装包已损坏(非可执行文件),已放弃启动,请重新下载".into());
+    }
+
+    // 轻量文件日志:启动器是自动更新的最后一环,失败必须留痕可诊断
+    let log = |msg: &str| {
+        if let Some(dir) = exe_plain.parent().and_then(std::path::Path::parent) {
+            if let Ok(mut f) = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(dir.join("logs").join("installer.log"))
+            {
+                use std::io::Write;
+                let _ = writeln!(f, "{} {}", chrono_now(), msg);
+            }
+        }
+    };
+    // 本地时间戳(避免引入 chrono,仅用于日志排序)
+    fn chrono_now() -> String {
+        let t = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        format!("[unix {t}s]")
+    }
+
+    let mut last_err = String::new();
+
+    // 尝试 1:直接启动;尝试 2:等待 400ms 重试(缓解 AV 实时扫描窗口);
+    // 尝试 3:cmd start 兜底(ShellExecute 语义,走不同的加载路径)
+    for attempt in 1..=3 {
+        let res = if attempt <= 2 {
+            if attempt == 2 {
+                std::thread::sleep(Duration::from_millis(400));
+            }
+            Command::new(&exe_plain)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map(|_| "ok".to_string())
+        } else {
+            Command::new("cmd")
+                .args(["/C", "start", ""])
+                .arg(&exe_plain)
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map(|_| "ok".to_string())
+        };
+        match res {
+            Ok(_) => {
+                log(&format!("launch attempt {attempt} OK: {}", exe_plain.display()));
+                // 给安装器进程留出初始化时间，再退出当前应用（sidecar 由 watchdog 跟随退出）
+                std::thread::sleep(Duration::from_millis(300));
+                app.exit(0);
+                return Ok(());
+            }
+            Err(e) => {
+                log(&format!("launch attempt {attempt} FAIL (os error {}): {e}", e.raw_os_error().unwrap_or(0)));
+                last_err = e.to_string();
+            }
+        }
+    }
+    Err(format!("启动安装器失败: {last_err}"))
 }
 
 // ---------- 原生文件操作 ----------
