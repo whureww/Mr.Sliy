@@ -253,3 +253,63 @@
 .code-editor .token.inserted {
   color: #116329;
 }
+
+/* ---------- 黑夜模式语法配色（GitHub Dark 派生） ---------- */
+:root[data-mode='dark'] .code-editor .token.comment,
+:root[data-mode='dark'] .code-editor .token.prolog,
+:root[data-mode='dark'] .code-editor .token.doctype,
+:root[data-mode='dark'] .code-editor .token.cdata {
+  color: #7D8590;
+}
+
+:root[data-mode='dark'] .code-editor .token.punctuation,
+:root[data-mode='dark'] .code-editor .token.operator {
+  color: #C9D1D9;
+}
+
+:root[data-mode='dark'] .code-editor .token.string,
+:root[data-mode='dark'] .code-editor .token.char,
+:root[data-mode='dark'] .code-editor .token.attr-value,
+:root[data-mode='dark'] .code-editor .token.regex {
+  color: #A5D6FF;
+}
+
+:root[data-mode='dark'] .code-editor .token.number,
+:root[data-mode='dark'] .code-editor .token.boolean,
+:root[data-mode='dark'] .code-editor .token.constant,
+:root[data-mode='dark'] .code-editor .token.symbol {
+  color: #79C0FF;
+}
+
+:root[data-mode='dark'] .code-editor .token.keyword,
+:root[data-mode='dark'] .code-editor .token.important,
+:root[data-mode='dark'] .code-editor .token.atrule,
+:root[data-mode='dark'] .code-editor .token.rule {
+  color: #FF7B72;
+}
+
+:root[data-mode='dark'] .code-editor .token.function {
+  color: #D2A8FF;
+}
+
+:root[data-mode='dark'] .code-editor .token.class-name,
+:root[data-mode='dark'] .code-editor .token.builtin {
+  color: #FFA657;
+}
+
+:root[data-mode='dark'] .code-editor .token.tag {
+  color: #7EE787;
+}
+
+:root[data-mode='dark'] .code-editor .token.attr-name,
+:root[data-mode='dark'] .code-editor .token.property {
+  color: #79C0FF;
+}
+
+:root[data-mode='dark'] .code-editor .token.deleted {
+  color: #FF9494;
+}
+
+:root[data-mode='dark'] .code-editor .token.inserted {
+  color: #7EE787;
+}

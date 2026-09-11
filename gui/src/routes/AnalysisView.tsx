@@ -296,7 +296,7 @@ function AssistantMessage({
                             <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />
                           </span>
                         ) : (
-                          <span style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #CFCDC7', boxSizing: 'border-box' }} />
+                          <span style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid var(--typing-dot)', boxSizing: 'border-box' }} />
                         )}
                         {!last && (
                           <span

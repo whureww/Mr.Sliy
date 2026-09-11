@@ -536,10 +536,24 @@ const DICT: Record<string, Entry> = {
   'theme.lake': { zh: '湖蓝 · 晴空', en: 'Lake Blue · Clear Sky' },
   'theme.berry': { zh: '莓紫 · 藤萝', en: 'Berry · Wisteria' },
   'theme.rose': { zh: '玫瑰 · 春樱', en: 'Rose · Spring Cherry' },
+  'theme.slate': { zh: '石墨 · 冷杉', en: 'Graphite · Fir' },
+  'theme.teal': { zh: '青潮 · 浅滩', en: 'Teal · Shallows' },
+  'theme.indigo': { zh: '黛蓝 · 星野', en: 'Indigo · Starfield' },
+  'theme.olive': { zh: '橄榄 · 原野', en: 'Olive · Meadow' },
   'scale.small': { zh: '小', en: 'Small' },
   'scale.standard': { zh: '标准', en: 'Standard' },
   'scale.large': { zh: '大', en: 'Large' },
   'scale.xl': { zh: '特大', en: 'X-Large' },
+
+  // ---------- 外观：日 / 夜模式 ----------
+  'appearance.daynight': { zh: '日 / 夜模式', en: 'Day / Night Mode' },
+  'appearance.mode.light': { zh: '白天', en: 'Day' },
+  'appearance.mode.dark': { zh: '黑夜', en: 'Night' },
+  'appearance.mode.auto': { zh: '自动', en: 'Auto' },
+  'appearance.mode.autoDesc': {
+    zh: '自动：18:00 – 次日 7:00 使用黑夜模式，其余时间白天模式',
+    en: 'Auto: night mode from 18:00 to 7:00, day mode otherwise'
+  },
 
   // ---------- 通用错误兜底 ----------
   'err.requestFailed': { zh: '请求失败', en: 'Request failed' },

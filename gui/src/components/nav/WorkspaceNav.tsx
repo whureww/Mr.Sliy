@@ -481,7 +481,7 @@ function TreeNode({
             ▶
           </span>
         ) : (
-          <span style={{ width: 12, textAlign: 'center', color: '#C4C2BC', fontSize: 12, flexShrink: 0 }}>·</span>
+          <span style={{ width: 12, textAlign: 'center', color: 'var(--disabled-text)', fontSize: 12, flexShrink: 0 }}>·</span>
         )}
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: node.is_dir ? 550 : 400 }}>
           {node.name}

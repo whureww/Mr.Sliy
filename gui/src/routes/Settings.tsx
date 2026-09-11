@@ -29,7 +29,7 @@ import {
   saveUpdateSource,
   startUpdateDownload
 } from '../ipc/client';
-import { SCALES, THEMES, Appearance } from '../lib/appearance';
+import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, paletteOf } from '../lib/appearance';
 import { Lang, setLang, t, useLang } from '../lib/i18n';
 
 interface Props {
@@ -72,17 +72,25 @@ const LANGS: { key: Lang; name: string }[] = [
   { key: 'en', name: 'English' }
 ];
 
-/** 更新记录状态徽章颜色 */
-const UPDATE_STATUS_STYLE: Record<string, { color: string; bg: string }> = {
-  success: { color: '#1A7F37', bg: '#E9F7EF' },
-  completed: { color: '#1A7F37', bg: '#E9F7EF' },
-  failed: { color: '#CF222E', bg: '#FFEBE9' },
-  pending: { color: '#9A6700', bg: '#FFF3D6' },
-  running: { color: '#9A6700', bg: '#FFF3D6' }
+/** 更新记录状态徽章颜色（底色用 color-mix 混合卡片背景，日/夜模式均适配） */
+const UPDATE_STATUS_STYLE: Record<string, { color: string; mixKey: 'success' | 'danger' | 'warning' }> = {
+  success: { color: 'var(--success-text)', mixKey: 'success' },
+  completed: { color: 'var(--success-text)', mixKey: 'success' },
+  failed: { color: 'var(--danger-text)', mixKey: 'danger' },
+  pending: { color: 'var(--warning-text)', mixKey: 'warning' },
+  running: { color: 'var(--warning-text)', mixKey: 'warning' }
 };
 
 export default function Settings({ mode, onModeChange, appearance, onAppearanceChange, updateInfo, onUpdateInfoChange }: Props) {
   const lang = useLang();
+  // auto 日夜跨越阈值时强制刷新（主题预览色跟随实际生效变体）
+  const [, setModeTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setModeTick((n) => n + 1);
+    window.addEventListener(MODE_CHANGE_EVENT, bump);
+    return () => window.removeEventListener(MODE_CHANGE_EVENT, bump);
+  }, []);
+  const dark = appearance ? isDarkMode(appearance) : false;
   const [payload, setPayload] = useState<LlmProvidersPayload | null>(null);
   const [keys, setKeys] = useState<LlmKeyInfo[]>([]);
   const [editing, setEditing] = useState<string | null>(null);
@@ -364,9 +372,9 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             padding: '10px 14px',
             borderRadius: 10,
             fontSize: 13,
-            background: notice.ok ? '#EDF7F1' : '#FBF0EE',
+            background: notice.ok ? 'color-mix(in srgb, var(--success) 10%, var(--bg-card))' : 'color-mix(in srgb, var(--danger) 10%, var(--bg-card))',
             color: notice.ok ? 'var(--success)' : 'var(--danger)',
-            border: `1px solid ${notice.ok ? '#CDEBDA' : '#F2D4D1'}`
+            border: `1px solid ${notice.ok ? 'color-mix(in srgb, var(--success) 24%, var(--bg-card))' : 'color-mix(in srgb, var(--danger) 24%, var(--bg-card))'}`
           }}
         >
           {notice.text}
@@ -620,9 +628,9 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
               borderRadius: 10,
               fontSize: 12.5,
               lineHeight: 1.7,
-              background: checkResult.checked ? (checkResult.updateAvailable ? 'var(--accent-tint)' : '#EDF7F1') : '#FDF6EC',
+              background: checkResult.checked ? (checkResult.updateAvailable ? 'var(--accent-tint)' : 'color-mix(in srgb, var(--success) 10%, var(--bg-card))') : 'color-mix(in srgb, var(--warning) 10%, var(--bg-card))',
               color: checkResult.checked ? (checkResult.updateAvailable ? 'var(--accent)' : 'var(--success)') : 'var(--warning)',
-              border: `1px solid ${checkResult.checked ? (checkResult.updateAvailable ? '#F5D9AE' : '#CDEBDA') : '#F0E2C8'}`
+              border: `1px solid ${checkResult.checked ? (checkResult.updateAvailable ? 'color-mix(in srgb, var(--accent) 30%, var(--bg-card))' : 'color-mix(in srgb, var(--success) 24%, var(--bg-card))') : 'color-mix(in srgb, var(--warning) 24%, var(--bg-card))'}`
             }}
           >
             {checkResult.checked ? (
@@ -700,7 +708,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                   {u.updateContent || '—'}
                 </span>
                 {u.status && (
-                  <span style={{ fontSize: 10.5, fontWeight: 650, color: st.color, background: st.bg, borderRadius: 6, padding: '1px 7px', flexShrink: 0 }}>
+                  <span style={{ fontSize: 10.5, fontWeight: 650, color: st.color, background: `color-mix(in srgb, var(${st.mixKey === 'success' ? '--success' : st.mixKey === 'danger' ? '--danger' : '--warning'}) 12%, var(--bg-card))`, borderRadius: 6, padding: '1px 7px', flexShrink: 0 }}>
                     {u.status}
                   </span>
                 )}
@@ -775,21 +783,64 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
         <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>{t('settings.appearance.title')}</div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 14 }}>{t('settings.appearance.desc')}</div>
 
+        {/* 日 / 夜模式 */}
+        <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>{t('appearance.daynight')}</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
+          {([
+            { key: 'light' as ThemeMode, label: t('appearance.mode.light') },
+            { key: 'dark' as ThemeMode, label: t('appearance.mode.dark') },
+            { key: 'auto' as ThemeMode, label: t('appearance.mode.auto') }
+          ]).map((m) => {
+            const active = (appearance?.mode ?? 'auto') === m.key;
+            return (
+              <button
+                key={m.key}
+                onClick={() => onAppearanceChange({
+                  theme: appearance?.theme ?? 'amber',
+                  scale: appearance?.scale ?? 1,
+                  mode: m.key
+                })}
+                style={{
+                  padding: '6px 18px',
+                  borderRadius: 999,
+                  border: `1.5px solid ${active ? 'var(--accent)' : 'var(--border-hairline)'}`,
+                  background: active ? 'var(--accent-tint)' : 'transparent',
+                  color: active ? 'var(--accent)' : 'var(--text-muted)',
+                  fontWeight: active ? 650 : 400,
+                  fontSize: 12.5,
+                  transition: 'all 0.3s ease'
+                }}
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+        {(appearance?.mode ?? 'auto') === 'auto' && (
+          <div className="muted" style={{ fontSize: 11, marginBottom: 14 }}>{t('appearance.mode.autoDesc')}</div>
+        )}
+        <div style={{ height: 14 }} />
+
         <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>{t('appearance.theme')}</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
           {THEMES.map((th) => {
             const active = appearance?.theme === th.key;
+            const c = paletteOf(th.key, dark); // 预览跟随当前日/夜变体
             return (
               <button
                 key={th.key}
-                onClick={() => onAppearanceChange({ theme: th.key, scale: appearance?.scale ?? 1 })}
-                title={th.name}
+                onClick={() => onAppearanceChange({
+                  theme: th.key,
+                  scale: appearance?.scale ?? 1,
+                  mode: appearance?.mode ?? 'auto'
+                })}
+                title={t(th.name)}
                 style={{
                   textAlign: 'left',
                   padding: 12,
                   borderRadius: 12,
-                  border: `1.5px solid ${active ? th.accent : 'var(--border-hairline)'}`,
-                  background: th.canvas,
+                  border: `1.5px solid ${active ? c.accent : 'var(--border-hairline)'}`,
+                  background: c.canvas,
                   boxShadow: active ? 'var(--shadow-lift)' : 'none',
                   transition: 'all 0.35s ease',
                   overflow: 'hidden'
@@ -797,11 +848,11 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
               >
                 {/* 配色预览条 */}
                 <div style={{ display: 'flex', gap: 6, marginBottom: 9 }}>
-                  <span style={{ width: 20, height: 20, borderRadius: 7, background: th.accent, boxShadow: `0 2px 6px ${th.accent}55` }} />
-                  <span style={{ width: 20, height: 20, borderRadius: 7, background: th.card, border: `1px solid ${th.border}` }} />
-                  <span style={{ width: 20, height: 20, borderRadius: 7, background: th.recessed }} />
+                  <span style={{ width: 20, height: 20, borderRadius: 7, background: c.accent, boxShadow: `0 2px 6px ${c.accent}55` }} />
+                  <span style={{ width: 20, height: 20, borderRadius: 7, background: c.card, border: `1px solid ${c.border}` }} />
+                  <span style={{ width: 20, height: 20, borderRadius: 7, background: c.recessed }} />
                   {active && (
-                    <span style={{ marginLeft: 'auto', color: th.accent, fontSize: 13, fontWeight: 700 }}>✓</span>
+                    <span style={{ marginLeft: 'auto', color: c.accent, fontSize: 13, fontWeight: 700 }}>✓</span>
                   )}
                 </div>
                 <div style={{ fontSize: 12.5, fontWeight: 650, color: 'var(--text-primary)' }}>{t(th.name)}</div>
@@ -820,7 +871,11 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             return (
               <button
                 key={s.value}
-                onClick={() => onAppearanceChange({ theme: appearance?.theme ?? 'amber', scale: s.value })}
+                onClick={() => onAppearanceChange({
+                  theme: appearance?.theme ?? 'amber',
+                  scale: s.value,
+                  mode: appearance?.mode ?? 'auto'
+                })}
                 style={{
                   padding: '6px 18px',
                   borderRadius: 999,
@@ -832,7 +887,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                   transition: 'all 0.3s ease'
                 }}
               >
-                {s.name}
+                {t(s.name)}
               </button>
             );
           })}

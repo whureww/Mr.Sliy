@@ -17,6 +17,28 @@
   --shadow-lift: 0 4px 16px rgba(38, 37, 35, 0.06);
   --font-ui: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
+  /* 日夜共用/分态变量（暗色值由 data-mode='dark' 覆盖） */
+  --scrollbar-thumb: #D8D6D0;
+  --typing-dot: #CFCDC7;
+  --disabled-bg: #F0D9B8;
+  --disabled-text: #C4C2BC;
+  --danger-hover-bg: #FBF0EE;
+  --pulse-ring: rgba(232, 135, 10, 0.35);
+  --pulse-halo: rgba(232, 135, 10, 0.08);
+  --focus-ring: rgba(232, 135, 10, 0.10);
+  --menu-shadow: 0 10px 32px rgba(38, 37, 35, 0.10);
+}
+
+/* 黑夜模式：分态变量覆盖（主题色/背景由 applyAppearance 按主题写入） */
+:root[data-mode='dark'] {
+  --scrollbar-thumb: #3A3E46;
+  --typing-dot: #4A4E56;
+  --disabled-bg: #2E2A22;
+  --disabled-text: #5C5952;
+  --danger-hover-bg: rgba(199, 84, 80, 0.16);
+  --success-text: #4EC98C;
+  --warning-text: #E0B34D;
+  --danger-text: #FF8B84;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -89,7 +111,7 @@ button {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #CFCDC7;
+  background: var(--typing-dot);
   display: inline-block;
   animation: typingBounce 1.4s infinite ease-in-out;
 }
@@ -204,7 +226,7 @@ button {
 }
 .ask-send:hover:not(:disabled) { background: var(--accent-hover); }
 .ask-send:active:not(:disabled) { transform: scale(0.93); }
-.ask-send:disabled { background: #F0D9B8; cursor: not-allowed; }
+.ask-send:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 .ask-send.stopping { background: var(--danger); }
 .ask-send.stopping:hover { background: #B03F3B; }
 

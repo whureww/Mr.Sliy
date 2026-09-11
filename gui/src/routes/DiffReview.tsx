@@ -111,11 +111,11 @@ export default function DiffReview({ payload, onBack }: Props) {
         </div>
         <div className="mono muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{filePath}</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <span style={{ fontSize: 12, color: 'var(--success)', background: '#EDF7F1', borderRadius: 8, padding: '3px 9px' }}>{t('diff.linesAdded', { n: added })}</span>
-          <span style={{ fontSize: 12, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '3px 9px' }}>{t('diff.linesRemoved', { n: removed })}</span>
+          <span style={{ fontSize: 12, color: 'var(--success)', background: 'color-mix(in srgb, var(--success) 12%, var(--bg-card))', borderRadius: 8, padding: '3px 9px' }}>{t('diff.linesAdded', { n: added })}</span>
+          <span style={{ fontSize: 12, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-card))', borderRadius: 8, padding: '3px 9px' }}>{t('diff.linesRemoved', { n: removed })}</span>
         </div>
         {err && (
-          <div style={{ fontSize: 12.5, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '9px 12px', lineHeight: 1.6 }}>
+          <div style={{ fontSize: 12.5, color: 'var(--danger)', background: 'color-mix(in srgb, var(--danger) 10%, var(--bg-card))', borderRadius: 8, padding: '9px 12px', lineHeight: 1.6 }}>
             {err}
           </div>
         )}

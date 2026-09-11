@@ -63,7 +63,12 @@ export default function App() {
         const app = normalizeAppearance(aRaw ? JSON.parse(aRaw) : null);
         setAppearance(app);
         applyAppearance(app);
-      } catch {}
+      } catch {
+        // 读取失败（如存储插件不可用）也应用默认外观，保证 auto 日夜模式始终生效
+        const app = normalizeAppearance(null);
+        setAppearance(app);
+        applyAppearance(app);
+      }
     })();
   }, []);
 
