@@ -337,6 +337,8 @@ export interface CheckUpdatePayload {
   url?: string;
   /** 新版本安装包直链（https）;为空时回退打开下载页 */
   download?: string;
+  /** 安装包 sha256 摘要("sha256:hex",来自 GitHub API),供下载后完整性校验 */
+  digest?: string;
   /** checked=false 时的原因说明 */
   reason?: string;
 }
@@ -371,10 +373,18 @@ export interface DownloadState {
   error?: string;
 }
 
-/** 开始下载新版本安装包(已有下载进行中时后端返回 409) */
-export async function startUpdateDownload(url: string, version: string): Promise<DownloadState> {
-  const env = await sidecarRequest<{ success: boolean; data: DownloadState }>('POST', '/api/update-download/start', { url, version });
-  return env?.data || { status: 'error', error: t('err.requestFailed') };
+/** 开始下载新版本安装包(已有下载进行中时后端返回 409);digest 用于 sha256 校验。
+ *  后端错误信封字段为 error,必须透传真实原因,不能吞成通用"请求失败"。 */
+export async function startUpdateDownload(url: string, version: string, digest?: string): Promise<DownloadState> {
+  const env = await sidecarRequest<{ success: boolean; error?: string; message?: string; data?: DownloadState }>(
+    'POST',
+    '/api/update-download/start',
+    { url, version, digest }
+  );
+  if (!env || env.success === false) {
+    return { status: 'error', error: env?.error || env?.message || t('err.requestFailed') };
+  }
+  return env.data || { status: 'error', error: t('err.requestFailed') };
 }
 
 /** 查询下载状态/进度(轮询) */

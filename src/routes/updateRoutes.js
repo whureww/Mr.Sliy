@@ -262,10 +262,14 @@ router.post('/update-source', (req, res) => {
   }
 });
 
-/** 开始下载新版本安装包（https 直链;已有下载进行中返回 409） */
+/** 开始下载新版本安装包（https 直链;已有下载进行中返回 409;digest 用于 sha256 完整性校验） */
 router.post('/update-download/start', (req, res) => {
   try {
-    const state = downloader.startDownload(req.body && req.body.url, req.body && req.body.version);
+    const state = downloader.startDownload(
+      req.body && req.body.url,
+      req.body && req.body.version,
+      req.body && req.body.digest
+    );
     res.json({ success: true, data: state });
   } catch (e) {
     const busy = e.code === 'BUSY';

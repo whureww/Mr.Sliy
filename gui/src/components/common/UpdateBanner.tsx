@@ -55,7 +55,7 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
       }
       // idle / error:有直链则(重新)开始下载
       if (info.download && info.latestVersion) {
-        const s = await startUpdateDownload(info.download, info.latestVersion).catch(() => null);
+        const s = await startUpdateDownload(info.download, info.latestVersion, info.digest).catch(() => null);
         if (!cancelled && s) setDl(s);
       }
     })();
@@ -194,11 +194,22 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
           className="btn-primary"
           style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
           onClick={async () => {
-            const s = await startUpdateDownload(info.download!, info.latestVersion!).catch(() => null);
+            const s = await startUpdateDownload(info.download!, info.latestVersion!, info.digest).catch(() => null);
             if (s) setDl(s);
           }}
         >
           {t('update.retry')}
+        </button>
+      )}
+
+      {/* 逃生通道:自动下载反复失败(如网络无法直连 GitHub)时,引导用户浏览器手动下载 */}
+      {(phase === 'error' || !info.download) && info.url && (
+        <button
+          className="btn-ghost"
+          style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
+          onClick={() => openExternal(info.url!).catch(() => {})}
+        >
+          {t('update.goDownload')}
         </button>
       )}
 

@@ -214,8 +214,8 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
     return () => clearInterval(timer);
   }, [dlState?.status]);
 
-  const beginDownload = async (url: string, version: string) => {
-    const s = await startUpdateDownload(url, version).catch((e) => ({ status: 'error', error: (e as Error).message }) as DownloadState);
+  const beginDownload = async (url: string, version: string, digest?: string) => {
+    const s = await startUpdateDownload(url, version, digest).catch((e) => ({ status: 'error', error: (e as Error).message }) as DownloadState);
     setDlState(s);
   };
 
@@ -692,13 +692,13 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                       <span style={{ color: 'var(--danger, #C0392B)', fontSize: 12 }}>{t('update.card.dlFailed', { err: dlState.error || t('update.unknownReason') })}</span>
                       {checkResult.download && (
-                        <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!)}>
+                        <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!, checkResult.digest)}>
                           {t('update.retry')}
                         </button>
                       )}
                     </span>
                   ) : checkResult.download ? (
-                    <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!)}>
+                    <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!, checkResult.digest)}>
                       {t('update.card.dlUpdate')}
                     </button>
                   ) : checkResult.url ? (

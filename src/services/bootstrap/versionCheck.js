@@ -94,6 +94,30 @@ function compareVersions(a, b) {
 const GITHUB_LATEST_API = 'https://api.github.com/repos/whureww/Mr.Sliy/releases/latest';
 const INSTALLER_ASSET_RE = /^MRSLIY-Setup-.*\.exe$/i;
 
+/** 从资产对象提取安装包信息:{ url, digest, size };无资产返回空对象 */
+function pickInstallerAsset(assets) {
+  const hit = (Array.isArray(assets) ? assets : []).find((a) => INSTALLER_ASSET_RE.test(String(a.name || '')));
+  if (!hit) return { url: '', digest: '', size: 0 };
+  // GitHub API 资产自带 sha256 摘要("sha256:hex"),供下载后完整性校验(镜像回退也靠它保证可信)
+  const digest = String(hit.digest || '').toLowerCase();
+  return {
+    url: /^https:\/\//i.test(String(hit.browser_download_url || '')) ? String(hit.browser_download_url) : '',
+    digest: /^(?:sha256:)?[0-9a-f]{64}$/.test(digest) ? digest : '',
+    size: Number(hit.size) || 0
+  };
+}
+
+/** 清理 release 正文用于横幅/卡片单行展示:去 Markdown 符号、压平空白 */
+function cleanNotes(body) {
+  return String(body || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map((l) => l.replace(/^\s*[-*>\s]+/, '').replace(/\*\*/g, '').replace(/`/g, '').trim())
+    .filter(Boolean)
+    .join('; ')
+    .slice(0, 160);
+}
+
 /** 从 GitHub Releases 解析最新安装包资产直链；任何异常静默返回空串（不阻塞检查流程） */
 async function resolveGithubReleaseAsset() {
   try {
@@ -132,8 +156,11 @@ async function checkRemoteUpdate(explicitVersion) {
       }
       const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
       let download = String((manifest && manifest.download) || '');
+      let digest = String((manifest && manifest.digest) || '');
       if (updateAvailable && !/^https:\/\//i.test(download)) {
-        download = await resolveGithubReleaseAsset();
+        const asset = pickInstallerAsset((await fetchJson(GITHUB_LATEST_API).catch(() => null))?.assets);
+        download = asset.url;
+        digest = asset.digest;
       }
       return {
         checked: true,
@@ -142,7 +169,8 @@ async function checkRemoteUpdate(explicitVersion) {
         updateAvailable,
         notes: String((manifest && manifest.notes) || ''),
         url: String((manifest && manifest.url) || ''),
-        download: /^https:\/\//i.test(download) ? download : ''
+        download: /^https:\/\//i.test(download) ? download : '',
+        digest
       };
     } catch (e) {
       return { checked: false, currentVersion, reason: `无法连接更新源（${e.message}）` };
@@ -158,20 +186,21 @@ async function checkRemoteUpdate(explicitVersion) {
     }
     const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
     let download = '';
+    let digest = '';
     if (updateAvailable) {
-      const assets = Array.isArray(release.assets) ? release.assets : [];
-      const hit = assets.find((a) => INSTALLER_ASSET_RE.test(String(a.name || '')));
-      const url = String((hit && hit.browser_download_url) || '');
-      download = /^https:\/\//i.test(url) ? url : '';
+      const asset = pickInstallerAsset(release.assets);
+      download = asset.url;
+      digest = asset.digest;
     }
     return {
       checked: true,
       currentVersion,
       latestVersion,
       updateAvailable,
-      notes: String((release && release.body) || '').slice(0, 200),
+      notes: cleanNotes(release && release.body),
       url: String((release && release.html_url) || ''),
-      download
+      download,
+      digest
     };
   } catch (e) {
     return { checked: false, currentVersion, reason: `无法连接 GitHub（${e.message}）` };
