@@ -40,6 +40,8 @@ interface Props {
   onAppearanceChange: (a: Appearance) => void;
   updateInfo: CheckUpdatePayload | null;
   onUpdateInfoChange: (info: CheckUpdatePayload | null) => void;
+  /** 首屏数据就绪后回调,页面切换过渡据此收场 */
+  onReady?: () => void;
 }
 
 /** 提供商展示名 */
@@ -131,7 +133,7 @@ function UpdateRow({ u }: { u: UpdateRecord }) {
   );
 }
 
-export default function Settings({ mode, onModeChange, appearance, onAppearanceChange, updateInfo, onUpdateInfoChange }: Props) {
+export default function Settings({ mode, onModeChange, appearance, onAppearanceChange, updateInfo, onUpdateInfoChange, onReady }: Props) {
   const lang = useLang();
   // auto 日夜跨越阈值时强制刷新（主题预览色跟随实际生效变体）
   const [, setModeTick] = useState(0);
@@ -294,10 +296,12 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   };
 
   useEffect(() => {
-    refresh();
-    refreshMemories();
-    refreshUpdates();
-    refreshMcp();
+    // 四项首屏数据全部落定后才回调就绪,页面切换过渡据此收场
+    // (各 refresh 内部已 catch,Promise.all 等待首次请求完成)
+    (async () => {
+      await Promise.all([refresh(), refreshMemories(), refreshUpdates(), refreshMcp()]);
+      onReady?.();
+    })();
     // 语言切换时同步刷新提示文案场景（数据本身与语言无关，仅初始化一次）
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

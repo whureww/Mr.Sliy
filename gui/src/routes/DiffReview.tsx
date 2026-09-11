@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { DiffPayload } from '../App';
 import { optimizeCode, saveFile } from '../ipc/client';
 import { openContextMenu, copyText } from '../lib/contextMenu';
@@ -7,6 +7,8 @@ import { t, useLang } from '../lib/i18n';
 interface Props {
   payload: DiffPayload | null;
   onBack: () => void;
+  /** 挂载即就绪(纯同步渲染),保持页面切换过渡协议一致 */
+  onReady?: () => void;
 }
 
 /** 行级差异（LCS）：' '='相同 '+'新增 '-'删除 */
@@ -43,7 +45,11 @@ function diffLines(before: string, after: string): { type: ' ' | '+' | '-'; text
   return out;
 }
 
-export default function DiffReview({ payload, onBack }: Props) {
+export default function DiffReview({ payload, onBack, onReady }: Props) {
+  // 纯同步渲染:大差异 LCS 计算也在此完成,挂载即代表内容完整
+  useEffect(() => {
+    onReady?.();
+  }, []);
   useLang();
   const [explanation, setExplanation] = useState<string>('');
   const [regenerating, setRegenerating] = useState(false);

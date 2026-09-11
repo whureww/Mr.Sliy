@@ -23,7 +23,7 @@ function sevBucket(sev: unknown): 'high' | 'medium' | 'low' {
   return 'low';
 }
 
-export default function Dashboard() {
+export default function Dashboard({ onReady }: { onReady?: () => void }) {
   const [stats, setStats] = useState<Stats | null>(null);
   const [err, setErr] = useState('');
 

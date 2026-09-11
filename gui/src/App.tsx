@@ -195,31 +195,34 @@ export default function App() {
     setTab('workbench');
   };
 
-  // 页面切换过渡:内容淡入 + 顶部缓冲进度条,并短暂屏蔽点击,
-  // 避免新页面数据尚未就绪时被误点(异步数据各自加载,过渡只做视觉缓冲)
-  const [switching, setSwitching] = useState(false);
-  const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 页面切换过渡:跟随实际数据加载,而非固定时长。
+  // 切换即进入 pending(顶部缓冲进度条 + 屏蔽点击 + 内容隐藏),新页面首屏数据
+  // 就绪(onReady 回调)后进度条消失、内容淡入——保证"加载结束=内容显示完全"。
+  // 兜底 1.2s 强制就绪,防止个别接口异常时永久卡住交互。
+  const [pageReady, setPageReady] = useState(false);
   useEffect(() => {
-    setSwitching(true);
-    if (switchTimer.current) clearTimeout(switchTimer.current);
-    switchTimer.current = setTimeout(() => setSwitching(false), 480);
-    return () => {
-      if (switchTimer.current) clearTimeout(switchTimer.current);
-    };
+    setPageReady(false);
+    const fallback = setTimeout(() => setPageReady(true), 1200);
+    return () => clearTimeout(fallback);
   }, [tab]);
+  const markPageReady = useCallback(() => setPageReady(true), []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <TopBar tab={tab} onTabChange={setTab} mode={mode} onModeChange={changeMode} />
       {updateInfo && <UpdateBanner info={updateInfo} onClose={() => setUpdateInfo(null)} />}
       <div style={{ flex: 1, minHeight: 0, padding: 16, position: 'relative' }}>
-        {switching && <div className="route-buffer" />}
-        <div key={tab} className="route-enter" style={{ height: '100%', pointerEvents: switching ? 'none' : undefined }}>
+        {!pageReady && <div className="route-buffer" />}
+        <div
+          key={tab}
+          className={'route-pane' + (pageReady ? ' route-enter' : '')}
+          style={{ height: '100%', opacity: pageReady ? 1 : 0, pointerEvents: pageReady ? undefined : 'none' }}
+        >
           {tab === 'workbench' && (
-            <Workbench mode={mode} onModeChange={setMode} onOpenDiff={openDiff} analysisMode={analysisMode} />
+            <Workbench mode={mode} onModeChange={setMode} onOpenDiff={openDiff} analysisMode={analysisMode} onReady={markPageReady} />
           )}
-          {tab === 'diff' && <DiffReview payload={diffPayload} onBack={() => setTab('workbench')} />}
-          {tab === 'dashboard' && <Dashboard />}
+          {tab === 'diff' && <DiffReview payload={diffPayload} onBack={() => setTab('workbench')} onReady={markPageReady} />}
+          {tab === 'dashboard' && <Dashboard onReady={markPageReady} />}
           {tab === 'settings' && (
             <Settings
               mode={analysisMode}
@@ -228,6 +231,7 @@ export default function App() {
               onAppearanceChange={changeAppearance}
               updateInfo={updateInfo}
               onUpdateInfoChange={setUpdateInfo}
+              onReady={markPageReady}
             />
           )}
         </div>

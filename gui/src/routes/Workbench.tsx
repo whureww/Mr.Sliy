@@ -28,6 +28,8 @@ interface Props {
   onModeChange: (m: WorkbenchMode) => void;
   onOpenDiff: (p: DiffPayload) => void;
   analysisMode: AnalysisMode;
+  /** 首屏数据(工作区/会话恢复)就绪后回调,页面切换过渡据此收场 */
+  onReady?: () => void;
 }
 
 /** 编辑器多标签页：每个标签持有独立内容/磁盘基线/扫描结果 */
@@ -56,7 +58,7 @@ const PIPELINE: Omit<AnalysisStep, 'done'>[] = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode }: Props) {
+export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode, onReady }: Props) {
   useLang(); // 订阅语言切换，触发重渲染
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWs, setActiveWs] = useState<string | null>(null);
@@ -736,6 +738,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       }
       restoring.current = false;
       loaded.current = true;
+      onReady?.();
     })();
   }, []);
 

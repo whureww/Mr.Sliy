@@ -268,7 +268,7 @@ button {
   width: 40%;
   border-radius: 99px;
   background: linear-gradient(90deg, transparent, var(--accent), transparent);
-  animation: routeBuffer 0.5s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+  animation: routeBuffer 0.9s cubic-bezier(0.45, 0, 0.55, 1) infinite; /* 循环扫过,就绪后由 React 卸载 */
 }
 @keyframes routeBuffer {
   from { transform: translateX(-110%); }
