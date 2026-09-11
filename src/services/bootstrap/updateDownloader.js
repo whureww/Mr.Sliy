@@ -26,7 +26,10 @@ const MAX_SIZE = 500 * 1024 * 1024; // 500MB
 const MAX_REDIRECTS = 5;
 const STALL_TIMEOUT = 30 * 1000; // 空闲 30s 无数据视为停滞
 const SLOW_AFTER = 45 * 1000; // 开跑 45s 后开始评估平均速度
-const SLOW_SPEED = 100 * 1024; // 平均速度低于 100KB/s 视为不可用(直连 GitHub 常见龟速),切镜像
+// 平均速度阈值 100KB/s。注意单位:下方比较式是 received(bytes)/elapsed(ms),而
+// bytes/ms 数值上恰好等于 KB/s,故这里写 100(曾误写 100*1024,等效 100MB/s,
+// 导致任何下载在 45s 时必然被误杀——安装包才 ~50MB,全部下完 ratio 也只有 ~1100)
+const SLOW_SPEED = 100;
 const VERSION_RE = /^[0-9A-Za-z._-]+$/;
 /** 镜像加速前缀(按顺序尝试);仅对 github.com 直链生效,配合 sha256 校验保证完整性 */
 const MIRROR_PREFIXES = ['https://ghfast.top/', 'https://mirror.ghproxy.com/'];

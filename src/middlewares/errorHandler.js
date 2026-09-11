@@ -44,9 +44,13 @@ const corsMiddleware = cors({
 const rateLimitMiddleware = rateLimit({
   windowMs: config.rateLimit.windowMs,
   max: config.rateLimit.max,
-  // 轮询类轻量接口豁免：状态栏每 5s 拉取用量，不能挤占常规配额
+  // 轮询类轻量接口豁免:状态栏每 5s 拉用量、更新下载期每 800ms 轮进度,
+  // 都不能挤占常规配额(否则下载一轮 90s+ 就耗尽 15min/100 次,重试即 429)
   skip: (req) =>
-    (req.path === '/llm/usage' || req.path === '/health' || req.path === '/healthz') &&
+    (req.path === '/llm/usage' ||
+      req.path === '/health' ||
+      req.path === '/healthz' ||
+      req.path === '/update-download/status') &&
     (req.ip === '127.0.0.1' || req.ip === '::1' || req.ip === '::ffff:127.0.0.1'),
   message: {
     success: false,
