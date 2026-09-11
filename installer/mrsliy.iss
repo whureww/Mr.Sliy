@@ -3,7 +3,7 @@
 
 #define MyAppName "MR·SLIY 代码优化智能体"
 #define MyAppExeName "mrsliy-desktop.exe"
-#define MyAppVersion "0.0.9"
+#define MyAppVersion "0.0.10"
 #define ProjRoot "d:\Final\final"
 
 [Setup]
@@ -45,14 +45,14 @@ Source: "{#ProjRoot}\.env.example"; DestDir: "{app}"; Flags: ignoreversion skipi
 Source: "{#ProjRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#ProjRoot}\src\*"; DestDir: "{app}\src"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjRoot}\database\*"; DestDir: "{app}\database"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "*.db,*.db-shm,*.db-wal"
-Source: "{#ProjRoot}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#ProjRoot}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules;node_modules\*;package.json;package-lock.json"
 ; 生产依赖（含 tree-sitter wasm 与原生模块，与内置 node ABI 匹配）
 Source: "{#ProjRoot}\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\mrsliy.ico"
+Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"; IconFilename: "{app}\mrsliy.ico"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\mrsliy.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "立即运行 {#MyAppName}"; Flags: nowait postinstall skipifsilent

@@ -31,6 +31,7 @@ import {
 } from '../ipc/client';
 import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, paletteOf, themeOf } from '../lib/appearance';
 import { Lang, setLang, t, useLang } from '../lib/i18n';
+import Collapse from '../components/common/Collapse';
 
 interface Props {
   mode: AnalysisMode;
@@ -81,7 +82,10 @@ const UPDATE_STATUS_STYLE: Record<string, { color: string; mixKey: 'success' | '
   running: { color: 'var(--warning-text)', mixKey: 'warning' }
 };
 
-/** 折叠箭头按钮（旋转指示展开方向） */
+/** 更新记录默认展示条数,更早的记录自动折叠 */
+const UPDATES_VISIBLE = 5;
+
+/** 折叠箭头按钮（单个箭头旋转指示方向，过渡丝滑） */
 function CollapseToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
     <button
@@ -89,9 +93,41 @@ function CollapseToggle({ open, onClick }: { open: boolean; onClick: () => void 
       style={{ fontSize: 12, padding: '4px 11px', flexShrink: 0, fontFamily: 'var(--font-mono)' }}
       onClick={onClick}
       title={open ? t('common.collapse') : t('common.expand')}
+      aria-expanded={open}
     >
-      {open ? '▾' : '▸'}
+      <span
+        style={{
+          display: 'inline-block',
+          transition: 'transform 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+          transform: open ? 'rotate(90deg)' : 'rotate(0deg)'
+        }}
+      >
+        ▸
+      </span>
     </button>
+  );
+}
+
+/** 更新记录行（列表与"更早记录"共用） */
+function UpdateRow({ u }: { u: UpdateRecord }) {
+  const st = UPDATE_STATUS_STYLE[String(u.status || '').toLowerCase()] || UPDATE_STATUS_STYLE.pending;
+  return (
+    <div className="selectable" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg-recessed)', borderRadius: 9, fontSize: 12.5 }}>
+      {u.createdAt && <span className="muted mono" style={{ fontSize: 10.5, flexShrink: 0 }}>{String(u.createdAt).slice(0, 16).replace('T', ' ')}</span>}
+      {u.updateType && (
+        <span style={{ fontSize: 10.5, fontWeight: 650, color: 'var(--accent)', background: 'var(--accent-tint)', borderRadius: 6, padding: '1px 7px', flexShrink: 0 }}>
+          {u.updateType}
+        </span>
+      )}
+      <span style={{ flex: 1, lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={u.updateContent || ''}>
+        {u.updateContent || '—'}
+      </span>
+      {u.status && (
+        <span style={{ fontSize: 10.5, fontWeight: 650, color: st.color, background: `color-mix(in srgb, var(${st.mixKey === 'success' ? '--success' : st.mixKey === 'danger' ? '--danger' : '--warning'}) 12%, var(--bg-card))`, borderRadius: 6, padding: '1px 7px', flexShrink: 0 }}>
+          {u.status}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -138,6 +174,8 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   const [themeOpen, setThemeOpen] = useState(false);
   const [providersOpen, setProvidersOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
+  // 更新记录超过 UPDATES_VISIBLE 条后,更早的记录自动折叠
+  const [showOlderUpdates, setShowOlderUpdates] = useState(false);
 
   const [mcp, setMcp] = useState<McpStatus | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -461,8 +499,9 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
           <CollapseToggle open={providersOpen} onClick={() => setProvidersOpen((v) => !v)} />
         </div>
 
-        {providersOpen && (
+        <Collapse open={providersOpen}>
         <>
+        <Collapse open={customOpen}>
         {customOpen && (
           <div style={{ marginTop: 12, padding: 14, border: '1px dashed var(--border-hairline)', borderRadius: 12, background: 'var(--bg-recessed)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 12.5, fontWeight: 650 }}>{t('llm.custom.title')}</div>
@@ -488,6 +527,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             </div>
           </div>
         )}
+        </Collapse>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 14 }}>
           {(payload?.providers || []).map((p) => {
@@ -530,6 +570,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                     </button>
                   )}
                 </div>
+                <Collapse open={isEditing}>
                 {isEditing && (
                   <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border-hairline)', background: 'var(--bg-recessed)', display: 'flex', flexDirection: 'column', gap: 10 }}>
                     {NEEDS_KEY[p.name] !== false && (
@@ -557,13 +598,14 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                     </div>
                   </div>
                 )}
+                </Collapse>
               </div>
             );
           })}
           {!payload && <div className="muted" style={{ fontSize: 13 }}>{t('common.loading')}</div>}
         </div>
         </>
-        )}
+        </Collapse>
       </section>
 
       {/* 记忆库：跨会话记忆管理 */}
@@ -631,6 +673,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
           </button>
         </div>
 
+        <Collapse open={showAdvanced}>
         {showAdvanced && (
           <div style={{ marginTop: 10 }}>
             <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
@@ -649,6 +692,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             </div>
           </div>
         )}
+        </Collapse>
 
         {checkState === 'done' && checkResult && (
           <div
@@ -732,33 +776,30 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
           <div style={{ flex: 1 }} />
           <CollapseToggle open={updatesOpen} onClick={() => setUpdatesOpen((v) => !v)} />
         </div>
-        {updatesOpen && (
+        <Collapse open={updatesOpen}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
           {updates === null && <div className="muted" style={{ fontSize: 12.5 }}>{t('updates.loadFail')}</div>}
           {updates?.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>{t('updates.empty')}</div>}
-          {updates?.map((u, i) => {
-            const st = UPDATE_STATUS_STYLE[String(u.status || '').toLowerCase()] || UPDATE_STATUS_STYLE.pending;
-            return (
-              <div key={u.id || i} className="selectable" style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg-recessed)', borderRadius: 9, fontSize: 12.5 }}>
-                {u.createdAt && <span className="muted mono" style={{ fontSize: 10.5, flexShrink: 0 }}>{String(u.createdAt).slice(0, 16).replace('T', ' ')}</span>}
-                {u.updateType && (
-                  <span style={{ fontSize: 10.5, fontWeight: 650, color: 'var(--accent)', background: 'var(--accent-tint)', borderRadius: 6, padding: '1px 7px', flexShrink: 0 }}>
-                    {u.updateType}
-                  </span>
-                )}
-                <span style={{ flex: 1, lineHeight: 1.55, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={u.updateContent || ''}>
-                  {u.updateContent || '—'}
-                </span>
-                {u.status && (
-                  <span style={{ fontSize: 10.5, fontWeight: 650, color: st.color, background: `color-mix(in srgb, var(${st.mixKey === 'success' ? '--success' : st.mixKey === 'danger' ? '--danger' : '--warning'}) 12%, var(--bg-card))`, borderRadius: 6, padding: '1px 7px', flexShrink: 0 }}>
-                    {u.status}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+          {updates?.slice(0, UPDATES_VISIBLE).map((u, i) => <UpdateRow key={u.id || i} u={u} />)}
+          {updates && updates.length > UPDATES_VISIBLE && (
+            <>
+              {/* 超出条数的旧记录自动折叠,点击展开 */}
+              <Collapse open={showOlderUpdates}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {updates.slice(UPDATES_VISIBLE).map((u, i) => <UpdateRow key={u.id || i + UPDATES_VISIBLE} u={u} />)}
+                </div>
+              </Collapse>
+              <button
+                className="btn-ghost"
+                style={{ fontSize: 12, alignSelf: 'center', padding: '4px 14px' }}
+                onClick={() => setShowOlderUpdates((v) => !v)}
+              >
+                {showOlderUpdates ? t('updates.olderHide') : t('updates.olderShow', { n: updates.length - UPDATES_VISIBLE })}
+              </button>
+            </>
+          )}
         </div>
-        )}
+        </Collapse>
       </section>
 
       {/* MCP 接入：让外部程序通过 Model Context Protocol 调用智能体 */}
@@ -875,7 +916,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
           <div style={{ flex: 1 }} />
           <CollapseToggle open={themeOpen} onClick={() => setThemeOpen((v) => !v)} />
         </div>
-        {themeOpen && (
+        <Collapse open={themeOpen}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
           {THEMES.map((th) => {
             const active = appearance?.theme === th.key;
@@ -917,7 +958,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             );
           })}
         </div>
-        )}
+        </Collapse>
 
         <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>{t('appearance.scale')}</div>
         <div style={{ display: 'flex', gap: 8 }}>

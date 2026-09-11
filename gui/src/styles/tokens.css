@@ -230,6 +230,51 @@ button {
 .ask-send.stopping { background: var(--danger); }
 .ask-send.stopping:hover { background: #B03F3B; }
 
+/* ---------- 丝滑折叠:grid-rows 0fr↔1fr 过渡,高度自适应内容 ---------- */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.34s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.collapse-open { grid-template-rows: 1fr; }
+.collapse-inner {
+  overflow: hidden;
+  min-height: 0;
+  visibility: hidden;
+  transition: visibility 0s 0.34s; /* 收起动画结束后再隐藏,避免内容提前消失 */
+}
+.collapse-open .collapse-inner { visibility: visible; transition: visibility 0s; }
+
+/* ---------- 页面切换过渡:内容淡入 + 顶部缓冲进度条 ---------- */
+.route-enter { animation: routeIn 0.32s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes routeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.route-buffer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  overflow: hidden;
+  z-index: 30;
+  pointer-events: none;
+}
+.route-buffer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: routeBuffer 0.5s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+}
+@keyframes routeBuffer {
+  from { transform: translateX(-110%); }
+  to { transform: translateX(360%); }
+}
+
 /* 输入条下方的快捷提示 */
 .ask-hint {
   display: flex;

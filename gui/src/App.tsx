@@ -195,26 +195,42 @@ export default function App() {
     setTab('workbench');
   };
 
+  // 页面切换过渡:内容淡入 + 顶部缓冲进度条,并短暂屏蔽点击,
+  // 避免新页面数据尚未就绪时被误点(异步数据各自加载,过渡只做视觉缓冲)
+  const [switching, setSwitching] = useState(false);
+  const switchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    setSwitching(true);
+    if (switchTimer.current) clearTimeout(switchTimer.current);
+    switchTimer.current = setTimeout(() => setSwitching(false), 480);
+    return () => {
+      if (switchTimer.current) clearTimeout(switchTimer.current);
+    };
+  }, [tab]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <TopBar tab={tab} onTabChange={setTab} mode={mode} onModeChange={changeMode} />
       {updateInfo && <UpdateBanner info={updateInfo} onClose={() => setUpdateInfo(null)} />}
-      <div style={{ flex: 1, minHeight: 0, padding: 16 }}>
-        {tab === 'workbench' && (
-          <Workbench mode={mode} onModeChange={setMode} onOpenDiff={openDiff} analysisMode={analysisMode} />
-        )}
-        {tab === 'diff' && <DiffReview payload={diffPayload} onBack={() => setTab('workbench')} />}
-        {tab === 'dashboard' && <Dashboard />}
-        {tab === 'settings' && (
-          <Settings
-            mode={analysisMode}
-            onModeChange={changeAnalysisMode}
-            appearance={appearance}
-            onAppearanceChange={changeAppearance}
-            updateInfo={updateInfo}
-            onUpdateInfoChange={setUpdateInfo}
-          />
-        )}
+      <div style={{ flex: 1, minHeight: 0, padding: 16, position: 'relative' }}>
+        {switching && <div className="route-buffer" />}
+        <div key={tab} className="route-enter" style={{ height: '100%', pointerEvents: switching ? 'none' : undefined }}>
+          {tab === 'workbench' && (
+            <Workbench mode={mode} onModeChange={setMode} onOpenDiff={openDiff} analysisMode={analysisMode} />
+          )}
+          {tab === 'diff' && <DiffReview payload={diffPayload} onBack={() => setTab('workbench')} />}
+          {tab === 'dashboard' && <Dashboard />}
+          {tab === 'settings' && (
+            <Settings
+              mode={analysisMode}
+              onModeChange={changeAnalysisMode}
+              appearance={appearance}
+              onAppearanceChange={changeAppearance}
+              updateInfo={updateInfo}
+              onUpdateInfoChange={setUpdateInfo}
+            />
+          )}
+        </div>
       </div>
       <StatusBar />
       {/* 全局右键菜单层：屏蔽默认菜单，按页面定制菜单项 */}

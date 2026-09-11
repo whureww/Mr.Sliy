@@ -82,15 +82,17 @@ const DICT: Record<string, Entry> = {
 
   // ---------- Settings：更新记录 ----------
   'settings.updates.title': { zh: '更新记录', en: 'Update History' },
-  'settings.updates.desc': { zh: '自更新与自修复的历史（最新在前）', en: 'Self-update & self-repair history (newest first)' },
+  'settings.updates.desc': { zh: '自更新与自修复历史', en: 'Self-update & self-repair history' },
   'updates.empty': { zh: '暂无更新记录', en: 'No update records yet' },
   'updates.loadFail': { zh: '更新记录读取失败', en: 'Failed to load update records' },
+  'updates.olderShow': { zh: '展开更早记录（{n}）', en: 'Show older records ({n})' },
+  'updates.olderHide': { zh: '收起更早记录', en: 'Hide older records' },
 
   // ---------- Settings：MCP 接入 ----------
   'settings.mcp.title': { zh: 'MCP 接入', en: 'MCP Integration' },
   'settings.mcp.desc': {
-    zh: '通过 Model Context Protocol 把本机的 MR·SLIY 能力开放给外部程序：扫描、AI 优化、对话、知识库、记忆与历史均可被 Claude Desktop、Cursor、Cline 等客户端直接调用',
-    en: 'Expose local MR·SLIY capabilities via Model Context Protocol: scanning, AI optimization, chat, knowledge base, memory and history are callable from Claude Desktop, Cursor, Cline and other clients'
+    zh: '把本机的扫描、AI 优化、对话等能力开放给 Claude Desktop、Cursor 等外部客户端',
+    en: 'Expose local capabilities (scanning, AI optimization, chat) to external clients like Claude Desktop and Cursor'
   },
   'mcp.server': { zh: '服务信息', en: 'Server' },
   'mcp.tools': { zh: '可用工具（{n}）', en: 'Available tools ({n})' },
@@ -111,8 +113,8 @@ const DICT: Record<string, Entry> = {
   // ---------- Settings：外观 ----------
   'settings.appearance.title': { zh: '外观设置', en: 'Appearance' },
   'settings.appearance.desc': {
-    zh: '整套配色方案：背景、卡片、边框与强调色联动切换，立即生效并自动保存',
-    en: 'Full palettes: background, cards, borders and accent switch together; applies instantly and saves automatically'
+    zh: '背景、卡片、边框与强调色联动切换',
+    en: 'Background, cards, borders and accent switch together'
   },
   'appearance.theme': { zh: '主题', en: 'Theme' },
   'appearance.clickToApply': { zh: '点击应用', en: 'Click to apply' },
@@ -213,16 +215,16 @@ const DICT: Record<string, Entry> = {
   // ---------- 检查更新卡片 ----------
   'update.card.title': { zh: '检查更新', en: 'Check Updates' },
   'update.card.desc': {
-    zh: '自动与 GitHub Releases 最新版本比对，发现新版本可一键下载安装，无需配置',
-    en: 'Automatically compares with the latest GitHub Releases; one-click download & install, no configuration needed'
+    zh: '发现新版本可一键下载安装',
+    en: 'One-click download & install when a new version is found'
   },
   'update.card.check': { zh: '检查更新', en: 'Check for updates' },
   'update.card.checking': { zh: '检查中…', en: 'Checking…' },
   'update.card.advanced': { zh: '高级选项', en: 'Advanced' },
   'update.card.advancedOn': { zh: '收起高级选项', en: 'Hide advanced options' },
   'update.card.advDesc': {
-    zh: '高级：自定义更新源清单 URL（默认无需配置，仅在使用自托管清单时填写）',
-    en: 'Advanced: custom manifest URL (leave empty to use GitHub Releases)'
+    zh: '使用自托管更新清单时填写',
+    en: 'Only for self-hosted update manifests'
   },
   'update.card.advPh': { zh: 'JSON 清单 URL（留空使用 GitHub Releases）', en: 'Manifest JSON URL (empty = GitHub Releases)' },
   'update.card.save': { zh: '保存', en: 'Save' },
