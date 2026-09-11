@@ -7,7 +7,7 @@
 | 产品 | 版本 | 说明 |
 |------|------|------|
 | CLI | v3.9.0 | 命令行智能体(`package.json` 根) |
-| 桌面 GUI | v0.0.2 | Tauri 桌面应用(`gui/package.json`,自 v0.0.1 起独立版本化) |
+| 桌面 GUI | v0.0.3 | Tauri 桌面应用(`gui/package.json`,自 v0.0.1 起独立版本化) |
 
 ### 版本号规则
 
