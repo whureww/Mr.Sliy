@@ -233,7 +233,8 @@ router.get('/confirmations', async (req, res) => {
 
 router.post('/check-update', async (req, res) => {
   try {
-    const result = await checkRemoteUpdate();
+    // 桌面端上报自身版本（GUI 与 CLI 独立版本化，优先以请求体为准）
+    const result = await checkRemoteUpdate(req.body && req.body.currentVersion);
     res.json({
       success: true,
       data: result

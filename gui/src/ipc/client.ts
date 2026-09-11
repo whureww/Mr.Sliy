@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { t } from '../lib/i18n';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window;
 const DEV_PORT = 3000; // 浏览器调试时直连本地 server
@@ -126,7 +127,7 @@ export async function saveState(name: string, content: string): Promise<void> {
 function unwrapData<T>(raw: unknown): T {
   const env = raw as { success?: boolean; message?: string; data?: unknown } | null;
   if (env && typeof env === 'object' && 'success' in env) {
-    if (env.success === false) throw new Error(env.message || '请求失败');
+    if (env.success === false) throw new Error(env.message || t('err.requestFailed'));
     if (env.data && typeof env.data === 'object') return env.data as T;
   }
   return raw as T;
@@ -340,10 +341,17 @@ export interface CheckUpdatePayload {
   reason?: string;
 }
 
-/** 检查更新：拉取更新源清单并与当前版本比对 */
+/** 检查更新：拉取更新源清单并与当前版本比对（上报 GUI 自身版本，服务端以此为准） */
+declare const __APP_VERSION__: string;
+
 export async function checkForUpdate(signal?: AbortSignal): Promise<CheckUpdatePayload> {
-  const env = await sidecarRequest<{ success: boolean; data: CheckUpdatePayload }>('POST', '/api/check-update', undefined, signal);
-  return env?.data || { checked: false, currentVersion: '', reason: '请求失败' };
+  const env = await sidecarRequest<{ success: boolean; data: CheckUpdatePayload }>(
+    'POST',
+    '/api/check-update',
+    { currentVersion: __APP_VERSION__ },
+    signal
+  );
+  return env?.data || { checked: false, currentVersion: '', reason: t('err.requestFailed') };
 }
 
 // ---------- 更新安装包下载（自动下载 + 一键安装） ----------
@@ -363,7 +371,7 @@ export interface DownloadState {
 /** 开始下载新版本安装包(已有下载进行中时后端返回 409) */
 export async function startUpdateDownload(url: string, version: string): Promise<DownloadState> {
   const env = await sidecarRequest<{ success: boolean; data: DownloadState }>('POST', '/api/update-download/start', { url, version });
-  return env?.data || { status: 'error', error: '请求失败' };
+  return env?.data || { status: 'error', error: t('err.requestFailed') };
 }
 
 /** 查询下载状态/进度(轮询) */
@@ -380,13 +388,14 @@ export async function cancelUpdateDownload(): Promise<boolean> {
 
 /** 启动已下载的安装器并退出当前应用(Tauri 命令;浏览器调试模式不可用) */
 export async function installUpdate(installerPath: string): Promise<void> {
-  if (!('__TAURI_INTERNALS__' in window)) throw new Error('仅桌面端支持一键安装');
+  if (!('__TAURI_INTERNALS__' in window)) throw new Error(t('err.desktopOnlyInstall'));
   await invoke('install_update', { path: installerPath });
 }
 
 export async function getUpdateSource(): Promise<{ url: string; currentVersion: string }> {
   const env = await sidecarRequest<{ success: boolean; data: { url: string; currentVersion: string } }>('GET', '/api/update-source');
-  return env?.data || { url: '', currentVersion: '' };
+  // currentVersion 以 GUI 自身版本为准（服务端返回的是 CLI 版本）
+  return { ...(env?.data || { url: '', currentVersion: '' }), currentVersion: __APP_VERSION__ };
 }
 
 export async function saveUpdateSource(url: string): Promise<string> {

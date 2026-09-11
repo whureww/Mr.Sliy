@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { health, getLlmUsage, LlmUsagePayload } from '../../ipc/client';
+import { t, useLang } from '../../lib/i18n';
 
 /** 数字千分位 */
 const fmt = (n: number) => n.toLocaleString('en-US');
 
 export default function StatusBar() {
+  useLang();
   const [ok, setOk] = useState<boolean | null>(null);
   const [usage, setUsage] = useState<LlmUsagePayload | null>(null);
 
@@ -59,18 +61,26 @@ export default function StatusBar() {
             ok === null ? 'var(--warning)' : ok ? 'var(--success)' : 'var(--danger)'
         }}
       />
-      <span>{ok === null ? '正在连接服务…' : ok ? 'Ready' : '服务未就绪'}</span>
+      <span>{ok === null ? t('status.connecting') : ok ? t('status.ready') : t('status.notReady')}</span>
       <span>services 5/5</span>
       {showLlm && (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 'auto' }}>
           <span style={{ color: 'var(--accent)', fontWeight: 650 }}>{active!.name}</span>
           <span>{fmt(session!.totalTokens)} tokens</span>
           {session!.cacheHitRate !== null && session!.cacheHitRate !== undefined && (
-            <span title={`缓存命中 ${fmt(session!.cacheHitTokens)} / 未命中 ${fmt(session!.cacheMissTokens)}`}>
-              缓存命中 {session!.cacheHitRate}%
+            <span
+              title={t('status.llm.cacheTip', {
+                hit: fmt(session!.cacheHitTokens),
+                miss: fmt(session!.cacheMissTokens)
+              })}
+            >
+              {t('status.llm.cacheHits')} {session!.cacheHitRate}%
             </span>
           )}
-          <span title="本次运行期间大模型调用次数">{session!.requests} 次调用</span>
+          <span title={t('status.llm.callsTip')}>
+            {session!.requests}
+            {t('status.llm.calls')}
+          </span>
         </span>
       )}
     </footer>

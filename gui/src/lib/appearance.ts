@@ -12,14 +12,15 @@ export interface ThemePalette {
   border: string;
 }
 
-/** 预设主题：整套浅色暖调配色（背景 / 卡片 / 凹陷面 / 边框 / 强调色联动） */
+/** 预设主题：整套浅色暖调配色（背景 / 卡片 / 凹陷面 / 边框 / 强调色联动）；
+ *  name 为 i18n key，展示时经 t() 翻译 */
 export const THEMES: ThemePalette[] = [
-  { key: 'amber', name: '琥珀 · 暖纸', accent: '#E8870A', accentTint: '#FEF3E2', accentHover: '#D07808', canvas: '#F6F6F4', card: '#FFFFFF', recessed: '#F0EFEC', border: '#E9E7E2' },
-  { key: 'coral', name: '珊瑚 · 晚霞', accent: '#E06C4A', accentTint: '#FDEEE8', accentHover: '#C85A39', canvas: '#FAF3EF', card: '#FFFDFA', recessed: '#F3EAE4', border: '#EDDFD6' },
-  { key: 'forest', name: '林绿 · 晨雾', accent: '#3D9A6C', accentTint: '#E9F5EE', accentHover: '#35875E', canvas: '#F2F6F1', card: '#FCFEFB', recessed: '#E9F0E7', border: '#DFE9DC' },
-  { key: 'lake', name: '湖蓝 · 晴空', accent: '#3E7BC4', accentTint: '#E9F1FA', accentHover: '#356CAD', canvas: '#F1F5F9', card: '#FBFDFE', recessed: '#E7EEF4', border: '#DCE6EE' },
-  { key: 'berry', name: '莓紫 · 藤萝', accent: '#8E6CC8', accentTint: '#F0EBF9', accentHover: '#7C5BB5', canvas: '#F5F3F8', card: '#FDFCFF', recessed: '#EDEAF3', border: '#E3DFEC' },
-  { key: 'rose', name: '玫瑰 · 春樱', accent: '#D4537E', accentTint: '#FAEAF0', accentHover: '#BC4670', canvas: '#F9F2F5', card: '#FFFBFC', recessed: '#F3E9ED', border: '#EBDEE4' }
+  { key: 'amber', name: 'theme.amber', accent: '#E8870A', accentTint: '#FEF3E2', accentHover: '#D07808', canvas: '#F6F6F4', card: '#FFFFFF', recessed: '#F0EFEC', border: '#E9E7E2' },
+  { key: 'coral', name: 'theme.coral', accent: '#E06C4A', accentTint: '#FDEEE8', accentHover: '#C85A39', canvas: '#FAF3EF', card: '#FFFDFA', recessed: '#F3EAE4', border: '#EDDFD6' },
+  { key: 'forest', name: 'theme.forest', accent: '#3D9A6C', accentTint: '#E9F5EE', accentHover: '#35875E', canvas: '#F2F6F1', card: '#FCFEFB', recessed: '#E9F0E7', border: '#DFE9DC' },
+  { key: 'lake', name: 'theme.lake', accent: '#3E7BC4', accentTint: '#E9F1FA', accentHover: '#356CAD', canvas: '#F1F5F9', card: '#FBFDFE', recessed: '#E7EEF4', border: '#DCE6EE' },
+  { key: 'berry', name: 'theme.berry', accent: '#8E6CC8', accentTint: '#F0EBF9', accentHover: '#7C5BB5', canvas: '#F5F3F8', card: '#FDFCFF', recessed: '#EDEAF3', border: '#E3DFEC' },
+  { key: 'rose', name: 'theme.rose', accent: '#D4537E', accentTint: '#FAEAF0', accentHover: '#BC4670', canvas: '#F9F2F5', card: '#FFFBFC', recessed: '#F3E9ED', border: '#EBDEE4' }
 ];
 
 export interface Appearance {
@@ -28,10 +29,10 @@ export interface Appearance {
 }
 
 export const SCALES: { name: string; value: number }[] = [
-  { name: '小', value: 0.9 },
-  { name: '标准', value: 1 },
-  { name: '大', value: 1.1 },
-  { name: '特大', value: 1.25 }
+  { name: 'scale.small', value: 0.9 },
+  { name: 'scale.standard', value: 1 },
+  { name: 'scale.large', value: 1.1 },
+  { name: 'scale.xl', value: 1.25 }
 ];
 
 export const DEFAULT_APPEARANCE: Appearance = { theme: THEMES[0].key, scale: 1 };

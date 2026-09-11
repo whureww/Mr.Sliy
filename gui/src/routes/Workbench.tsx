@@ -19,6 +19,7 @@ import {
   sanitizeMessages,
   severityColor
 } from '../lib/analysis';
+import { t, useLang } from '../lib/i18n';
 
 export type { WorkbenchMode };
 
@@ -44,17 +45,19 @@ interface Session {
   tabs?: EditorTab[];
 }
 
+/** 流水线步骤：label/detail 存 i18n key，渲染时经 t() 翻译 */
 const PIPELINE: Omit<AnalysisStep, 'done'>[] = [
-  { label: '解析源码', detail: 'Tree-sitter 词法与语法解析' },
-  { label: '构建 AST', detail: '抽象语法树与作用域分析' },
-  { label: '规则检测', detail: '缺陷规则与代码坏味道匹配' },
-  { label: '知识库比对', detail: 'RAG 检索相似案例与修复方案' },
-  { label: '生成结论', detail: '汇总问题清单与优化建议' }
+  { label: 'wb.pipeline.parse', detail: 'wb.pipeline.parseD' },
+  { label: 'wb.pipeline.ast', detail: 'wb.pipeline.astD' },
+  { label: 'wb.pipeline.rules', detail: 'wb.pipeline.rulesD' },
+  { label: 'wb.pipeline.kb', detail: 'wb.pipeline.kbD' },
+  { label: 'wb.pipeline.conclude', detail: 'wb.pipeline.concludeD' }
 ];
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode }: Props) {
+  useLang(); // 订阅语言切换，触发重渲染
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [activeWs, setActiveWs] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<{ path: string; content: string } | null>(null);
@@ -122,12 +125,12 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   /** 新建工作区：验证目录可读 → 加入列表 → 激活为新对话 */
   const addWorkspace = async (raw: string): Promise<string | null> => {
     const p = raw.trim().replace(/[\\/]+$/, '');
-    if (!p) return '请输入或选择路径';
-    if (workspaces.some((w) => w.path.toLowerCase() === p.toLowerCase())) return '该路径已在列表中';
+    if (!p) return t('wb.needPath');
+    if (workspaces.some((w) => w.path.toLowerCase() === p.toLowerCase())) return t('wb.dupPath');
     try {
       await listDir(p);
     } catch {
-      return '目录不存在或无法读取';
+      return t('wb.badPath');
     }
     const ws: Workspace = { path: p, name: fileName(p) };
     setWorkspaces((w) => [...w, ws]);
@@ -138,7 +141,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         {
           id: newId(),
           role: 'assistant',
-          text: `已创建工作区「${ws.name}」。在左侧文件树展开目录并选择一个文件开始分析，或直接发送你的问题。`,
+          text: t('wb.wsCreated', { name: ws.name }),
           time: nowTime()
         }
       ]
@@ -198,7 +201,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       setSavedFlash(true);
       setTimeout(() => setSavedFlash(false), 1600);
     } catch (e) {
-      setError(`保存失败: ${(e as Error).message || '无法写入文件'}`);
+      setError(t('wb.saveFail', { msg: (e as Error).message || t('wb.cannotWrite') }));
     } finally {
       setSaving(false);
     }
@@ -220,7 +223,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     if (!minutes || mode !== 'analysis') return;
     const timer = setInterval(() => {
       if (!scanning && !activeLocked && currentFile) {
-        void runScan(`定时扫描（每 ${minutes} 分钟）：${fileName(currentFile.path)}`);
+        void runScan(t('wb.scheduledScan', { n: minutes, file: fileName(currentFile.path) }));
       }
     }, minutes * 60 * 1000);
     return () => clearInterval(timer);
@@ -229,8 +232,8 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
 
   /** 门控确认：将 AI 建议的代码修改应用到当前文件（定位替换并保存），返回错误信息或 null（成功） */
   const applyCodeChange = async (originalCode: string, modifiedCode: string): Promise<string | null> => {
-    if (!currentFile) return '当前没有打开的文件';
-    if (activeLocked) return '会话已锁定，无法修改代码';
+    if (!currentFile) return t('wb.needFile');
+    if (activeLocked) return t('wb.lockedNoEdit');
     const content = currentFile.content;
     const norm = (s: string) => s.replace(/\r\n/g, '\n');
     let next: string | null = null;
@@ -246,7 +249,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         next = nc.slice(0, i2) + norm(modifiedCode) + nc.slice(i2 + no.length);
       }
     }
-    if (next === null) return '未能在当前文件中定位原始代码片段（文件可能已被修改），请手动检查后重试';
+    if (next === null) return t('wb.locateFail');
     const updated = { ...currentFile, content: next };
     setCurrentFile(updated);
     setTabs((t) => t.map((x) => (x.path === updated.path ? { ...x, content: updated.content, disk: updated.content } : x)));
@@ -255,14 +258,14 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       setDiskContent(updated.content);
       return null;
     } catch (e) {
-      return `写入文件失败: ${(e as Error).message || '未知错误'}`;
+      return t('wb.writeFail', { msg: (e as Error).message || t('wb.unknownErr') });
     }
   };
 
   const openFile = async (node: { path: string; is_dir?: boolean }) => {
     if (!activeWs) return;
     if (activeLocked) {
-      setError('会话已锁定，请先在左侧右键解锁后再操作');
+      setError(t('wb.lockedUnlockFirst'));
       return;
     }
     setError('');
@@ -285,12 +288,12 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         {
           id: newId(),
           role: 'assistant',
-          text: `已打开 ${fileName(node.path)}。发送消息或点击"开始分析"，我将展示完整的分析过程。`,
+          text: t('wb.fileOpened', { file: fileName(node.path) }),
           time: nowTime()
         }
       ]);
     } catch {
-      setError('文件读取失败');
+      setError(t('wb.readFail'));
     }
   };
 
@@ -326,7 +329,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const runScan = async (userText?: string) => {
     if (!currentFile || scanning) return;
     if (activeLocked) {
-      setError('会话已锁定，请先在左侧右键解锁后再操作');
+      setError(t('wb.lockedUnlockFirst'));
       return;
     }
     setScanning(true);
@@ -336,12 +339,12 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     const started = Date.now();
     setMessages((m) => [
       ...m,
-      { id: uid, role: 'user', text: userText || `分析 ${fileName(currentFile.path)}`, time: nowTime() },
+      { id: uid, role: 'user', text: userText || t('wb.analyzeFile', { file: fileName(currentFile.path) }), time: nowTime() },
       {
         id: aid,
         role: 'assistant',
         time: nowTime(),
-        steps: PIPELINE.map((s) => ({ ...s, done: false, status: 'pending' as const }))
+        steps: PIPELINE.map((s) => ({ label: t(s.label), detail: t(s.detail), done: false, status: 'pending' as const }))
       }
     ]);
     const patch = (fn: (steps: AnalysisStep[]) => AnalysisStep[]) =>
@@ -374,7 +377,8 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
             ? {
                 ...msg,
                 steps: PIPELINE.map((s, j) => ({
-                  ...s,
+                  label: t(s.label),
+                  detail: t(s.detail),
                   done: true,
                   status: 'done' as const,
                   ms: msg.steps?.[j]?.ms
@@ -404,13 +408,13 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
           msg.id === aid
             ? {
                 ...msg,
-                error: aborted ? '分析已停止' : '分析失败，请确认本地服务已启动',
+                error: aborted ? t('wb.scanStopped') : t('wb.analyzeFail'),
                 elapsed: Date.now() - started
               }
             : msg
         )
       );
-      if (!aborted) setError('扫描失败，请确认本地服务已启动');
+      if (!aborted) setError(t('wb.scanFail'));
     } finally {
       scanAbort.current = null;
       setScanning(false);
@@ -426,13 +430,13 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   /** 本地规则兜底回复（未配置大模型或调用失败时） */
   const cannedReply = (): string => {
     if (!currentFile) {
-      return '请先在左侧文件树中选择一个文件，我可以帮你分析其中的问题。';
+      return t('wb.cannedNoFile');
     }
     if (!result) {
-      return `我已了解 ${fileName(currentFile.path)}。发送"分析"或点击"开始分析"触发完整检测流水线。`;
+      return t('wb.cannedNoResult', { file: fileName(currentFile.path) });
     }
     const high = (result.issues || []).filter((i) => isHigh(i.severity)).length;
-    return `关于 ${fileName(currentFile.path)}：共 ${result.totalIssues} 个问题（高危 ${high} 个）。点击问题卡片上的"修复"可生成优化 diff；发送"分析"可重新检测。`;
+    return t('wb.cannedSummary', { file: fileName(currentFile.path), total: result.totalIssues, high });
   };
 
   /** 随聊天注入的工作区上下文：当前文件 + 扫描结果概览 */
@@ -447,7 +451,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const sendChat = async (text: string) => {
     if (!text.trim() || scanning) return;
     if (activeLocked) {
-      setError('会话已锁定，请先在左侧右键解锁后再操作');
+      setError(t('wb.lockedUnlockFirst'));
       return;
     }
     const uid = newId();
@@ -477,7 +481,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         });
         const raw = res.reply;
         const parsed = parseReply(raw);
-        const note = parsed.parseFailed ? '\n\n修改方案解析失败，请让 AI 重新给出方案。' : '';
+        const note = parsed.parseFailed ? '\n\n' + t('wb.modParseFail') : '';
         // 用量换算：与服务端 scanRoutes 的 cacheHitRate 口径一致
         const u = (res.usage || null) as { totalTokens?: number; cacheHitTokens?: number; cacheMissTokens?: number } | null;
         const cacheTotal = u ? (u.cacheHitTokens || 0) + (u.cacheMissTokens || 0) : 0;
@@ -518,8 +522,8 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
                 typing: false,
                 elapsed: Date.now() - started,
                 text: aborted
-                  ? (msg.text || '') + '\n\n（已停止生成）'
-                  : (msg.text || '') || cannedReply() + '\n\n（大模型调用失败，已回退本地提示）'
+                  ? (msg.text || '') + '\n\n' + t('wb.stoppedGen')
+                  : (msg.text || '') || cannedReply() + '\n\n' + t('wb.llmFallback')
               }
             : msg
         )
@@ -543,17 +547,17 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     }
     if (action === 'more') {
       setMessages((m) => m.map((x) => (x.modStatus === 'pending' ? { ...x, modStatus: 'superseded' } : x)));
-      void sendChat('这个方案我想再看看其他思路，请换一种不同的实现方式，重新给出修改建议和风险评估。');
+      void sendChat(t('wb.moreAsk'));
       return;
     }
     if (action === 'verify') {
-      void runScan('重新分析验证：确认修改后的问题状态');
+      void runScan(t('wb.verifyAsk'));
       return;
     }
     if (action === 'undo') {
       const msg = messages.find((x) => x.id === msgId);
       if (msg?.modPrevContent === undefined) {
-        setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, applyError: '未找到修改前备份，无法撤销' } : x)));
+        setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, applyError: t('wb.noBackup') } : x)));
         return;
       }
       if (!currentFile) return;
@@ -565,15 +569,15 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         setDiskContent(restored.content);
         setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, modStatus: 'undone' } : x)));
       } catch (e) {
-        setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, applyError: `撤销写回失败: ${(e as Error).message}` } : x)));
+        setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, applyError: t('wb.undoFail', { msg: (e as Error).message }) } : x)));
       }
       return;
     }
     // apply
     let err: string | null;
     let prevContent: string | undefined;
-    if (!currentFile) err = '当前没有打开的文件';
-    else if (activeLocked) err = '会话已锁定，无法修改代码';
+    if (!currentFile) err = t('wb.needFile');
+    else if (activeLocked) err = t('wb.lockedNoEdit');
     else {
       const content = currentFile.content;
       prevContent = content;
@@ -589,7 +593,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         if (i2 >= 0) next = nc.slice(0, i2) + norm(mod.modifiedCode) + nc.slice(i2 + no.length);
       }
       if (next === null) {
-        err = '未能在当前文件中定位原始代码片段（文件可能已被修改），请手动检查后重试';
+        err = t('wb.locateFail');
       } else {
         const updated = { ...currentFile, content: next };
         setCurrentFile(updated);
@@ -599,7 +603,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
           setDiskContent(updated.content);
           err = null;
         } catch (e) {
-          err = `写入文件失败: ${(e as Error).message || '未知错误'}`;
+          err = t('wb.writeFail', { msg: (e as Error).message || t('wb.unknownErr') });
         }
       }
     }
@@ -616,13 +620,13 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const runProjectScan = async () => {
     if (!activeWs || scanning) return;
     if (activeLocked) {
-      setError('会话已锁定，请先在左侧右键解锁后再操作');
+      setError(t('wb.lockedUnlockFirst'));
       return;
     }
     const aid = newId();
     setMessages((m) => [
       ...m,
-      { id: aid, role: 'assistant', typing: true, time: nowTime(), text: `正在扫描整个项目 ${fileName(activeWs)}…` }
+      { id: aid, role: 'assistant', typing: true, time: nowTime(), text: t('wb.scanningProject', { file: fileName(activeWs) }) }
     ]);
     try {
       const r = await projectScan(activeWs, analysisMode);
@@ -631,7 +635,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       );
     } catch (e) {
       setMessages((m) =>
-        m.map((msg) => (msg.id === aid ? { ...msg, typing: false, text: `项目扫描失败：${(e as Error).message || '未知错误'}` } : msg))
+        m.map((msg) => (msg.id === aid ? { ...msg, typing: false, text: t('wb.projScanFail', { msg: (e as Error).message || t('wb.unknownErr') }) } : msg))
       );
     }
   };
@@ -641,7 +645,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     const aid = newId();
     setMessages((m) => [
       ...m,
-      { id: aid, role: 'assistant', typing: true, time: nowTime(), text: '正在生成 HTML 分析报告…' }
+      { id: aid, role: 'assistant', typing: true, time: nowTime(), text: t('wb.generatingReport') }
     ]);
     try {
       const out = await generateReport({
@@ -660,13 +664,13 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       setMessages((m) =>
         m.map((msg) =>
           msg.id === aid
-            ? { ...msg, typing: false, text: `报告已生成：${out.path}\n（可用浏览器打开查看，路径已可选中复制）` }
+            ? { ...msg, typing: false, text: t('wb.reportDone', { path: out.path }) }
             : msg
         )
       );
     } catch (e) {
       setMessages((m) =>
-        m.map((msg) => (msg.id === aid ? { ...msg, typing: false, text: `报告生成失败：${(e as Error).message}` } : msg))
+        m.map((msg) => (msg.id === aid ? { ...msg, typing: false, text: t('wb.reportFail', { msg: (e as Error).message }) } : msg))
       );
     }
   };
@@ -674,7 +678,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const fix = async (issue: Issue) => {
     if (!currentFile) return;
     if (activeLocked) {
-      setError('会话已锁定，请先在左侧右键解锁后再操作');
+      setError(t('wb.lockedUnlockFirst'));
       return;
     }
     setFixing(issue.issueType);
@@ -689,7 +693,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       );
       onOpenDiff({ filePath: currentFile.path, language: result?.language || 'javascript', originalCode: currentFile.content, result: opt });
     } catch (e) {
-      setError((e as Error).message || '优化请求失败');
+      setError((e as Error).message || t('wb.optimizeFail'));
     } finally {
       setFixing(null);
     }
@@ -792,12 +796,12 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       <section className="card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--border-hairline)' }}>
           <span className="mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {currentFile?.path || '未打开文件'}
+            {currentFile?.path || t('wb.noFile')}
           </span>
           {dirty && (
-            <span title="有未保存的修改" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />
+            <span title={t('wb.unsaved')} style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />
           )}
-          {activeLocked && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>· 会话已锁定</span>}
+          {activeLocked && <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>· {t('wb.locked')}</span>}
           <div style={{ flex: 1 }} />
           {currentFile && (
             <button
@@ -805,29 +809,29 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
               style={{ fontSize: 12.5 }}
               onClick={saveToDisk}
               disabled={!dirty || saving || activeLocked}
-              title={activeLocked ? '会话已锁定' : '保存到原文件 (Ctrl+S)'}
+              title={activeLocked ? t('wb.locked') : `${t('wb.save')} (Ctrl+S)`}
             >
-              {saving ? '保存中…' : savedFlash ? '已保存 ✓' : dirty ? '保存修改' : '已保存'}
+              {saving ? t('wb.saving') : savedFlash ? `${t('wb.saved')} ✓` : dirty ? t('wb.saveChanges') : t('wb.saved')}
             </button>
           )}
-          <button className="btn-primary" onClick={() => runScan()} disabled={!currentFile || scanning || activeLocked} title={activeLocked ? '会话已锁定' : undefined}>
-            {scanning ? '扫描中…' : '扫描此文件'}
+          <button className="btn-primary" onClick={() => runScan()} disabled={!currentFile || scanning || activeLocked} title={activeLocked ? t('wb.locked') : undefined}>
+            {scanning ? t('wb.scanning') : t('wb.scanFile')}
           </button>
         </div>
         {/* 多标签页：同一会话可同时打开多个文件 */}
         {tabs.length > 0 && (
           <div style={{ display: 'flex', gap: 4, padding: '6px 10px', borderBottom: '1px solid var(--border-hairline)', overflowX: 'auto' }}>
-            {tabs.map((t) => {
-              const active = currentFile?.path === t.path;
-              const tabDirty = t.content !== t.disk;
+            {tabs.map((tab) => {
+              const active = currentFile?.path === tab.path;
+              const tabDirty = tab.content !== tab.disk;
               return (
                 <div
-                  key={t.path}
-                  onClick={() => switchTab(t.path)}
+                  key={tab.path}
+                  onClick={() => switchTab(tab.path)}
                   onContextMenu={(e) =>
                     openContextMenu(e, [
-                      { label: '关闭标签页', onClick: () => closeTab(t.path) },
-                      { label: '复制文件路径', onClick: () => copyText(t.path) }
+                      { label: t('wb.closeTab'), onClick: () => closeTab(tab.path) },
+                      { label: t('nav.copyFilePath'), onClick: () => copyText(tab.path) }
                     ])
                   }
                   style={{
@@ -844,13 +848,13 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
                     fontWeight: active ? 600 : 400
                   }}
                 >
-                  <span>{fileName(t.path)}</span>
-                  {tabDirty && <span title="未保存" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />}
+                  <span>{fileName(tab.path)}</span>
+                  {tabDirty && <span title={t('wb.tabUnsaved')} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />}
                   <span
-                    title="关闭"
+                    title={t('win.close')}
                     onClick={(e) => {
                       e.stopPropagation();
-                      closeTab(t.path);
+                      closeTab(tab.path);
                     }}
                     style={{ opacity: 0.55, padding: '0 2px' }}
                   >
@@ -873,18 +877,18 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
                 onSave={saveToDisk}
                 onContextMenu={(e, sel) => {
                   openContextMenu(e, [
-                    { label: '复制选中内容', disabled: !sel, onClick: () => copyText(sel) },
+                    { label: t('wb.copySel'), disabled: !sel, onClick: () => copyText(sel) },
                     {
-                      label: '全选代码',
+                      label: t('wb.selectAllCode'),
                       onClick: () => {
                         const ta = document.querySelector<HTMLTextAreaElement>('.ce-input');
                         ta?.select();
                       }
                     },
                     { separator: true },
-                    { label: scanning ? '扫描中…' : '扫描此文件', disabled: scanning || activeLocked, title: activeLocked ? '会话已锁定' : undefined, onClick: () => runScan() },
+                    { label: scanning ? t('wb.scanning') : t('wb.scanFile'), disabled: scanning || activeLocked, title: activeLocked ? t('wb.locked') : undefined, onClick: () => runScan() },
                     ...(dirty
-                      ? [{ label: saving ? '保存中…' : '保存修改', disabled: saving || activeLocked, onClick: () => saveToDisk() }]
+                      ? [{ label: saving ? t('wb.saving') : t('wb.saveChanges'), disabled: saving || activeLocked, onClick: () => saveToDisk() }]
                       : [])
                   ]);
                 }}
@@ -892,7 +896,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
             </div>
           ) : (
             <div className="muted" style={{ textAlign: 'center', marginTop: 80 }}>
-              {activeWs ? '从左侧文件树选择一个文件开始编辑与扫描' : '点击左侧"+ 新建"添加工作区后开始'}
+              {activeWs ? t('wb.emptyEditor') : t('wb.emptyNoWs')}
             </div>
           )}
         </div>
@@ -901,21 +905,21 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       {/* 右栏 · 问题精简面板：分析过程只显示部分 */}
       <aside className="card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, padding: 14, position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-          <strong style={{ fontSize: 14 }}>问题</strong>
-          {result && <span className="muted" style={{ fontSize: 12 }}>{result.totalIssues} 个 · {result.language}</span>}
+          <strong style={{ fontSize: 14 }}>{t('wb.issues')}</strong>
+          {result && <span className="muted" style={{ fontSize: 12 }}>{t('wb.issueCount', { n: result.totalIssues, lang: result.language })}</span>}
         </div>
         <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-hairline)' }}>
           {scanning ? (
-            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>分析进行中：解析源码 → 构建AST → 规则检测 → RAG 比对 → 生成结论</span>
+            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('wb.analyzingPipeline')}</span>
           ) : (
-            '分析管线：Tree-sitter 解析 · 规则检测 · RAG 比对（完整过程见分析模式）'
+            t('wb.pipelineDesc')
           )}
         </div>
         <div style={{ overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!result && !scanning && <div className="muted" style={{ fontSize: 13 }}>扫描后在此显示检测结果</div>}
+          {!result && !scanning && <div className="muted" style={{ fontSize: 13 }}>{t('wb.scanToSee')}</div>}
           {scanning && (
             <div style={{ background: 'var(--accent-tint)', borderRadius: 10, padding: 12, fontSize: 12.5, color: 'var(--accent)', lineHeight: 1.7 }}>
-              正在分析 {currentFile ? fileName(currentFile.path) : ''}，检测完成后结果会显示在这里…
+              {t('wb.analyzingFile', { file: currentFile ? fileName(currentFile.path) : '' })}
             </div>
           )}
           {result?.issues?.slice(0, 3).map((iss, i) => (
@@ -932,12 +936,12 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
                 onClick={() => fix(iss)}
                 disabled={fixing !== null}
               >
-                {fixing === iss.issueType ? '生成优化中…' : '修复'}
+                {fixing === iss.issueType ? t('wb.optimizing') : t('an.fix')}
               </button>
             </div>
           ))}
           {result && result.totalIssues === 0 && (
-            <div style={{ color: 'var(--success)', fontSize: 13 }}>未发现问题</div>
+            <div style={{ color: 'var(--success)', fontSize: 13 }}>{t('wb.noIssues')}</div>
           )}
         </div>
         {result && (result.issues?.length || 0) > 3 && (
@@ -946,7 +950,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
             style={{ marginTop: 10, fontSize: 12.5 }}
             onClick={() => onModeChange('analysis')}
           >
-            其余 {(result.issues?.length || 0) - 3} 条 · 前往分析模式查看
+            {t('wb.moreIssues', { n: (result.issues?.length || 0) - 3 })}
           </button>
         )}
       </aside>

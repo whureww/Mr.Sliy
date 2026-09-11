@@ -44,21 +44,26 @@ interface Props {
 const PROVIDER_LABEL: Record<string, string> = {
   openai: 'OpenAI',
   deepseek: 'DeepSeek',
-  zhipu: '智谱 AI (GLM)',
-  tongyi: '通义千问',
-  moonshot: 'Moonshot (Kimi)',
-  ollama: 'Ollama（本地）'
+  moonshot: 'Moonshot (Kimi)'
+};
+
+/** 含中文文案的提供商名走 i18n（品牌名两种语言一致的无需翻译） */
+const PROVIDER_NAME_KEYS: Record<string, string> = {
+  zhipu: 'provider.name.zhipu',
+  tongyi: 'provider.name.tongyi',
+  ollama: 'provider.name.ollama'
 };
 
 /** 提供商是否需要 API Key（Ollama 本地服务无需 Key） */
 const NEEDS_KEY: Record<string, boolean> = { ollama: false };
 
 const providerLabel = (name: string) =>
-  PROVIDER_LABEL[name] || (name.startsWith('custom-') ? `自定义 · ${name.slice(7)}` : name);
+  PROVIDER_NAME_KEYS[name] ? t(PROVIDER_NAME_KEYS[name])
+    : PROVIDER_LABEL[name] || (name.startsWith('custom-') ? t('provider.customTag', { name: name.slice(7) }) : name);
 
-const MODES: { key: AnalysisMode; badge: string; titleKey: string; descKey: string }[] = [
-  { key: 'local', badge: '本地', titleKey: 'mode.local.title', descKey: 'mode.local.desc' },
-  { key: 'cloud', badge: '大模型', titleKey: 'mode.cloud.title', descKey: 'mode.cloud.desc' }
+const MODES: { key: AnalysisMode; badgeKey: string; titleKey: string; descKey: string }[] = [
+  { key: 'local', badgeKey: 'mode.badge.local', titleKey: 'mode.local.title', descKey: 'mode.local.desc' },
+  { key: 'cloud', badgeKey: 'mode.badge.cloud', titleKey: 'mode.cloud.title', descKey: 'mode.cloud.desc' }
 ];
 
 const LANGS: { key: Lang; name: string }[] = [
@@ -202,7 +207,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
     try {
       const saved = await saveUpdateSource(sourceUrl.trim());
       setSourceUrl(saved);
-      flash(true, '更新源已保存');
+      flash(true, t('toast.sourceSaved'));
     } catch (e) {
       flash(false, (e as Error).message);
     }
@@ -389,7 +394,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                 }}
               >
                 <div style={{ fontSize: 13, fontWeight: 650, marginBottom: 4 }}>
-                  {m.badge} {t(m.titleKey)}
+                  {t(m.badgeKey)} {t(m.titleKey)}
                   {active && <span style={{ color: 'var(--accent)', fontSize: 11, marginLeft: 8 }}>{t('common.inUse')}</span>}
                 </div>
                 <div className="muted" style={{ fontSize: 12, lineHeight: 1.65, whiteSpace: 'normal' }}>{t(m.descKey)}</div>
@@ -414,7 +419,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             className="btn-ghost"
             style={{ fontSize: 12, padding: '5px 12px' }}
             onClick={() => setCustomOpen((v) => !v)}
-            title="接入任意 OpenAI 兼容接口（OneAPI、vLLM、私有部署等）"
+            title={t('llm.custom.tip')}
           >
             {t('llm.custom')}
           </button>
@@ -573,35 +578,34 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
 
       {/* 检查更新：自动对比 GitHub Releases 版本 */}
       <section className="card" style={{ padding: 18 }}>
-        <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>检查更新</div>
+        <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>{t('update.card.title')}</div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
-          当前版本 {checkResult?.currentVersion || currentVersion || updateInfo?.currentVersion || ''}
-          (自动与 GitHub Releases 最新版本比对,发现新版本可一键下载安装,无需配置)
+          {t('update.card.curVer', { ver: checkResult?.currentVersion || currentVersion || updateInfo?.currentVersion || '' })} ({t('update.card.desc')})
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <button className="btn-primary" style={{ fontSize: 12.5 }} disabled={checkState === 'checking'} onClick={doCheckUpdate}>
-            {checkState === 'checking' ? '检查中…' : '检查更新'}
+            {checkState === 'checking' ? t('update.card.checking') : t('update.card.check')}
           </button>
           <button className="btn-ghost" style={{ fontSize: 12.5 }} onClick={() => setShowAdvanced((v) => !v)}>
-            {showAdvanced ? '收起高级选项' : '高级选项'}
+            {showAdvanced ? t('update.card.advancedOn') : t('update.card.advanced')}
           </button>
         </div>
 
         {showAdvanced && (
           <div style={{ marginTop: 10 }}>
             <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
-              高级:自定义更新源清单 URL(默认无需配置,仅在使用自托管清单时填写)
+              {t('update.card.advDesc')}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <input
                 value={sourceUrl}
                 onChange={(e) => setSourceUrl(e.target.value)}
-                placeholder="JSON 清单 URL(留空使用 GitHub Releases)"
+                placeholder={t('update.card.advPh')}
                 style={{ flex: 1, border: '1px solid var(--border-hairline)', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, outline: 'none', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
               />
               <button className="btn-ghost" style={{ fontSize: 12.5, flexShrink: 0 }} onClick={submitSource}>
-                保存
+                {t('update.card.save')}
               </button>
             </div>
           </div>
@@ -623,7 +627,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             {checkResult.checked ? (
               checkResult.updateAvailable ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                  <span style={{ fontWeight: 650 }}>发现新版本 v{checkResult.latestVersion}</span>
+                  <span style={{ fontWeight: 650 }}>{t('update.card.found', { ver: checkResult.latestVersion ?? '' })}</span>
                   {checkResult.notes && <span style={{ color: 'var(--text-muted)' }}>{checkResult.notes.slice(0, 100)}</span>}
                   {dlState?.status === 'downloading' ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontVariantNumeric: 'tabular-nums' }}>
@@ -639,36 +643,36 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                           }}
                         />
                       </span>
-                      <span className="muted" style={{ fontSize: 12 }}>下载中 {dlState.percent || 0}%</span>
+                      <span className="muted" style={{ fontSize: 12 }}>{t('update.card.dlProgress', { n: dlState.percent || 0 })}</span>
                     </span>
                   ) : dlState?.status === 'done' && dlState.filePath ? (
                     <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} disabled={installing} onClick={installNow}>
-                      {installing ? '正在启动安装器…' : '安装更新'}
+                      {installing ? t('update.installing') : t('update.install')}
                     </button>
                   ) : dlState?.status === 'error' ? (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ color: 'var(--danger, #C0392B)', fontSize: 12 }}>下载失败:{dlState.error || '未知原因'}</span>
+                      <span style={{ color: 'var(--danger, #C0392B)', fontSize: 12 }}>{t('update.card.dlFailed', { err: dlState.error || t('update.unknownReason') })}</span>
                       {checkResult.download && (
                         <button className="btn-ghost" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!)}>
-                          重试
+                          {t('update.retry')}
                         </button>
                       )}
                     </span>
                   ) : checkResult.download ? (
                     <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => beginDownload(checkResult.download!, checkResult.latestVersion!)}>
-                      下载并更新
+                      {t('update.card.dlUpdate')}
                     </button>
                   ) : checkResult.url ? (
                     <button className="btn-primary" style={{ fontSize: 12, padding: '4px 12px' }} onClick={() => openExternal(checkResult.url!).catch(() => {})}>
-                      前往下载
+                      {t('update.goDownload')}
                     </button>
                   ) : null}
                 </div>
               ) : (
-                `已是最新版本（v${checkResult.currentVersion}）`
+                t('update.card.uptodate', { ver: checkResult.currentVersion })
               )
             ) : (
-              `未能完成检查：${checkResult.reason || '未知原因'}`
+              t('update.card.checkFail', { reason: checkResult.reason || t('update.unknownReason') })
             )}
           </div>
         )}
@@ -799,7 +803,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                     <span style={{ marginLeft: 'auto', color: th.accent, fontSize: 13, fontWeight: 700 }}>✓</span>
                   )}
                 </div>
-                <div style={{ fontSize: 12.5, fontWeight: 650, color: 'var(--text-primary)' }}>{th.name}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 650, color: 'var(--text-primary)' }}>{t(th.name)}</div>
                 <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
                   {active ? t('common.inUse') : t('appearance.clickToApply')}
                 </div>
@@ -837,7 +841,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       {/* 语言 / Language */}
       <section className="card" style={{ padding: 18 }}>
         <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>{t('settings.lang.title')}</div>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t('settings.lang.desc')}</div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t('settings.appearance.langDesc')}</div>
         <div style={{ display: 'flex', gap: 8 }}>
           {LANGS.map((l) => {
             const active = lang === l.key;
@@ -867,7 +871,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       <section className="card" style={{ padding: 18 }}>
         <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 6 }}>{t('settings.about.title')}</div>
         <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.8 }}>
-          MR·SLIY 代码优化智能体 · v3.15.2
+          {t('about.product')} · v3.15.2
           <br />
           {t('about.body')}
         </div>

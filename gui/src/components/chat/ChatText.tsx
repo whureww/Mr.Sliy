@@ -1,4 +1,5 @@
 import { ReactNode } from 'react';
+import { t, useLang } from '../../lib/i18n';
 
 /** 聊天回复的轻量 Markdown 渲染：围栏代码块 / 行内代码 / 加粗 / 标题 / 列表 / 引用。
  *  不引第三方库；未闭合的 ``` 围栏按"到末尾"处理，兼容流式逐字输出。 */
@@ -142,6 +143,7 @@ function parsePlain(src: string, keyBase: string): ReactNode[] {
 }
 
 export default function ChatText({ text, streaming }: { text: string; streaming?: boolean }) {
+  useLang();
   const nodes: ReactNode[] = [];
   const fence = /```(\w*)[ \t]*\n?([\s\S]*?)(?:```|$)/g;
   let last = 0;
@@ -166,7 +168,7 @@ export default function ChatText({ text, streaming }: { text: string; streaming?
   return (
     <div style={{ whiteSpace: 'normal' }}>
       {nodes}
-      {streaming && <span className="stream-cursor" title="正在输出…" />}
+      {streaming && <span className="stream-cursor" title={t('ai.streaming')} />}
     </div>
   );
 }

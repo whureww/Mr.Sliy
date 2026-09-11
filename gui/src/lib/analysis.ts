@@ -1,5 +1,6 @@
 import { Issue, ProjectScanResult } from '../ipc/client';
 import { ModProposal } from './modProposal';
+import { t } from './i18n';
 
 export type WorkbenchMode = 'analysis' | 'editor';
 
@@ -64,11 +65,11 @@ export const sanitizeMessages = (msgs: ChatMessage[]): ChatMessage[] =>
     const fixed: ChatMessage = { ...m };
     if (m.typing) {
       fixed.typing = false;
-      fixed.text = m.text || '（回复被中断，请重新发送）';
+      fixed.text = m.text || t('chat.interrupted');
     }
     if (m.streaming) {
       fixed.streaming = false;
-      fixed.text = m.text || '（回复被中断，请重新发送）';
+      fixed.text = m.text || t('chat.interrupted');
     }
     if (m.steps?.some((s) => stepStatus(s) === 'active')) {
       fixed.steps = m.steps.map((s) =>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { TabKey, WorkbenchMode } from '../../App';
 import { WindowControls } from './WindowControls';
+import { t, useLang } from '../../lib/i18n';
 
 interface Props {
   tab: TabKey;
@@ -9,19 +10,20 @@ interface Props {
   onModeChange: (m: WorkbenchMode) => void;
 }
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'workbench', label: '主工作区' },
-  { key: 'diff', label: '优化对比' },
-  { key: 'dashboard', label: '质量概览' },
-  { key: 'settings', label: '设置' }
+const TABS: { key: TabKey; tKey: string }[] = [
+  { key: 'workbench', tKey: 'tab.workbench' },
+  { key: 'diff', tKey: 'tab.diff' },
+  { key: 'dashboard', tKey: 'tab.dashboard' },
+  { key: 'settings', tKey: 'tab.settings' }
 ];
 
-const MODES: { key: WorkbenchMode; label: string }[] = [
-  { key: 'analysis', label: '分析模式' },
-  { key: 'editor', label: '编辑模式' }
+const MODES: { key: WorkbenchMode; tKey: string; tipKey: string }[] = [
+  { key: 'analysis', tKey: 'mode.analysis', tipKey: 'mode.analysis.tip' },
+  { key: 'editor', tKey: 'mode.editor', tipKey: 'mode.editor.tip' }
 ];
 
 export default function TopBar({ tab, onTabChange, mode, onModeChange }: Props) {
+  useLang();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -67,20 +69,20 @@ export default function TopBar({ tab, onTabChange, mode, onModeChange }: Props) 
         <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5 }}>MR·SLIY</span>
       </div>
       <nav data-tauri-drag-region style={{ display: 'flex', gap: 4 }}>
-        {TABS.map((t) => (
+        {TABS.map((item) => (
           <button
-            key={t.key}
-            onClick={() => onTabChange(t.key)}
+            key={item.key}
+            onClick={() => onTabChange(item.key)}
             style={{
-              background: tab === t.key ? 'var(--accent-tint)' : 'transparent',
-              color: tab === t.key ? 'var(--accent)' : 'var(--text-muted)',
-              fontWeight: tab === t.key ? 650 : 400,
+              background: tab === item.key ? 'var(--accent-tint)' : 'transparent',
+              color: tab === item.key ? 'var(--accent)' : 'var(--text-muted)',
+              fontWeight: tab === item.key ? 650 : 400,
               padding: '6px 14px',
               borderRadius: 'var(--radius-sm)',
               transition: 'all 0.35s ease'
             }}
           >
-            {t.label}
+            {t(item.tKey)}
           </button>
         ))}
       </nav>
@@ -102,7 +104,7 @@ export default function TopBar({ tab, onTabChange, mode, onModeChange }: Props) 
               <button
                 key={m.key}
                 onClick={() => onModeChange(m.key)}
-                title={m.key === 'analysis' ? '对话与分析过程为主' : '代码编辑为主，AI 收纳为小框'}
+                title={t(m.tipKey)}
                 style={{
                   background: active ? 'var(--bg-card)' : 'transparent',
                   color: active ? 'var(--accent)' : 'var(--text-muted)',
@@ -114,7 +116,7 @@ export default function TopBar({ tab, onTabChange, mode, onModeChange }: Props) 
                   transition: 'all 0.35s ease'
                 }}
               >
-                {m.label}
+                {t(m.tKey)}
               </button>
             );
           })}

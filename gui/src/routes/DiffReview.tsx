@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { DiffPayload } from '../App';
 import { optimizeCode, saveFile } from '../ipc/client';
 import { openContextMenu, copyText } from '../lib/contextMenu';
+import { t, useLang } from '../lib/i18n';
 
 interface Props {
   payload: DiffPayload | null;
@@ -43,6 +44,7 @@ function diffLines(before: string, after: string): { type: ' ' | '+' | '-'; text
 }
 
 export default function DiffReview({ payload, onBack }: Props) {
+  useLang();
   const [explanation, setExplanation] = useState<string>('');
   const [regenerating, setRegenerating] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -52,9 +54,9 @@ export default function DiffReview({ payload, onBack }: Props) {
   if (!payload) {
     return (
       <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-        <div className="muted" style={{ marginBottom: 16 }}>还没有待审查的优化结果</div>
-        <div className="muted" style={{ fontSize: 12.5, marginBottom: 16 }}>在主工作区点击问题卡片上的"修复"按钮，即可在这里对比原始代码与 AI 优化后的代码。</div>
-        <button className="btn-ghost" onClick={onBack}>返回主工作区</button>
+        <div className="muted" style={{ marginBottom: 16 }}>{t('diff.empty')}</div>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 16 }}>{t('diff.emptyDesc')}</div>
+        <button className="btn-ghost" onClick={onBack}>{t('diff.back')}</button>
       </div>
     );
   }
@@ -68,12 +70,12 @@ export default function DiffReview({ payload, onBack }: Props) {
     setRegenerating(true);
     setErr('');
     try {
-      const opt = await optimizeCode(originalCode, filePath, language, 'general', '重新生成优化方案');
+      const opt = await optimizeCode(originalCode, filePath, language, 'general', t('diff.regeneratePrompt'));
       setExplanation(opt.explanation || '');
       result.optimizedCode = opt.optimizedCode;
       setApplied(false);
     } catch (e) {
-      setErr((e as Error).message || '重新生成失败');
+      setErr((e as Error).message || t('diff.regenerateFail'));
     } finally {
       setRegenerating(false);
     }
@@ -87,7 +89,7 @@ export default function DiffReview({ payload, onBack }: Props) {
       await saveFile(filePath, result.optimizedCode);
       setApplied(true);
     } catch (e) {
-      setErr((e as Error).message || '应用失败');
+      setErr((e as Error).message || t('diff.applyFail'));
     } finally {
       setApplying(false);
     }
@@ -102,15 +104,15 @@ export default function DiffReview({ payload, onBack }: Props) {
       {/* 左 · AI 审查说明 */}
       <aside className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0, overflow: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <strong>AI 审查</strong>
+          <strong>{t('diff.reviewTitle')}</strong>
           <span style={{ background: 'var(--accent-tint)', color: 'var(--accent)', fontSize: 11, fontWeight: 650, padding: '2px 9px', borderRadius: 6 }}>
-            [大模型]
+            {t('diff.llmTag')}
           </span>
         </div>
         <div className="mono muted" style={{ fontSize: 12, wordBreak: 'break-all' }}>{filePath}</div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <span style={{ fontSize: 12, color: 'var(--success)', background: '#EDF7F1', borderRadius: 8, padding: '3px 9px' }}>+{added} 行</span>
-          <span style={{ fontSize: 12, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '3px 9px' }}>-{removed} 行</span>
+          <span style={{ fontSize: 12, color: 'var(--success)', background: '#EDF7F1', borderRadius: 8, padding: '3px 9px' }}>{t('diff.linesAdded', { n: added })}</span>
+          <span style={{ fontSize: 12, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '3px 9px' }}>{t('diff.linesRemoved', { n: removed })}</span>
         </div>
         {err && (
           <div style={{ fontSize: 12.5, color: 'var(--danger)', background: '#FBF0EE', borderRadius: 8, padding: '9px 12px', lineHeight: 1.6 }}>
@@ -121,16 +123,16 @@ export default function DiffReview({ payload, onBack }: Props) {
           onContextMenu={(e) => {
             const exp = result.explanation || explanation;
             openContextMenu(e, [
-              { label: '复制 AI 说明', disabled: !exp, onClick: () => copyText(exp || '') },
-              { label: '复制优化后代码', disabled: !result.optimizedCode, onClick: () => copyText(result.optimizedCode || '') }
+              { label: t('diff.copyExplanation'), disabled: !exp, onClick: () => copyText(exp || '') },
+              { label: t('diff.copyOptimized'), disabled: !result.optimizedCode, onClick: () => copyText(result.optimizedCode || '') }
             ]);
           }}
         >
-          {result.explanation || explanation || '此优化基于 AST 检测结果与知识库模式生成。'}
+          {result.explanation || explanation || t('diff.explainFallback')}
         </div>
         {result.suggestions && result.suggestions.length > 0 && (
           <div>
-            <div className="muted" style={{ fontSize: 11, letterSpacing: 1.2, marginBottom: 8 }}>建议</div>
+            <div className="muted" style={{ fontSize: 11, letterSpacing: 1.2, marginBottom: 8 }}>{t('diff.suggestions')}</div>
             {result.suggestions.map((s, i) => (
               <div key={i} style={{ fontSize: 12.5, marginBottom: 6, lineHeight: 1.6 }}>· {s}</div>
             ))}
@@ -138,18 +140,18 @@ export default function DiffReview({ payload, onBack }: Props) {
         )}
         <div style={{ flex: 1 }} />
         <button className="btn-ghost" onClick={regenerate} disabled={regenerating}>
-          {regenerating ? '重新生成中…' : '重新生成'}
+          {regenerating ? t('diff.regenerating') : t('diff.regenerate')}
         </button>
-        <button className="btn-ghost" onClick={onBack}>返回</button>
+        <button className="btn-ghost" onClick={onBack}>{t('close.back')}</button>
       </aside>
 
       {/* 右 · 差异对比 */}
       <section className="card" style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-hairline)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 10 }}>
-          优化对比
-          <span className="muted" style={{ fontSize: 11 }}>(原始 → 优化后，绿色为新增 / 红色为删除)</span>
+          {t('diff.title')}
+          <span className="muted" style={{ fontSize: 11 }}>{t('diff.legend')}</span>
           <div style={{ flex: 1 }} />
-          {applied && <span style={{ fontSize: 12, color: 'var(--success)' }}>已写入文件 ✓</span>}
+          {applied && <span style={{ fontSize: 12, color: 'var(--success)' }}>{t('diff.written')}</span>}
         </div>
         <pre
           className="mono selectable"
@@ -157,10 +159,10 @@ export default function DiffReview({ payload, onBack }: Props) {
           onContextMenu={(e) => {
             const sel = String(window.getSelection() || '');
             openContextMenu(e, [
-              { label: '复制选中内容', disabled: !sel, onClick: () => copyText(sel) },
-              { label: '复制优化后代码', disabled: !result.optimizedCode, onClick: () => copyText(result.optimizedCode || '') },
+              { label: t('wb.copySel'), disabled: !sel, onClick: () => copyText(sel) },
+              { label: t('diff.copyOptimized'), disabled: !result.optimizedCode, onClick: () => copyText(result.optimizedCode || '') },
               { separator: true },
-              { label: applied ? '已应用到文件' : '应用到文件', disabled: applying || applied || !result.optimizedCode, onClick: apply }
+              { label: applied ? t('diff.applied') : t('diff.apply'), disabled: applying || applied || !result.optimizedCode, onClick: apply }
             ]);
           }}
         >
@@ -173,9 +175,9 @@ export default function DiffReview({ payload, onBack }: Props) {
         </pre>
         <div style={{ padding: 12, borderTop: '1px solid var(--border-hairline)', display: 'flex', gap: 10 }}>
           <button className="btn-primary" onClick={apply} disabled={applying || applied || !result.optimizedCode}>
-            {applying ? '写入中…' : applied ? '已应用' : '应用到文件'}
+            {applying ? t('diff.applying') : applied ? t('diff.appliedShort') : t('diff.apply')}
           </button>
-          <button className="btn-ghost" onClick={onBack}>放弃</button>
+          <button className="btn-ghost" onClick={onBack}>{t('diff.discard')}</button>
         </div>
       </section>
     </div>

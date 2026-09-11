@@ -3,6 +3,7 @@ import { AnalysisMode, AnalyzeResult, ChatMsg, chatWithAI, getLlmProviders } fro
 import { fileName } from '../../lib/analysis';
 import { openContextMenu, copyText } from '../../lib/contextMenu';
 import { ModProposal, ModStatus, RISK_STYLE, parseReply } from '../../lib/modProposal';
+import { t, useLang } from '../../lib/i18n';
 import ChatText from './ChatText';
 
 interface Props {
@@ -50,8 +51,16 @@ const codePreStyle: React.CSSProperties = {
   maxHeight: 170
 };
 
+/** 风险等级 → i18n key（RISK_STYLE 仅取配色，文案走 DICT） */
+const RISK_KEY: Record<string, string> = {
+  low: 'ai.risk.low',
+  medium: 'ai.risk.medium',
+  high: 'ai.risk.high'
+};
+
 /** 编辑模式悬浮 AI 小框：收纳为右下角气泡，展开为紧凑对话窗 */
 export default function AIDock({ currentFile, result, scanning, analysisMode, locked, onApplyCode }: Props) {
+  useLang();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [msgs, setMsgs] = useState<Msg[]>([]);
@@ -81,15 +90,15 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
 
   /** 本地固定提示（未配置大模型或调用失败时的兜底） */
   const localReply = (text: string): string => {
-    if (!currentFile) return '请先选择一个文件，我可以结合分析结果给你建议。';
+    if (!currentFile) return t('ai.noFile');
     const name = fileName(currentFile.path);
-    if (scanning) return `正在分析 ${name}，完成后可以在问题面板查看结果。`;
-    if (!result) return `我已了解 ${name}。点击上方"扫描此文件"后，我可以针对检测结果给你具体建议。`;
+    if (scanning) return t('ai.scanning', { name });
+    if (!result) return t('ai.needScan', { name });
     const high = (result.issues || []).filter((i) => {
       const s = (i.severity || '').toLowerCase();
       return s.includes('high') || s.includes('error');
     }).length;
-    return `关于 ${name}：共 ${result.totalIssues} 个问题（高危 ${high} 个）。在右侧问题面板点击"修复"可生成优化 diff。`;
+    return t('ai.summary', { name, total: result.totalIssues, high });
   };
 
   const send = async (override?: string) => {
@@ -114,7 +123,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
         const res = await chatWithAI(history, null, controller.signal);
         const replyStr = typeof res.reply === 'string' ? res.reply : String(res.reply || '');
         const { text: display, mod, parseFailed } = parseReply(replyStr);
-        const note = parseFailed ? '\n\n修改方案解析失败，请让 AI 重新给出方案。' : '';
+        const note = parseFailed ? '\n\n' + t('ai.parseFail') : '';
         // 用量换算：与服务端 scanRoutes 的 cacheHitRate 口径一致
         const u = (res.usage || null) as { totalTokens?: number; cacheHitTokens?: number; cacheMissTokens?: number } | null;
         const cacheTotal = u ? (u.cacheHitTokens || 0) + (u.cacheMissTokens || 0) : 0;
@@ -141,7 +150,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
         ]);
       } catch {
         // 用户主动停止时不再回退到本地兜底提示
-        setMsgs((m) => [...m, { from: 'ai', text: controller.signal.aborted ? '已停止生成。' : localReply(text), mode: 'local' }]);
+        setMsgs((m) => [...m, { from: 'ai', text: controller.signal.aborted ? t('ai.stopped') : localReply(text), mode: 'local' }]);
       } finally {
         abortRef.current = null;
         setThinking(false);
@@ -160,7 +169,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
     const target = msgs[idx];
     if (!target?.mod) return;
     if (!onApplyCode) {
-      setMsgs((ms) => ms.map((x, j) => (j === idx ? { ...x, modStatus: 'failed', applyError: '当前环境不支持应用修改' } : x)));
+      setMsgs((ms) => ms.map((x, j) => (j === idx ? { ...x, modStatus: 'failed', applyError: t('ai.applyUnsupported') } : x)));
       return;
     }
     setApplyingIdx(idx);
@@ -168,7 +177,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
       const err = await onApplyCode(target.mod.originalCode, target.mod.modifiedCode);
       setMsgs((ms) => ms.map((x, j) => (j === idx ? { ...x, modStatus: err ? 'failed' : 'applied', applyError: err ?? undefined } : x)));
     } catch (e) {
-      setMsgs((ms) => ms.map((x, j) => (j === idx ? { ...x, modStatus: 'failed', applyError: (e as Error).message || '未知错误' } : x)));
+      setMsgs((ms) => ms.map((x, j) => (j === idx ? { ...x, modStatus: 'failed', applyError: (e as Error).message || t('ai.unknownErr') } : x)));
     } finally {
       setApplyingIdx(null);
     }
@@ -182,7 +191,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
   /** 门控：不再采用当前方案，请 AI 换一种思路重新给出修改建议 */
   const askMoreIdeas = () => {
     setMsgs((ms) => ms.map((x) => (x.mod && x.modStatus === 'pending' ? { ...x, modStatus: 'superseded' } : x)));
-    void send('这个方案我想再看看其他思路，请换一种不同的实现方式，重新给出修改建议和风险评估。');
+    void send(t('ai.askMoreIdeas'));
   };
 
   return (
@@ -207,16 +216,16 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
             <div style={{ width: 22, height: 22, borderRadius: 6, background: 'var(--accent)', color: '#FFF', fontSize: 11, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               AI
             </div>
-            <strong style={{ fontSize: 13 }}>助手</strong>
+            <strong style={{ fontSize: 13 }}>{t('ai.assistant')}</strong>
             <span className="muted" style={{ fontSize: 11 }}>
-              {(llmAvailable ?? analysisMode === 'cloud') ? '[大模型]' : '[本地]'}
+              {(llmAvailable ?? analysisMode === 'cloud') ? t('ai.tagCloud') : t('ai.tagLocal')}
             </span>
             <div style={{ flex: 1 }} />
             <button
               onClick={() => setOpen(false)}
               className="muted"
               style={{ background: 'transparent', fontSize: 16, padding: '0 4px', lineHeight: 1 }}
-              title="收起"
+              title={t('ai.collapse')}
             >
               ×
             </button>
@@ -224,14 +233,14 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
           <div ref={bodyRef} style={{ flex: 1, overflow: 'auto', padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {msgs.length === 0 && (
               <div className="muted" style={{ fontSize: 12, textAlign: 'center', marginTop: 24 }}>
-                聊代码、问问题，随时都可以问我
+                {t('ai.welcome')}
               </div>
             )}
             {msgs.map((m, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: m.from === 'user' ? 'flex-end' : 'flex-start' }}>
                 <div
                   className="selectable"
-                  onContextMenu={(e) => openContextMenu(e, [{ label: '复制内容', onClick: () => copyText(m.text) }])}
+                  onContextMenu={(e) => openContextMenu(e, [{ label: t('ai.copyContent'), onClick: () => copyText(m.text) }])}
                   style={{
                     background: m.from === 'user' ? 'var(--accent-tint)' : 'var(--bg-recessed)',
                     padding: '7px 11px',
@@ -245,7 +254,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                 >
                   {m.from === 'ai' && (
                     <span className="muted" style={{ fontSize: 10.5, marginRight: 4 }}>
-                      {m.mode === 'cloud' ? '[大模型]' : '[本地]'}
+                      {m.mode === 'cloud' ? t('ai.tagCloud') : t('ai.tagLocal')}
                     </span>
                   )}
                   {m.text}
@@ -264,12 +273,13 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                       }}
                     >
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <strong style={{ fontSize: 12 }}>代码修改确认</strong>
+                        <strong style={{ fontSize: 12 }}>{t('ai.confirm.title')}</strong>
                         {(() => {
-                          const risk = RISK_STYLE[m.mod!.riskLevel || 'medium'] || RISK_STYLE.medium;
+                          const level = m.mod!.riskLevel || 'medium';
+                          const risk = RISK_STYLE[level] || RISK_STYLE.medium;
                           return (
                             <span style={{ fontSize: 10.5, padding: '1px 7px', borderRadius: 99, fontWeight: 700, color: risk.color, background: risk.bg }}>
-                              {risk.label}
+                              {t(RISK_KEY[level] || 'ai.risk.medium')}
                             </span>
                           );
                         })()}
@@ -277,11 +287,11 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                       {m.mod.summary && <div style={{ marginTop: 4, lineHeight: 1.5 }}>{m.mod.summary}</div>}
                       <div style={{ marginTop: 6 }}>
                         <details>
-                          <summary className="muted" style={{ cursor: 'pointer', fontSize: 11, userSelect: 'none' }}>查看原代码</summary>
+                          <summary className="muted" style={{ cursor: 'pointer', fontSize: 11, userSelect: 'none' }}>{t('ai.viewOriginal')}</summary>
                           <pre className="selectable" style={codePreStyle}>{m.mod.originalCode}</pre>
                         </details>
                         <details open>
-                          <summary className="muted" style={{ cursor: 'pointer', fontSize: 11, userSelect: 'none', marginTop: 4 }}>查看修改后代码</summary>
+                          <summary className="muted" style={{ cursor: 'pointer', fontSize: 11, userSelect: 'none', marginTop: 4 }}>{t('ai.viewModified')}</summary>
                           <pre className="selectable" style={codePreStyle}>{m.mod.modifiedCode}</pre>
                         </details>
                       </div>
@@ -295,20 +305,20 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                       {m.modStatus === 'pending' && (
                         <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
                           <button className="btn-primary" disabled={applyingIdx === i} onClick={() => applyMod(i)} style={{ fontSize: 11.5, padding: '5px 10px' }}>
-                            {applyingIdx === i ? '应用中…' : '✓ 确认修改'}
+                            {applyingIdx === i ? t('ai.applying') : t('ai.confirmApply')}
                           </button>
                           <button className="btn-ghost" onClick={askMoreIdeas} style={{ fontSize: 11.5, padding: '5px 10px' }}>
-                            更多想法
+                            {t('ai.moreIdeas')}
                           </button>
                           <button className="btn-ghost" onClick={() => rejectMod(i)} style={{ fontSize: 11.5, padding: '5px 10px' }}>
-                            取消
+                            {t('common.cancel')}
                           </button>
                         </div>
                       )}
-                      {m.modStatus === 'applied' && <div style={{ marginTop: 6, color: 'var(--success)', fontSize: 11.5 }}>已应用并保存到文件</div>}
-                      {m.modStatus === 'rejected' && <div className="muted" style={{ marginTop: 6, fontSize: 11.5 }}>已取消该修改建议</div>}
-                      {m.modStatus === 'superseded' && <div className="muted" style={{ marginTop: 6, fontSize: 11.5 }}>已被新的修改方案取代</div>}
-                      {m.modStatus === 'failed' && <div style={{ marginTop: 6, color: 'var(--danger)', fontSize: 11.5 }}>应用失败：{m.applyError || '未知错误'}</div>}
+                      {m.modStatus === 'applied' && <div style={{ marginTop: 6, color: 'var(--success)', fontSize: 11.5 }}>{t('ai.applied')}</div>}
+                      {m.modStatus === 'rejected' && <div className="muted" style={{ marginTop: 6, fontSize: 11.5 }}>{t('ai.rejected')}</div>}
+                      {m.modStatus === 'superseded' && <div className="muted" style={{ marginTop: 6, fontSize: 11.5 }}>{t('ai.superseded')}</div>}
+                      {m.modStatus === 'failed' && <div style={{ marginTop: 6, color: 'var(--danger)', fontSize: 11.5 }}>{t('ai.applyFailed', { err: m.applyError || t('ai.unknownErr') })}</div>}
                     </div>
                   )}
 
@@ -325,11 +335,11 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                         paddingTop: 5,
                         borderTop: '1px dashed var(--border-hairline)'
                       }}
-                      title={m.llm ? `共 ${m.llm.requests} 次调用` : undefined}
+                      title={m.llm ? t('ai.llmCalls', { n: m.llm.requests }) : undefined}
                     >
-                      {m.elapsed != null && <span>耗时 {(m.elapsed / 1000).toFixed(1)}s</span>}
+                      {m.elapsed != null && <span>{t('an.usage.time')} {(m.elapsed / 1000).toFixed(1)}s</span>}
                       {m.llm && m.llm.tokens > 0 && <span>{m.llm.tokens.toLocaleString('en-US')} tokens</span>}
-                      {m.llm && m.llm.cacheHitRate != null && <span style={{ color: 'var(--accent)' }}>缓存命中 {m.llm.cacheHitRate}%</span>}
+                      {m.llm && m.llm.cacheHitRate != null && <span style={{ color: 'var(--accent)' }}>{t('an.usage.cache')} {m.llm.cacheHitRate}%</span>}
                     </div>
                   )}
                 </div>
@@ -338,7 +348,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
             {thinking && (
               <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
                 <div className="muted" style={{ background: 'var(--bg-recessed)', padding: '7px 11px', borderRadius: '10px 10px 10px 3px', fontSize: 12.5 }}>
-                  思考中…
+                  {t('ai.thinking')}
                 </div>
               </div>
             )}
@@ -348,7 +358,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && send()}
-              placeholder={locked ? '会话已锁定' : '输入问题…'}
+              placeholder={locked ? t('wb.locked') : t('ai.inputPh')}
               disabled={locked}
               style={{
                 flex: 1,
@@ -365,8 +375,8 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
               <button
                 className="btn-primary"
                 onClick={() => abortRef.current?.abort()}
-                title="停止生成"
-                aria-label="停止生成"
+                title={t('ai.stop')}
+                aria-label={t('ai.stop')}
                 style={{ width: 47, padding: '7px 0', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
               >
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
@@ -375,7 +385,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
               </button>
             ) : (
               <button className="btn-primary" onClick={() => send()} disabled={locked} style={{ fontSize: 12, padding: '7px 12px' }}>
-                发送
+                {t('an.send')}
               </button>
             )}
           </div>
@@ -386,7 +396,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          title="AI 助手"
+          title={t('ai.title')}
           style={{
             position: 'absolute',
             right: 20,

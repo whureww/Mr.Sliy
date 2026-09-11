@@ -19,6 +19,13 @@ export const RISK_STYLE: Record<string, { label: string; color: string; bg: stri
   high: { label: '高风险', color: '#CF222E', bg: '#FFEBE9' }
 };
 
+/** 风险等级 → i18n key */
+export const RISK_KEY: Record<string, string> = {
+  low: 'ai.risk.low',
+  medium: 'ai.risk.medium',
+  high: 'ai.risk.high'
+};
+
 /** 从回复中解析 <MODIFICATION>{...}</MODIFICATION> 门控方案，返回展示文本与方案 */
 export function parseReply(raw: string): { text: string; mod: ModProposal | null; parseFailed: boolean } {
   const m = raw.match(/<MODIFICATION>([\s\S]*?)<\/MODIFICATION>/i);

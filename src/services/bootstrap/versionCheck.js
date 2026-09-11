@@ -110,12 +110,16 @@ async function resolveGithubReleaseAsset() {
 /**
  * 执行一次远程检查。
  * 默认直接对比 GitHub Releases 最新版本与本程序版本（无需用户配置任何地址），
+ * 桌面端会显式上报自身版本（explicitVersion），避免误用根 package.json 的 CLI 版本号。
  * 资产名匹配 MRSLIY-Setup-*.exe 即为安装包直链。
  * 仍支持高级用法：配置了更新源清单 URL 时以清单为准（version/notes/download 字段）。
  * 返回 { checked, currentVersion, latestVersion?, updateAvailable?, notes?, url?, download?, reason? }
  */
-async function checkRemoteUpdate() {
-  const currentVersion = pkg.version;
+async function checkRemoteUpdate(explicitVersion) {
+  const valid = typeof explicitVersion === 'string' && /^\d+(\.\d+){1,3}/.test(explicitVersion.trim())
+    ? explicitVersion.trim()
+    : '';
+  const currentVersion = valid || pkg.version;
   const manifestUrl = getUpdateSourceUrl();
 
   // 高级模式：用户配置了清单地址,以清单为准

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { FileNode } from '../../ipc/client';
 import { openContextMenu, copyText } from '../../lib/contextMenu';
+import { t, useLang } from '../../lib/i18n';
 
 export interface Workspace {
   path: string;
@@ -41,6 +42,7 @@ export default function WorkspaceNav({
   onSelect,
   onOpenFile
 }: Props) {
+  useLang();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const [dialogErr, setDialogErr] = useState('');
@@ -76,7 +78,7 @@ export default function WorkspaceNav({
         return n;
       });
     } catch {
-      setLoadErr((e) => ({ ...e, [path]: '无法读取' }));
+      setLoadErr((e) => ({ ...e, [path]: t('nav.loadFail') }));
     } finally {
       setLoading((s) => {
         const n = new Set(s);
@@ -135,7 +137,7 @@ export default function WorkspaceNav({
         <div className="muted" style={{ fontSize: 11, letterSpacing: 1.2 }}>WORKSPACE</div>
         <button
           onClick={() => setDialogOpen(true)}
-          title="新建工作区（每个目录对应一个独立对话）"
+          title={t('nav.newTip')}
           style={{
             background: 'var(--accent-tint)',
             color: 'var(--accent)',
@@ -154,7 +156,7 @@ export default function WorkspaceNav({
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索会话…"
+          placeholder={t('nav.searchPh')}
           style={{
             width: '100%',
             boxSizing: 'border-box',
@@ -173,18 +175,18 @@ export default function WorkspaceNav({
       <button
         className="btn-ghost"
         disabled={!activeWs}
-        title={activeWs ? '聚合检测当前工作区整个项目目录' : '请先选择工作区'}
+        title={activeWs ? t('nav.scanProjectTip') : t('nav.pickWorkspace')}
         onClick={onProjectScan}
         style={{ fontSize: 12.5, marginBottom: 8, width: '100%' }}
       >
-        扫描整个项目
+        {t('nav.scanProject')}
       </button>
 
       {/* 会话列表 */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginBottom: 12, maxHeight: 200, overflow: 'auto' }}>
         {workspaces.length === 0 && (
           <div className="muted" style={{ fontSize: 12, lineHeight: 1.7, padding: '4px 6px' }}>
-            还没有工作区。点击"新建"添加一个文件夹，它将作为一个独立的分析对话。
+            {t('nav.emptyTitle')}{t('nav.emptyDesc')}
           </div>
         )}
         {workspaces
@@ -202,33 +204,33 @@ export default function WorkspaceNav({
               onClick={() => onSelect(ws.path)}
               onContextMenu={(e) =>
                 openContextMenu(e, [
-                  { label: '切换到此对话', disabled: active, onClick: () => onSelect(ws.path) },
-                  { label: '复制路径', onClick: () => copyText(ws.path) },
+                  { label: t('nav.switchTo'), disabled: active, onClick: () => onSelect(ws.path) },
+                  { label: t('nav.copyPath'), onClick: () => copyText(ws.path) },
                   { separator: true },
-                  { label: ws.locked ? '解锁会话' : '锁定会话', onClick: () => onToggleLock(ws.path) },
-                  { label: ws.archived ? '取消归档' : '归档会话', onClick: () => onArchive(ws.path) },
+                  { label: ws.locked ? t('nav.unlock') : t('nav.lock'), onClick: () => onToggleLock(ws.path) },
+                  { label: ws.archived ? t('nav.unarchive') : t('nav.archive'), onClick: () => onArchive(ws.path) },
                   { separator: true },
                   {
-                    label: ws.scheduleMinutes ? `定时扫描：关闭（当前每 ${ws.scheduleMinutes} 分钟）` : '定时扫描：关闭',
+                    label: ws.scheduleMinutes ? t('nav.schedOffCur', { n: ws.scheduleMinutes }) : t('nav.schedOff'),
                     disabled: !ws.scheduleMinutes,
                     onClick: () => onSchedule(ws.path, 0)
                   },
                   ...[5, 15, 30, 60].map((m) => ({
-                    label: `定时扫描：每 ${m} 分钟${ws.scheduleMinutes === m ? ' ✓' : ''}`,
+                    label: `${t('nav.schedEvery', { n: m })}${ws.scheduleMinutes === m ? ' ✓' : ''}`,
                     onClick: () => onSchedule(ws.path, m)
                   })),
                   { separator: true },
                   {
-                    label: '扫描整个项目',
+                    label: t('nav.scanProject'),
                     disabled: !active,
-                    title: !active ? '切换到该会话后可用' : undefined,
+                    title: !active ? t('nav.switchToUse') : undefined,
                     onClick: () => onProjectScan()
                   },
                   {
-                    label: '移除工作区',
+                    label: t('nav.removeWs'),
                     danger: true,
                     disabled: ws.locked,
-                    title: ws.locked ? '会话已锁定，解锁后才能移除' : undefined,
+                    title: ws.locked ? t('nav.lockedRemoveTip') : undefined,
                     onClick: () => onRemove(ws.path)
                   }
                 ])
@@ -252,18 +254,18 @@ export default function WorkspaceNav({
                 {ws.name}
               </span>
               {ws.scheduleMinutes ? (
-                <span title={`定时扫描：每 ${ws.scheduleMinutes} 分钟`} style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--accent)' }}>
+                <span title={t('nav.schedEvery', { n: ws.scheduleMinutes })} style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--accent)' }}>
                   ⏰{ws.scheduleMinutes}
                 </span>
               ) : null}
               {ws.archived && (
-                <span title="已归档（右键可取消归档）" style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--text-muted)' }}>
-                  归档
+                <span title={t('nav.archivedTip')} style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--text-muted)' }}>
+                  {t('nav.archived')}
                 </span>
               )}
               {ws.locked && (
                 <span
-                  title="会话已锁定：不可移除，内容只读"
+                  title={t('nav.lockedTip')}
                   style={{ flexShrink: 0, fontSize: 11, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center' }}
                 >
                   <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
@@ -278,7 +280,7 @@ export default function WorkspaceNav({
                     e.stopPropagation();
                     onRemove(ws.path);
                   }}
-                title="移除该工作区"
+                title={t('nav.removeWsTip')}
                 className="muted"
                 style={{
                   background: 'transparent',
@@ -301,10 +303,10 @@ export default function WorkspaceNav({
           <button
             className="muted"
             onClick={() => setShowArchived((v) => !v)}
-            title={showArchived ? '隐藏归档会话' : '显示归档会话'}
+            title={showArchived ? t('nav.hideArchived') : t('nav.showArchived')}
             style={{ background: 'transparent', border: 'none', fontSize: 11.5, textAlign: 'left', padding: '6px 8px', cursor: 'pointer' }}
           >
-            {showArchived ? '▾' : '▸'} 归档会话（{workspaces.filter((w) => w.archived).length}）
+            {showArchived ? '▾' : '▸'} {t('nav.archivedCount', { n: workspaces.filter((w) => w.archived).length })}
           </button>
         )}
       </div>
@@ -315,7 +317,7 @@ export default function WorkspaceNav({
           {activeWs || '—'}
         </div>
         <div style={{ overflow: 'auto', flex: 1 }}>
-          {!activeWs && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>选择工作区后浏览文件</div>}
+          {!activeWs && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>{t('nav.browseAfterPick')}</div>}
           {activeWs &&
             (children[activeWs] || []).map((n) => (
               <TreeNode
@@ -332,7 +334,7 @@ export default function WorkspaceNav({
               />
             ))}
           {activeWs && loading.has(activeWs) && !children[activeWs] && (
-            <div className="muted" style={{ fontSize: 12, padding: '4px 8px' }}>加载中…</div>
+            <div className="muted" style={{ fontSize: 12, padding: '4px 8px' }}>{t('nav.loading')}</div>
           )}
           {activeWs && loadErr[activeWs] && (
             <div style={{ color: 'var(--danger)', fontSize: 12, padding: '4px 8px' }}>{loadErr[activeWs]}</div>
@@ -359,9 +361,9 @@ export default function WorkspaceNav({
             style={{ width: 460, padding: 20 }}
             onClick={(e) => e.stopPropagation()}
           >
-            <strong style={{ fontSize: 15 }}>新建工作区</strong>
+            <strong style={{ fontSize: 15 }}>{t('nav.newWsTitle')}</strong>
             <div className="muted" style={{ fontSize: 12.5, margin: '6px 0 14px' }}>
-              选择一个文件夹，它将作为一个新的独立对话加入列表。
+              {t('nav.newWsDesc')}
             </div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
               <input
@@ -382,14 +384,14 @@ export default function WorkspaceNav({
                 }}
               />
               <button className="btn-ghost" onClick={browseFolder} disabled={browsing}>
-                {browsing ? '打开中…' : '浏览…'}
+                {browsing ? t('nav.opening') : t('nav.browse')}
               </button>
             </div>
             {dialogErr && <div style={{ color: 'var(--danger)', fontSize: 12.5, marginBottom: 8 }}>{dialogErr}</div>}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
-              <button className="btn-ghost" onClick={closeDialog}>取消</button>
+              <button className="btn-ghost" onClick={closeDialog}>{t('common.cancel')}</button>
               <button className="btn-primary" onClick={confirmAdd} disabled={!draft.trim()}>
-                添加
+                {t('common.add')}
               </button>
             </div>
           </div>
@@ -421,6 +423,7 @@ function TreeNode({
   onToggle: (node: FileNode) => void;
   onOpenFile: (node: FileNode) => void;
 }) {
+  useLang();
   const active = currentFile?.path === node.path;
   const isOpen = expanded.has(node.path);
   const kids = childrenMap[node.path];
@@ -432,13 +435,13 @@ function TreeNode({
         onContextMenu={(e) =>
           node.is_dir
             ? openContextMenu(e, [
-                { label: isOpen ? '收起目录' : '展开目录', onClick: () => onToggle(node) },
-                { label: '复制目录路径', onClick: () => copyText(node.path) }
+                { label: isOpen ? t('nav.collapseDir') : t('nav.expandDir'), onClick: () => onToggle(node) },
+                { label: t('nav.copyDirPath'), onClick: () => copyText(node.path) }
               ])
             : openContextMenu(e, [
-                { label: '打开文件', disabled: active, onClick: () => onOpenFile(node) },
-                { label: '复制文件路径', onClick: () => copyText(node.path) },
-                { label: '复制文件名', onClick: () => copyText(node.name) }
+                { label: t('nav.openFile'), disabled: active, onClick: () => onOpenFile(node) },
+                { label: t('nav.copyFilePath'), onClick: () => copyText(node.path) },
+                { label: t('nav.copyFileName'), onClick: () => copyText(node.name) }
               ])
         }
         title={node.path}
@@ -488,7 +491,7 @@ function TreeNode({
         <div>
           {loading.has(node.path) && !kids && (
             <div className="muted" style={{ fontSize: 12, padding: '3px 8px', paddingLeft: 20 + depth * 14 }}>
-              加载中…
+              {t('nav.loading')}
             </div>
           )}
           {loadErr[node.path] && (
@@ -512,7 +515,7 @@ function TreeNode({
           ))}
           {kids && kids.length === 0 && (
             <div className="muted" style={{ fontSize: 12, padding: '3px 8px', paddingLeft: 20 + depth * 14 }}>
-              空目录
+              {t('nav.emptyDir')}
             </div>
           )}
         </div>

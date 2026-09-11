@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { issueStats } from '../ipc/client';
+import { t, useLang } from '../lib/i18n';
 
 interface StatRow {
   [k: string]: unknown;
@@ -31,13 +32,13 @@ export default function Dashboard() {
       .then((r: { success: boolean; data?: unknown }) => {
         const d = r?.data as Stats | undefined;
         if (d && typeof d.total === 'number') setStats(d);
-        else setErr('暂无统计数据');
+        else setErr('dash.empty');
       })
-      .catch(() => setErr('获取统计数据失败，请确认服务已启动'));
+      .catch(() => setErr('dash.loadFail'));
   }, []);
 
   if (err) {
-    return <div className="card" style={{ padding: 40, textAlign: 'center' }}><span className="muted">{err}</span></div>;
+    return <div className="card" style={{ padding: 40, textAlign: 'center' }}><span className="muted">{t(err)}</span></div>;
   }
 
   const total = stats?.total ?? 0;
@@ -53,30 +54,30 @@ export default function Dashboard() {
   });
 
   const langs = (stats?.languageStats || [])
-    .map((r) => ({ name: String(r.language || '未知'), count: Number(r.count) || 0 }))
+    .map((r) => ({ name: String(r.language || t('an.unknown')), count: Number(r.count) || 0 }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 6);
   const langMax = Math.max(1, ...langs.map((l) => l.count));
 
   const types = (stats?.typeStats || [])
-    .map((r) => ({ name: String(r.issue_type || '未知'), count: Number(r.count) || 0 }))
+    .map((r) => ({ name: String(r.issue_type || t('an.unknown')), count: Number(r.count) || 0 }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 5);
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: 'minmax(170px, auto)', gap: 16, overflow: 'auto', paddingBottom: 8 }}>
       <div className="card" style={bento(2)}>
-        <CardTitle>项目概览</CardTitle>
+        <CardTitle>{t('dash.overview')}</CardTitle>
         {total === 0 ? (
-          <Empty>还没有扫描数据 — 回到主工作区扫描文件后，这里会展示缺陷统计与质量趋势。</Empty>
+          <Empty>{t('dash.emptyDesc')}</Empty>
         ) : (
           <>
-            <StatRow label="缺陷总数" value={String(total)} />
-            <StatRow label="已修复" value={String(fixed)} color="var(--success)" />
-            <StatRow label="待处理" value={String(unfixed)} color={unfixed > 0 ? 'var(--warning)' : undefined} />
+            <StatRow label={t('dash.totalIssues')} value={String(total)} />
+            <StatRow label={t('dash.fixed')} value={String(fixed)} color="var(--success)" />
+            <StatRow label={t('dash.pending')} value={String(unfixed)} color={unfixed > 0 ? 'var(--warning)' : undefined} />
             <div style={{ marginTop: 4 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                <span className="muted">修复率</span>
+                <span className="muted">{t('dash.fixRate')}</span>
                 <span style={{ fontWeight: 650 }}>{fixRate}%</span>
               </div>
               <div style={{ height: 8, borderRadius: 4, background: 'var(--bg-recessed)', overflow: 'hidden' }}>
@@ -88,25 +89,25 @@ export default function Dashboard() {
       </div>
 
       <div className="card" style={bento(1)}>
-        <CardTitle>严重度分布</CardTitle>
-        {total === 0 ? <Empty>暂无数据</Empty> : (
+        <CardTitle>{t('dash.severity')}</CardTitle>
+        {total === 0 ? <Empty>{t('dash.noData')}</Empty> : (
           <>
-            <StatRow label="高危" value={String(sev.high)} color="var(--danger)" />
-            <StatRow label="中危" value={String(sev.medium)} color="var(--warning)" />
-            <StatRow label="低危" value={String(sev.low)} />
+            <StatRow label={t('dash.high')} value={String(sev.high)} color="var(--danger)" />
+            <StatRow label={t('dash.medium')} value={String(sev.medium)} color="var(--warning)" />
+            <StatRow label={t('dash.low')} value={String(sev.low)} />
           </>
         )}
       </div>
 
       <div className="card" style={bento(1)}>
-        <CardTitle>质量评分</CardTitle>
+        <CardTitle>{t('dash.score')}</CardTitle>
         <div style={{ fontSize: 44, fontWeight: 700, color: scoreColor }}>{total === 0 ? '—' : score}</div>
-        <div className="muted" style={{ fontSize: 12 }}>按未处理缺陷数扣减（每个 -2 分）</div>
+        <div className="muted" style={{ fontSize: 12 }}>{t('dash.scoreDesc')}</div>
       </div>
 
       <div className="card" style={bento(2)}>
-        <CardTitle>语言分布</CardTitle>
-        {langs.length === 0 ? <Empty>暂无数据</Empty> : langs.map((l) => (
+        <CardTitle>{t('dash.languages')}</CardTitle>
+        {langs.length === 0 ? <Empty>{t('dash.noData')}</Empty> : langs.map((l) => (
           <div key={l.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <span className="mono" style={{ fontSize: 12, width: 90, textAlign: 'right' }}>{l.name}</span>
             <div style={{ flex: 1, height: 10, borderRadius: 5, background: 'var(--bg-recessed)', overflow: 'hidden' }}>
@@ -118,9 +119,9 @@ export default function Dashboard() {
       </div>
 
       <div className="card" style={bento(1)}>
-        <CardTitle>高频问题类型</CardTitle>
-        {types.length === 0 ? <Empty>暂无数据</Empty> : types.map((t) => (
-          <StatRow key={t.name} label={t.name} value={String(t.count)} />
+        <CardTitle>{t('dash.topTypes')}</CardTitle>
+        {types.length === 0 ? <Empty>{t('dash.noData')}</Empty> : types.map((ty) => (
+          <StatRow key={ty.name} label={ty.name} value={String(ty.count)} />
         ))}
       </div>
     </div>

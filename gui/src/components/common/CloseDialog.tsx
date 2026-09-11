@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { t, useLang } from '../../lib/i18n';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window;
 
@@ -8,6 +9,7 @@ const IS_TAURI = '__TAURI_INTERNALS__' in window;
  * 选项：最小化到托盘（后台继续运行）/ 退出程序 / 取消
  */
 export default function CloseDialog({ onClose }: { onClose: () => void }) {
+  useLang();
   const [busy, setBusy] = useState(false);
 
   const minimize = async () => {
@@ -75,12 +77,11 @@ export default function CloseDialog({ onClose }: { onClose: () => void }) {
           >
             ?
           </div>
-          <strong style={{ fontSize: 15 }}>要离开了嘛？</strong>
+          <strong style={{ fontSize: 15 }}>{t('close.title')}</strong>
         </div>
 
         <p className="muted" style={{ fontSize: 12.5, lineHeight: 1.8, margin: 0 }}>
-          最小化到托盘后，分析服务会继续在后台运行，随时可以从系统托盘唤回窗口；
-          退出程序将结束本次所有任务。
+          {t('close.desc')}
         </p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
@@ -93,7 +94,7 @@ export default function CloseDialog({ onClose }: { onClose: () => void }) {
               color: '#FFF'
             }}
           >
-            最小化到托盘，后台继续运行
+            {t('close.minimize')}
           </button>
           <button
             onClick={exit}
@@ -104,7 +105,7 @@ export default function CloseDialog({ onClose }: { onClose: () => void }) {
               color: 'var(--danger, #C75450)'
             }}
           >
-            退出程序
+            {t('close.exit')}
           </button>
           <button
             onClick={onClose}
@@ -116,7 +117,7 @@ export default function CloseDialog({ onClose }: { onClose: () => void }) {
               border: '1px solid var(--border-hairline)'
             }}
           >
-            取消，我再看一眼
+            {t('close.back')}
           </button>
         </div>
       </div>

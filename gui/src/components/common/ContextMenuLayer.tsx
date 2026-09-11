@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { MenuItem } from '../../lib/contextMenu';
+import { t, useLang } from '../../lib/i18n';
 
 interface MenuState {
   x: number;
@@ -14,26 +15,27 @@ function editItems(el: HTMLInputElement | HTMLTextAreaElement): MenuItem[] {
   const sel = el.value.slice(el.selectionStart ?? 0, el.selectionEnd ?? 0);
   const isPassword = (el as HTMLInputElement).type === 'password';
   return [
-    { label: '剪切', disabled: !sel || isPassword, onClick: () => document.execCommand('cut') },
-    { label: '复制', disabled: !sel || isPassword, onClick: () => document.execCommand('copy') },
+    { label: t('ctx.cut'), disabled: !sel || isPassword, onClick: () => document.execCommand('cut') },
+    { label: t('ctx.copy'), disabled: !sel || isPassword, onClick: () => document.execCommand('copy') },
     {
-      label: '粘贴',
+      label: t('ctx.paste'),
       onClick: () => {
         navigator.clipboard
           .readText()
-          .then((t) => {
-            if (t) document.execCommand('insertText', false, t);
+          .then((text) => {
+            if (text) document.execCommand('insertText', false, text);
           })
           .catch(() => {});
       }
     },
     { separator: true },
-    { label: '全选', onClick: () => { el.focus(); el.select(); } }
+    { label: t('ctx.selectAll'), onClick: () => { el.focus(); el.select(); } }
   ];
 }
 
 /** 全局右键菜单层：一律屏蔽 WebView2 默认菜单；文本输入框给编辑菜单，其余由页面自定义 */
 export default function ContextMenuLayer() {
+  useLang();
   const [menu, setMenu] = useState<MenuState | null>(null);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -42,14 +44,14 @@ export default function ContextMenuLayer() {
 
     const onCtx = (e: MouseEvent) => {
       e.preventDefault();
-      const t = e.target as HTMLElement;
+      const target = e.target as HTMLElement;
       // 在菜单自身上右键：仅关闭
-      if (ref.current?.contains(t)) {
+      if (ref.current?.contains(target)) {
         setMenu(null);
         return;
       }
       // 文本输入框：通用编辑菜单
-      const box = t.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
+      const box = target.closest('input, textarea') as HTMLInputElement | HTMLTextAreaElement | null;
       if (box) {
         window.dispatchEvent(
           new CustomEvent<MenuState>(EVT, { detail: { x: e.clientX, y: e.clientY, items: editItems(box) } })

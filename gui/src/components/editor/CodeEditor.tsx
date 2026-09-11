@@ -14,6 +14,7 @@ import 'prismjs/components/prism-sql';
 import 'prismjs/components/prism-bash';
 import 'prismjs/components/prism-markdown';
 import './codeEditor.css';
+import { t, useLang } from '../../lib/i18n';
 
 /** 扩展名 → Prism 语言（markup/css/clike/javascript 由核心自带） */
 const EXT_LANG: Record<string, string> = {
@@ -56,6 +57,7 @@ interface Props {
  * 附：Ctrl+F 查找/替换（Enter/Shift+Enter 上下切换）、Ctrl+G 跳转行。
  */
 export default function CodeEditor({ path, value, onChange, onSave, readOnly, onContextMenu }: Props) {
+  useLang();
   const viewportRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -273,7 +275,7 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
             <input
               ref={findInputRef}
               className="ce-find-input"
-              placeholder="查找（Enter 下一个 / Shift+Enter 上一个）"
+              placeholder={t('ed.findPh')}
               value={findText}
               onChange={(e) => setFindText(e.target.value)}
               onKeyDown={(e) => {
@@ -286,25 +288,25 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
               }}
             />
             <span className="ce-find-count">
-              {findText ? (matches.length ? `${matchIndex + 1}/${matches.length}` : '无结果') : ''}
+              {findText ? (matches.length ? `${matchIndex + 1}/${matches.length}` : t('ed.noResults')) : ''}
             </span>
-            <button className="ce-find-btn" title="上一个 (Shift+Enter)" onClick={() => gotoMatch(matchIndex - 1)}>↑</button>
-            <button className="ce-find-btn" title="下一个 (Enter)" onClick={() => gotoMatch(matchIndex + 1)}>↓</button>
+            <button className="ce-find-btn" title={`${t('ed.prev')} (Shift+Enter)`} onClick={() => gotoMatch(matchIndex - 1)}>↑</button>
+            <button className="ce-find-btn" title={`${t('ed.next')} (Enter)`} onClick={() => gotoMatch(matchIndex + 1)}>↓</button>
             <button
               className="ce-find-btn"
-              title={replaceVisible ? '收起替换' : '展开替换'}
+              title={replaceVisible ? t('ed.hideReplace') : t('ed.showReplace')}
               style={replaceVisible ? { color: 'var(--accent)' } : undefined}
               onClick={() => setReplaceVisible((v) => !v)}
             >
               ⇄
             </button>
-            <button className="ce-find-btn" title="关闭 (Esc)" onClick={() => setFindOpen(false)}>×</button>
+            <button className="ce-find-btn" title={`${t('win.close')} (Esc)`} onClick={() => setFindOpen(false)}>×</button>
           </div>
           {replaceVisible && (
             <div className="ce-find-row">
               <input
                 className="ce-find-input"
-                placeholder="替换为…"
+                placeholder={t('ed.replaceWith')}
                 value={replaceText}
                 onChange={(e) => setReplaceText(e.target.value)}
                 onKeyDown={(e) => {
@@ -316,11 +318,11 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
                   }
                 }}
               />
-              <button className="ce-find-btn" disabled={readOnly} title={readOnly ? '会话已锁定' : '替换当前匹配'} onClick={replaceCurrent}>
-                替换
+              <button className="ce-find-btn" disabled={readOnly} title={readOnly ? t('wb.locked') : t('ed.replaceOne')} onClick={replaceCurrent}>
+                {t('ed.replace')}
               </button>
-              <button className="ce-find-btn" disabled={readOnly} title={readOnly ? '会话已锁定' : '替换全部匹配'} onClick={replaceAll}>
-                全部
+              <button className="ce-find-btn" disabled={readOnly} title={readOnly ? t('wb.locked') : t('ed.replaceAllTip')} onClick={replaceAll}>
+                {t('ed.replaceAll')}
               </button>
             </div>
           )}
@@ -334,7 +336,7 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
             <input
               ref={gotoInputRef}
               className="ce-find-input"
-              placeholder={`跳转到行（1-${lines.length}）`}
+              placeholder={t('ed.gotoPh', { n: lines.length })}
               value={gotoText}
               onChange={(e) => setGotoText(e.target.value)}
               onKeyDown={(e) => {
@@ -346,9 +348,9 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
                 }
               }}
             />
-            <span className="ce-find-count">共 {lines.length} 行</span>
-            <button className="ce-find-btn" onClick={gotoLine}>跳转</button>
-            <button className="ce-find-btn" title="关闭 (Esc)" onClick={() => setGotoOpen(false)}>×</button>
+            <span className="ce-find-count">{t('ed.lines', { n: lines.length })}</span>
+            <button className="ce-find-btn" onClick={gotoLine}>{t('ed.goto')}</button>
+            <button className="ce-find-btn" title={`${t('win.close')} (Esc)`} onClick={() => setGotoOpen(false)}>×</button>
           </div>
         </div>
       )}

@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Issue, ProjectScanResult } from '../ipc/client';
 import { ChatMessage, fileName, isHigh, severityColor, stepStatus } from '../lib/analysis';
-import { ModProposal, RISK_STYLE } from '../lib/modProposal';
+import { ModProposal, RISK_STYLE, RISK_KEY } from '../lib/modProposal';
 import { openContextMenu, copyText } from '../lib/contextMenu';
+import { t, useLang } from '../lib/i18n';
 import ChatText from '../components/chat/ChatText';
 
 interface Props {
@@ -37,6 +38,7 @@ export default function AnalysisView({
   onExportReport,
   onStop
 }: Props) {
+  useLang();
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -61,28 +63,28 @@ export default function AnalysisView({
     >
       {/* 头部 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderBottom: '1px solid var(--border-hairline)' }}>
-        <strong style={{ fontSize: 14 }}>分析会话</strong>
+        <strong style={{ fontSize: 14 }}>{t('an.title')}</strong>
         <span className="mono muted" style={{ fontSize: 12 }}>
-          {currentFile ? fileName(currentFile.path) : '未打开文件'}
+          {currentFile ? fileName(currentFile.path) : t('an.noFile')}
         </span>
         {scanning && (
-          <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>检测进行中…</span>
+          <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>{t('an.scanning')}</span>
         )}
         {locked && (
           <span
             style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'inline-flex', alignItems: 'center', gap: 4 }}
-            title="会话已锁定：只读，右键左侧会话可解锁"
+            title={t('an.lockedTip')}
           >
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
               <rect x="4.5" y="10.5" width="15" height="10" rx="2.4" />
               <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" />
             </svg>
-            已锁定
+            {t('an.locked')}
           </span>
         )}
         <div style={{ flex: 1 }} />
-        <button className="btn-primary" onClick={onScan} disabled={!currentFile || scanning || locked} title={locked ? '会话已锁定' : undefined}>
-          {scanning ? '分析中…' : '开始分析'}
+        <button className="btn-primary" onClick={onScan} disabled={!currentFile || scanning || locked} title={locked ? t('wb.locked') : undefined}>
+          {scanning ? t('an.analyzing') : t('an.start')}
         </button>
       </div>
 
@@ -90,9 +92,9 @@ export default function AnalysisView({
       <div ref={listRef} style={{ flex: 1, overflow: 'auto', padding: '18px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
         {messages.length === 0 && (
           <div className="muted" style={{ textAlign: 'center', marginTop: 60, fontSize: 13, lineHeight: 2 }}>
-            在左侧文件树展开目录并选择文件，或直接发送消息
+            {t('an.emptyLine1')}
             <br />
-            点击"开始分析"后，这里会实时展示每一步的执行过程与问题结果
+            {t('an.emptyLine2')}
           </div>
         )}
         {messages.map((msg) =>
@@ -100,7 +102,7 @@ export default function AnalysisView({
             <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
               <div
                 className="selectable"
-                onContextMenu={(e) => openContextMenu(e, [{ label: '复制消息内容', onClick: () => copyText(msg.text || '') }])}
+                onContextMenu={(e) => openContextMenu(e, [{ label: t('an.copyMsg'), onClick: () => copyText(msg.text || '') }])}
                 style={{
                   background: 'var(--accent-tint)',
                   color: 'var(--text-primary)',
@@ -113,7 +115,7 @@ export default function AnalysisView({
               >
                 {msg.text}
               </div>
-              {msg.time && <span className="muted" style={{ fontSize: 11, paddingRight: 2 }}>我 · {msg.time}</span>}
+              {msg.time && <span className="muted" style={{ fontSize: 11, paddingRight: 2 }}>{t('an.me')} · {msg.time}</span>}
             </div>
           ) : (
             <AssistantMessage key={msg.id} msg={msg} fixing={fixing} locked={locked} onFix={onFix} onModAction={onModAction} onExportReport={onExportReport} />
@@ -132,11 +134,11 @@ export default function AnalysisView({
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.nativeEvent.isComposing) submit();
             }}
-            placeholder={locked ? '会话已锁定，请先解锁' : currentFile ? '描述你的问题，或输入"分析"触发检测流水线' : '请先在左侧选择文件'}
+            placeholder={locked ? t('an.phLocked') : currentFile ? t('an.phDescribe') : t('an.phPickFile')}
             disabled={!currentFile || scanning || locked}
           />
           {busy ? (
-            <button className="ask-send stopping" onClick={onStop} title="中断当前回复 / 扫描" aria-label="停止">
+            <button className="ask-send stopping" onClick={onStop} title={t('an.stopTip')} aria-label={t('an.stop')}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
                 <rect x="5" y="5" width="14" height="14" rx="2.5" />
               </svg>
@@ -146,8 +148,8 @@ export default function AnalysisView({
               className="ask-send"
               onClick={submit}
               disabled={!currentFile || locked || !draft.trim()}
-              title="发送 (Enter)"
-              aria-label="发送"
+              title={t('an.sendTip')}
+              aria-label={t('an.send')}
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                 <path d="M22 2 11 13" />
@@ -157,9 +159,9 @@ export default function AnalysisView({
           )}
         </div>
         <div className="ask-hint">
-          <span>输入</span>
-          <kbd>分析</kbd>
-          <span>触发检测流水线 · Enter 发送</span>
+          <span>{t('an.hint.type')}</span>
+          <kbd>{t('an.hint.keyword')}</kbd>
+          <span>{t('an.hint.pipeline')}</span>
         </div>
       </div>
     </section>
@@ -181,6 +183,7 @@ function AssistantMessage({
   onModAction: (action: 'apply' | 'reject' | 'more' | 'undo' | 'verify', msgId: number, mod: ModProposal) => void;
   onExportReport: (r: ProjectScanResult) => void;
 }) {
+  useLang();
   const typing = !!msg.typing;
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -213,13 +216,13 @@ function AssistantMessage({
           onContextMenu={(e) =>
             openContextMenu(e, [
               {
-                label: '复制回复内容',
+                label: t('an.copyReply'),
                 disabled: !msg.text,
                 onClick: () =>
                   copyText(
                     msg.text ||
                       (msg.issues
-                        ? `检测完成 · ${msg.total} 个问题${msg.lang ? ` · ${msg.lang}` : ''}`
+                        ? `${t('an.doneSummary', { n: msg.total ?? 0 })}${msg.lang ? ` · ${msg.lang}` : ''}`
                         : '')
                   )
               }
@@ -243,7 +246,7 @@ function AssistantMessage({
                   style={{ animationDelay: `${i * 0.18}s` }}
                 />
               ))}
-              <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>正在组织回复…</span>
+              <span className="muted" style={{ fontSize: 12, marginLeft: 4 }}>{t('an.composing')}</span>
             </div>
           )}
 
@@ -251,7 +254,7 @@ function AssistantMessage({
           {msg.steps && (
             <div style={{ marginBottom: msg.issues || msg.error ? 12 : 0 }}>
               <div className="muted" style={{ fontSize: 11.5, letterSpacing: 1, marginBottom: 8 }}>
-                分析过程{msg.elapsed != null && ` · 总耗时 ${(msg.elapsed / 1000).toFixed(1)}s`}
+                {t('an.process')}{msg.elapsed != null && ` · ${t('an.elapsed')} ${(msg.elapsed / 1000).toFixed(1)}s`}
               </div>
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 {msg.steps.map((s, i) => {
@@ -312,15 +315,15 @@ function AssistantMessage({
                       {/* 文案 */}
                       <div style={{ paddingBottom: last ? 0 : 10 }}>
                         <div style={{ fontSize: 13, fontWeight: st === 'pending' ? 400 : 650, color: st === 'active' ? 'var(--accent)' : 'inherit' }}>
-                          {s.label}
-                          {st === 'active' && <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>执行中…</span>}
+                          {t(s.label)}
+                          {st === 'active' && <span className="muted" style={{ fontWeight: 400, fontSize: 12, marginLeft: 8 }}>{t('an.running')}</span>}
                           {st === 'done' && s.ms != null && (
                             <span className="muted" style={{ fontWeight: 400, fontSize: 11.5, marginLeft: 8 }}>
                               {(s.ms / 1000).toFixed(1)}s
                             </span>
                           )}
                         </div>
-                        {st !== 'pending' && <div className="muted" style={{ fontSize: 12 }}>{s.detail}</div>}
+                        {st !== 'pending' && <div className="muted" style={{ fontSize: 12 }}>{t(s.detail)}</div>}
                       </div>
                     </div>
                   );
@@ -349,12 +352,12 @@ function AssistantMessage({
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <strong style={{ fontSize: 13 }}>代码修改确认</strong>
+                <strong style={{ fontSize: 13 }}>{t('ai.confirm.title')}</strong>
                 {(() => {
                   const risk = RISK_STYLE[msg.mod!.riskLevel || 'medium'] || RISK_STYLE.medium;
                   return (
                     <span style={{ fontSize: 11, padding: '2px 9px', borderRadius: 99, fontWeight: 700, color: risk.color, background: risk.bg }}>
-                      {risk.label}
+                      {t(RISK_KEY[msg.mod!.riskLevel || 'medium'] || 'ai.risk.medium')}
                     </span>
                   );
                 })()}
@@ -362,7 +365,7 @@ function AssistantMessage({
               {msg.mod.summary && <div style={{ marginTop: 6, lineHeight: 1.6 }}>{msg.mod.summary}</div>}
               <div style={{ marginTop: 8 }}>
                 <details>
-                  <summary className="muted" style={{ cursor: 'pointer', fontSize: 12, userSelect: 'none' }}>查看原代码</summary>
+                  <summary className="muted" style={{ cursor: 'pointer', fontSize: 12, userSelect: 'none' }}>{t('an.viewOriginal')}</summary>
                   <pre
                     className="selectable mono"
                     style={{ margin: '6px 0 0', padding: 10, background: 'var(--bg-recessed)', border: '1px solid var(--border-hairline)', borderRadius: 8, fontSize: 11.5, lineHeight: 1.55, whiteSpace: 'pre', overflow: 'auto', maxHeight: 190 }}
@@ -371,7 +374,7 @@ function AssistantMessage({
                   </pre>
                 </details>
                 <details open>
-                  <summary className="muted" style={{ cursor: 'pointer', fontSize: 12, userSelect: 'none', marginTop: 6 }}>查看修改后代码</summary>
+                  <summary className="muted" style={{ cursor: 'pointer', fontSize: 12, userSelect: 'none', marginTop: 6 }}>{t('an.viewModified')}</summary>
                   <pre
                     className="selectable mono"
                     style={{ margin: '6px 0 0', padding: 10, background: 'var(--bg-recessed)', border: '1px solid var(--border-hairline)', borderRadius: 8, fontSize: 11.5, lineHeight: 1.55, whiteSpace: 'pre', overflow: 'auto', maxHeight: 190 }}
@@ -389,44 +392,44 @@ function AssistantMessage({
               )}
               {msg.modStatus === 'pending' && (
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                  <button className="btn-primary" disabled={locked} title={locked ? '会话已锁定' : undefined} onClick={() => onModAction('apply', msg.id, msg.mod!)} style={{ fontSize: 12, padding: '6px 12px' }}>
-                    ✓ 确认修改
+                  <button className="btn-primary" disabled={locked} title={locked ? t('wb.locked') : undefined} onClick={() => onModAction('apply', msg.id, msg.mod!)} style={{ fontSize: 12, padding: '6px 12px' }}>
+                    ✓ {t('an.confirmMod')}
                   </button>
                   <button className="btn-ghost" onClick={() => onModAction('more', msg.id, msg.mod!)} style={{ fontSize: 12, padding: '6px 12px' }}>
-                    更多想法
+                    {t('an.moreIdeas')}
                   </button>
                   <button className="btn-ghost" onClick={() => onModAction('reject', msg.id, msg.mod!)} style={{ fontSize: 12, padding: '6px 12px' }}>
-                    取消
+                    {t('common.cancel')}
                   </button>
                 </div>
               )}
               {msg.modStatus === 'applied' && (
                 <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ color: 'var(--success)', fontSize: 12.5 }}>已应用并保存到文件</span>
+                  <span style={{ color: 'var(--success)', fontSize: 12.5 }}>{t('an.appliedSaved')}</span>
                   <button
                     className="btn-ghost"
                     style={{ fontSize: 12, padding: '4px 10px' }}
                     disabled={locked}
-                    title={locked ? '会话已锁定' : '将文件恢复为修改前内容'}
+                    title={locked ? t('wb.locked') : t('an.undoTip')}
                     onClick={() => onModAction('undo', msg.id, msg.mod!)}
                   >
-                    撤销修改
+                    {t('an.undoMod')}
                   </button>
                   <button
                     className="btn-ghost"
                     style={{ fontSize: 12, padding: '4px 10px' }}
                     disabled={locked}
-                    title={locked ? '会话已锁定' : '重新扫描当前文件，验证修改效果'}
+                    title={locked ? t('wb.locked') : t('an.verifyTip')}
                     onClick={() => onModAction('verify', msg.id, msg.mod!)}
                   >
-                    重新扫描验证
+                    {t('an.verifyRescan')}
                   </button>
                 </div>
               )}
-              {msg.modStatus === 'undone' && <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>已撤销，文件已恢复到修改前内容（可重新扫描确认）</div>}
-              {msg.modStatus === 'rejected' && <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>已取消该修改建议</div>}
-              {msg.modStatus === 'superseded' && <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>已被新的修改方案取代</div>}
-              {msg.modStatus === 'failed' && <div style={{ marginTop: 8, color: 'var(--danger)', fontSize: 12.5 }}>应用失败：{msg.applyError || '未知错误'}</div>}
+              {msg.modStatus === 'undone' && <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>{t('an.undoneMsg')}</div>}
+              {msg.modStatus === 'rejected' && <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>{t('an.rejectedMsg')}</div>}
+              {msg.modStatus === 'superseded' && <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>{t('an.supersededMsg')}</div>}
+              {msg.modStatus === 'failed' && <div style={{ marginTop: 8, color: 'var(--danger)', fontSize: 12.5 }}>{t('an.applyFail', { msg: msg.applyError || t('an.unknownErr') })}</div>}
             </div>
           )}
 
@@ -435,12 +438,12 @@ function AssistantMessage({
             <>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0', paddingTop: 10, borderTop: '1px solid var(--border-hairline)' }}>
                 <span style={{ background: 'var(--accent-tint)', color: 'var(--accent)', fontSize: 12, fontWeight: 650, padding: '3px 10px', borderRadius: 6 }}>
-                  {msg.tag === 'cloud' ? '[大模型]' : '[本地]'}
+                  {msg.tag === 'cloud' ? t('an.tagLLM') : t('an.tagLocal')}
                 </span>
                 <span className="muted" style={{ fontSize: 12.5 }}>
-                  检测完成 · {msg.total} 个问题{msg.lang && ` · ${msg.lang}`}
+                  {t('an.doneSummary', { n: msg.total ?? 0 })}{msg.lang && ` · ${msg.lang}`}
                   {(msg.issues || []).some((i) => isHigh(i.severity)) && (
-                    <span style={{ color: 'var(--danger)', fontWeight: 600 }}> · 存在高危项</span>
+                    <span style={{ color: 'var(--danger)', fontWeight: 600 }}> · {t('an.hasHigh')}</span>
                   )}
                 </span>
               </div>
@@ -451,7 +454,7 @@ function AssistantMessage({
                 onFix={onFix}
               />
               {msg.total === 0 && (
-                <div style={{ color: 'var(--success)', fontSize: 13 }}>未发现问题，代码质量良好。</div>
+                <div style={{ color: 'var(--success)', fontSize: 13 }}>{t('an.noIssues')}</div>
               )}
             </>
           )}
@@ -459,27 +462,27 @@ function AssistantMessage({
           {/* 项目级扫描结果卡片 */}
           {msg.projScan && (
             <div
-              onContextMenu={(e) => openContextMenu(e, [{ label: '导出 HTML 报告', onClick: () => onExportReport(msg.projScan!) }])}
+              onContextMenu={(e) => openContextMenu(e, [{ label: t('an.exportReport'), onClick: () => onExportReport(msg.projScan!) }])}
               style={{ marginTop: 10, border: '1px solid var(--border-hairline)', borderRadius: 10, background: 'var(--bg-card)', padding: 12, fontSize: 12.5 }}
             >
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                <strong style={{ fontSize: 13 }}>项目扫描报告</strong>
+                <strong style={{ fontSize: 13 }}>{t('an.projReport')}</strong>
                 <span className="mono muted" style={{ fontSize: 11, wordBreak: 'break-all' }}>{msg.projScan.projectPath}</span>
               </div>
               <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap' }}>
                 <span>
-                  扫描文件 <strong>{msg.projScan.scannedFiles}</strong>/{msg.projScan.totalFiles}
-                  {msg.projScan.failedFiles > 0 && <span style={{ color: 'var(--danger)' }}>（失败 {msg.projScan.failedFiles}）</span>}
+                  {t('an.scannedFiles')} <strong>{msg.projScan.scannedFiles}</strong>/{msg.projScan.totalFiles}
+                  {msg.projScan.failedFiles > 0 && <span style={{ color: 'var(--danger)' }}>{t('an.scanFailed', { n: msg.projScan.failedFiles })}</span>}
                 </span>
                 <span>
-                  问题总数 <strong style={{ color: msg.projScan.totalIssues > 0 ? 'var(--warning)' : 'var(--success)' }}>{msg.projScan.totalIssues}</strong>
+                  {t('an.totalIssues')} <strong style={{ color: msg.projScan.totalIssues > 0 ? 'var(--warning)' : 'var(--success)' }}>{msg.projScan.totalIssues}</strong>
                 </span>
-                <span className="muted">耗时 {(msg.projScan.durationMs / 1000).toFixed(1)}s</span>
+                <span className="muted">{t('an.usage.time')} {(msg.projScan.durationMs / 1000).toFixed(1)}s</span>
               </div>
               {/* 问题最多的文件 Top5 */}
               {(msg.projScan.results || []).filter((f) => (f.totalIssues || 0) > 0).length > 0 && (
                 <div style={{ marginTop: 8, borderTop: '1px dashed var(--border-hairline)', paddingTop: 8 }}>
-                  <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>问题集中的文件</div>
+                  <div className="muted" style={{ fontSize: 11.5, marginBottom: 4 }}>{t('an.topFiles')}</div>
                   {[...(msg.projScan.results || [])]
                     .sort((a, b) => (b.totalIssues || 0) - (a.totalIssues || 0))
                     .slice(0, 5)
@@ -496,7 +499,7 @@ function AssistantMessage({
                             flexShrink: 0
                           }}
                         >
-                          {f.totalIssues || 0} 个
+                          {t('an.nCount', { n: f.totalIssues || 0 })}
                         </span>
                       </div>
                     ))}
@@ -504,7 +507,7 @@ function AssistantMessage({
               )}
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
                 <button className="btn-primary" style={{ fontSize: 12, padding: '6px 12px' }} onClick={() => onExportReport(msg.projScan!)}>
-                  导出 HTML 报告
+                  {t('an.exportReport')}
                 </button>
               </div>
             </div>
@@ -523,12 +526,12 @@ function AssistantMessage({
                 paddingTop: 6,
                 borderTop: '1px dashed var(--border-hairline)'
               }}
-              title={`模型 ${msg.llm?.model || '未知'} · 共 ${msg.llm?.requests ?? 1} 次调用`}
+              title={t('an.llmTip', { model: msg.llm?.model || t('an.unknown'), n: msg.llm?.requests ?? 1 })}
             >
-              {!msg.steps && msg.elapsed != null && <span>耗时 {(msg.elapsed / 1000).toFixed(1)}s</span>}
+              {!msg.steps && msg.elapsed != null && <span>{t('an.usage.time')} {(msg.elapsed / 1000).toFixed(1)}s</span>}
               {msg.llm && msg.llm.tokens > 0 && <span>{msg.llm.tokens.toLocaleString('en-US')} tokens</span>}
               {msg.llm && msg.llm.cacheHitRate !== null && msg.llm.cacheHitRate !== undefined && (
-                <span style={{ color: 'var(--accent)' }}>缓存命中 {msg.llm.cacheHitRate}%</span>
+                <span style={{ color: 'var(--accent)' }}>{t('an.usage.cache')} {msg.llm.cacheHitRate}%</span>
               )}
             </div>
           )}
@@ -550,6 +553,7 @@ function IssueGrid({
   locked?: boolean;
   onFix: (issue: Issue) => void;
 }) {
+  useLang();
   const [expanded, setExpanded] = useState(false);
   const shown = expanded ? issues : issues.slice(0, 8);
   if (issues.length === 0) return null;
@@ -561,9 +565,9 @@ function IssueGrid({
             key={i}
             onContextMenu={(e) =>
               openContextMenu(e, [
-                { label: '修复此问题', disabled: fixing !== null || locked, title: locked ? '会话已锁定' : undefined, onClick: () => onFix(iss) },
+                { label: t('an.fixThis'), disabled: fixing !== null || locked, title: locked ? t('wb.locked') : undefined, onClick: () => onFix(iss) },
                 {
-                  label: '复制问题描述',
+                  label: t('an.copyIssue'),
                   onClick: () => copyText(`${iss.issueType}${iss.line != null ? ` (L${iss.line})` : ''}：${iss.message}`)
                 }
               ])
@@ -585,7 +589,7 @@ function IssueGrid({
                 {iss.issueType}
               </span>
               {isHigh(iss.severity) && (
-                <span style={{ fontSize: 10.5, color: 'var(--danger)', fontWeight: 600, flexShrink: 0 }}>高危</span>
+                <span style={{ fontSize: 10.5, color: 'var(--danger)', fontWeight: 600, flexShrink: 0 }}>{t('dash.high')}</span>
               )}
               {iss.line != null && <span className="muted" style={{ fontSize: 10.5, flexShrink: 0 }}>L{iss.line}</span>}
               <span style={{ flex: 1 }} />
@@ -594,9 +598,9 @@ function IssueGrid({
                 style={{ fontSize: 11, padding: '3px 10px', flexShrink: 0 }}
                 onClick={() => onFix(iss)}
                 disabled={fixing !== null || locked}
-                title={locked ? '会话已锁定' : undefined}
+                title={locked ? t('wb.locked') : undefined}
               >
-                {fixing === iss.issueType ? '生成中…' : '修复'}
+                {fixing === iss.issueType ? t('an.generating') : t('an.fix')}
               </button>
             </div>
             <div style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)' }}>{iss.message}</div>
@@ -609,7 +613,7 @@ function IssueGrid({
           style={{ fontSize: 12, padding: '5px 12px', marginTop: 8 }}
           onClick={() => setExpanded((v) => !v)}
         >
-          {expanded ? '收起问题列表' : `展开全部 ${issues.length} 个问题`}
+          {expanded ? t('an.collapseList') : t('an.expandAll', { n: issues.length })}
         </button>
       )}
     </div>

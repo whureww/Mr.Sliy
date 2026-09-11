@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { t, useLang } from '../../lib/i18n';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window;
 
@@ -11,6 +12,7 @@ interface Props {
  * 细线 SVG，hover 语义色；非 Tauri 环境（浏览器调试）不渲染
  */
 export function WindowControls({ maximized }: Props) {
+  useLang();
   const [win, setWin] = useState<{
     minimize: () => void;
     toggleMaximize: () => void;
@@ -29,12 +31,12 @@ export function WindowControls({ maximized }: Props) {
 
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-      <ControlButton onClick={() => win.minimize()} label="最小化">
+      <ControlButton onClick={() => win.minimize()} label={t('win.minimize')}>
         <svg width="11" height="11" viewBox="0 0 11 11">
           <line x1="0.5" y1="5.5" x2="10.5" y2="5.5" stroke="currentColor" strokeWidth="1" />
         </svg>
       </ControlButton>
-      <ControlButton onClick={() => win.toggleMaximize()} label={maximized ? '还原' : '最大化'}>
+      <ControlButton onClick={() => win.toggleMaximize()} label={maximized ? t('win.restore') : t('win.maximize')}>
         {maximized ? (
           <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
             <rect x="0.5" y="3.5" width="7" height="7" stroke="currentColor" strokeWidth="1" />
@@ -46,7 +48,7 @@ export function WindowControls({ maximized }: Props) {
           </svg>
         )}
       </ControlButton>
-      <ControlButton onClick={() => win.close()} label="关闭" danger>
+      <ControlButton onClick={() => win.close()} label={t('win.close')} danger>
         <svg width="11" height="11" viewBox="0 0 11 11">
           <line x1="0.5" y1="0.5" x2="10.5" y2="10.5" stroke="currentColor" strokeWidth="1" />
           <line x1="10.5" y1="0.5" x2="0.5" y2="10.5" stroke="currentColor" strokeWidth="1" />

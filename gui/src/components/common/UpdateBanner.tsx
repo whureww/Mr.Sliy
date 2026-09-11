@@ -7,6 +7,7 @@ import {
   installUpdate,
   openExternal
 } from '../../ipc/client';
+import { t, useLang } from '../../lib/i18n';
 
 const DISMISS_KEY = 'update-banner-dismissed';
 
@@ -29,6 +30,7 @@ function fmtMB(n?: number): string {
  * 同一版本关闭后不再提示;下载中不可关闭(后台继续,重开或重启后由状态恢复)。
  */
 export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePayload; onClose: () => void }) {
+  useLang();
   const [visible, setVisible] = useState(true);
   const [dl, setDl] = useState<DownloadState | null>(null);
   const [installing, setInstalling] = useState(false);
@@ -124,7 +126,7 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
           flexShrink: 0
         }}
       >
-        新版本
+        {t('update.badge')}
       </span>
       <span style={{ fontWeight: 650, color: 'var(--accent)', flexShrink: 0 }}>v{info.latestVersion}</span>
 
@@ -152,7 +154,7 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
             />
           </span>
           <span className="muted" style={{ flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-            正在下载更新 {sizeText && `${sizeText} · `}
+            {t('update.downloading')} {sizeText && `${sizeText} · `}
             {percent}%
           </span>
         </span>
@@ -160,19 +162,19 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
 
       {phase === 'done' && (
         <span className="muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          更新包下载完成{dl?.version ? `（v${dl.version}）` : ''},安装将关闭当前应用。
+          {t('update.done', { ver: dl?.version ? t('update.doneVer', { ver: dl.version }) : '' })}
         </span>
       )}
 
       {phase === 'error' && (
         <span className="muted" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          下载失败:{dl?.error || '未知原因'}
+          {t('update.failed', { err: dl?.error || t('update.unknownReason') })}
         </span>
       )}
 
       {(phase === 'idle' || !info.download) && (
         <span className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {info.notes ? info.notes.slice(0, 80) : '发现可用更新,建议升级以获得最新功能与修复。'}
+          {info.notes ? info.notes.slice(0, 80) : t('update.defaultNotes')}
         </span>
       )}
 
@@ -183,7 +185,7 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
           disabled={installing}
           onClick={install}
         >
-          {installing ? '正在启动安装器…' : '安装更新'}
+          {installing ? t('update.installing') : t('update.install')}
         </button>
       )}
 
@@ -196,7 +198,7 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
             if (s) setDl(s);
           }}
         >
-          重试
+          {t('update.retry')}
         </button>
       )}
 
@@ -206,7 +208,7 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
           style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
           onClick={() => openExternal(info.url!).catch(() => {})}
         >
-          前往下载
+          {t('update.goDownload')}
         </button>
       )}
 
@@ -214,8 +216,8 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
       {phase !== 'downloading' && (
         <button
           className="btn-ghost"
-          title="关闭(本版本不再提示)"
-          aria-label="关闭更新提示"
+          title={t('update.dismissTip')}
+          aria-label={t('update.dismissAria')}
           onClick={dismiss}
           style={{ width: 26, height: 26, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
         >
