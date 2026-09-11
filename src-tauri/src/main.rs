@@ -43,6 +43,15 @@ fn main() {
             let quit_item = MenuItem::with_id(app, "tray-quit", "退出 MR·SLIY", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
+            // 兜底显示窗口：窗口配置为 visible:false,正常由前端启动画面结束后 show();
+            // 若前端异常(脚本错误/资源加载失败)导致永远不 show,8s 后在此强制显示,
+            // 宁可让用户看到空白页也不能看起来"双击没反应"
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(8));
+                show_main_window(&handle);
+            });
+
             TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().expect("no window icon").clone())
                 .tooltip("MR·SLIY 代码优化智能体 · 后台运行中")

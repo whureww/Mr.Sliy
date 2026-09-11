@@ -91,9 +91,33 @@ export default function App() {
         const app = normalizeAppearance(null);
         setAppearance(app);
         applyAppearance(app);
+      } finally {
+        // 外观流程无论成败都算就绪；reveal 内部还有最短展示时长门控
+        appReady.current = true;
+        reveal();
       }
     })();
   }, []);
+
+  // 启动画面最短展示 1.9s,保证入场动画完整;时长满足后尝试收场
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      minTimeDone.current = true;
+      reveal();
+    }, 1900);
+    return () => clearTimeout(timer);
+  }, [reveal]);
+
+  // 兜底:任何环节(状态读取/外观应用)异常挂起时,6s 后强制收场并显示窗口,
+  // 避免程序卡死在启动动画(Rust 侧还有 8s 线程兜底,双保险)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      minTimeDone.current = true;
+      appReady.current = true;
+      reveal();
+    }, 6000);
+    return () => clearTimeout(timer);
+  }, [reveal]);
 
   const changeAppearance = (a: Appearance) => {
     setAppearance(a);
