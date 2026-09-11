@@ -101,6 +101,34 @@ export default function App() {
 
   // 启动画面最短展示 1.9s,保证入场动画完整;时长满足后尝试收场
   useEffect(() => {
+    // 白屏规避:部分显卡驱动 + WebView2 偶发"首帧不呈现"——页面已加载但合成器不刷新,
+    // 窗口持续白屏,任何尺寸变化会立即恢复。挂载后立即(及短间隔重复)做 1px 尺寸抖动,
+    // 强制合成器出帧,保证启动动画可见;此时尚在动画期,抖动视觉无感
+    if ('__TAURI_INTERNALS__' in window) {
+      const kick = async () => {
+        try {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          const { PhysicalSize } = await import('@tauri-apps/api/dpi');
+          const w = getCurrentWindow();
+          const sz = await w.innerSize();
+          await w.setSize(new PhysicalSize(sz.width + 1, sz.height));
+          setTimeout(() => {
+            w.setSize(new PhysicalSize(sz.width, sz.height)).catch(() => {});
+          }, 60);
+        } catch { /* 忽略:非 Tauri 环境 */ }
+      };
+      kick();
+      const t1 = setTimeout(kick, 700);
+      const t2 = setTimeout(kick, 1500);
+      return () => {
+        clearTimeout(t1);
+        clearTimeout(t2);
+      };
+    }
+  }, []);
+
+  // 启动画面最短展示定时器
+  useEffect(() => {
     const timer = setTimeout(() => {
       minTimeDone.current = true;
       reveal();

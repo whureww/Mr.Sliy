@@ -11,10 +11,19 @@ export default function StatusBar() {
   const [usage, setUsage] = useState<LlmUsagePayload | null>(null);
 
   useEffect(() => {
-    const check = () => health().then(() => setOk(true)).catch(() => setOk(false));
+    let timer: ReturnType<typeof setInterval> | null = null;
+    // 快轮询:sidecar 异步启动(健康检查在后台线程),就绪前每 2s 重试;就绪后转 15s 常规轮询
+    const check = () =>
+      health()
+        .then(() => {
+          setOk(true);
+          if (timer) clearInterval(timer);
+          timer = setInterval(() => health().then(() => setOk(true)).catch(() => setOk(false)), 15000);
+        })
+        .catch(() => setOk(false));
     check();
-    const timer = setInterval(check, 15000);
-    return () => clearInterval(timer);
+    timer = setInterval(check, 2000);
+    return () => { if (timer) clearInterval(timer); };
   }, []);
 
   // 大模型用量轮询（5s），未启用云端提供商时保持 null

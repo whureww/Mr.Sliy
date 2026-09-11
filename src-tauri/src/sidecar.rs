@@ -5,16 +5,26 @@ use std::net::{TcpListener, TcpStream};
 use std::os::windows::process::CommandExt;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// sidecar 端口共享状态：0 = 尚未就绪（前端轮询 sidecar_port 直到非 0）
 pub struct SidecarState {
-    pub port: u16,
+    pub port: AtomicU16,
+}
+
+impl SidecarState {
+    pub fn port(&self) -> u16 {
+        self.port.load(Ordering::Relaxed)
+    }
 }
 
 /// 启动 sidecar（dev: 系统 node + 项目根 sidecar.js；release: 资源目录）
+/// 只负责拉起进程并立即返回端口;健康检查由调用方后台线程执行,
+/// 严禁在 Tauri 主线程同步等待——会冻结消息泵,WebView2 首帧无法呈现(白屏)。
 pub fn spawn_sidecar(app: &tauri::AppHandle) -> Result<u16, String> {
     let port = pick_free_port().ok_or("no free port available")?;
     let script = resolve_script(app)?;
@@ -38,8 +48,12 @@ pub fn spawn_sidecar(app: &tauri::AppHandle) -> Result<u16, String> {
         .spawn()
         .map_err(|e| format!("spawn node failed: {e}"))?;
 
-    wait_for_health(port, Duration::from_secs(25))?;
     Ok(port)
+}
+
+/// 阻塞等待 sidecar 健康检查通过（仅供后台线程调用）
+pub fn wait_until_healthy(port: u16, timeout: Duration) -> Result<(), String> {
+    wait_for_health(port, timeout)
 }
 
 fn resolve_script(app: &tauri::AppHandle) -> Result<PathBuf, String> {

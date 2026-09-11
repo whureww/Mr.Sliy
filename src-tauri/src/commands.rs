@@ -1,4 +1,4 @@
-//! Tauri IPC 命令：原生文件操作 + 转发到 Node sidecar 的 REST API。
+﻿//! Tauri IPC 命令：原生文件操作 + 转发到 Node sidecar 的 REST API。
 
 use crate::sidecar::SidecarState;
 use serde::Serialize;
@@ -41,12 +41,12 @@ fn post_json(port: u16, path: &str, body: serde_json::Value) -> Result<serde_jso
 
 #[tauri::command]
 pub fn sidecar_health(state: State<SidecarState>) -> Result<serde_json::Value, String> {
-    get_json(state.port, "/health")
+    get_json(state.port(), "/health")
 }
 
 #[tauri::command]
 pub fn sidecar_port(state: State<SidecarState>) -> u16 {
-    state.port
+    state.port()
 }
 
 // ---------- 窗口生命周期（关闭确认对话框选项） ----------
@@ -184,7 +184,7 @@ pub fn analyze_file(
     sourceCode: String,
 ) -> Result<serde_json::Value, String> {
     post_json(
-        state.port,
+        state.port(),
         "/api/scan/file",
         json!({ "filePath": filePath, "sourceCode": sourceCode }),
     )
@@ -200,7 +200,7 @@ pub fn optimize_issue(
     message: Option<String>,
 ) -> Result<serde_json::Value, String> {
     post_json(
-        state.port,
+        state.port(),
         "/api/ai/optimize",
         json!({
             "code": code,
@@ -214,5 +214,5 @@ pub fn optimize_issue(
 
 #[tauri::command]
 pub fn issue_stats(state: State<SidecarState>) -> Result<serde_json::Value, String> {
-    get_json(state.port, "/api/issues/stats")
+    get_json(state.port(), "/api/issues/stats")
 }

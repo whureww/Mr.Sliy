@@ -26,16 +26,26 @@ fn main() {
         }))
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
-            match sidecar::spawn_sidecar(app.handle()) {
-                Ok(port) => {
-                    eprintln!("[sidecar] ready on 127.0.0.1:{port}");
-                    app.manage(SidecarState { port });
-                }
-                Err(e) => {
-                    eprintln!("[sidecar] spawn failed: {e}");
-                    // 端口置 0：窗口仍可启动，前端显示"服务未就绪"
-                    app.manage(SidecarState { port: 0 });
-                }
+            // 先占位 port=0（前端轮询直到非 0）,再由后台线程拉起 sidecar 并等待健康检查。
+            // 必须异步:同步 wait_for_health 会阻塞 Tauri 主线程消息泵 1~3s,
+            // WebView2 首帧无法呈现 → 启动白屏、splash 动画被吃掉。
+            app.manage(SidecarState { port: std::sync::atomic::AtomicU16::new(0) });
+            {
+                let handle_sidecar = app.handle().clone();
+                std::thread::spawn(move || match sidecar::spawn_sidecar(&handle_sidecar) {
+                    Ok(port) => {
+                        match sidecar::wait_until_healthy(port, std::time::Duration::from_secs(25)) {
+                            Ok(()) => {
+                                if let Some(st) = handle_sidecar.try_state::<SidecarState>() {
+                                    st.port.store(port, std::sync::atomic::Ordering::Relaxed);
+                                }
+                                eprintln!("[sidecar] ready on 127.0.0.1:{port}");
+                            }
+                            Err(e) => eprintln!("[sidecar] health check failed: {e}"),
+                        }
+                    }
+                    Err(e) => eprintln!("[sidecar] spawn failed: {e}"),
+                });
             }
 
             // 系统托盘：最小化到托盘后程序仍后台运行，从托盘可随时唤回
@@ -43,13 +53,31 @@ fn main() {
             let quit_item = MenuItem::with_id(app, "tray-quit", "退出 MR·SLIY", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
 
-            // 兜底显示窗口：窗口配置为 visible:false,正常由前端启动画面结束后 show();
-            // 若前端异常(脚本错误/资源加载失败)导致永远不 show,8s 后在此强制显示,
-            // 宁可让用户看到空白页也不能看起来"双击没反应"
+            // 兜底显示窗口：若前端异常(脚本错误/资源加载失败)导致窗口未显示,
+            // 8s 后在此强制显示,宁可让用户看到空白页也不能看起来"双击没反应"
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 std::thread::sleep(std::time::Duration::from_secs(8));
                 show_main_window(&handle);
+            });
+
+            // 白屏规避:AMD 等部分显卡驱动 + WebView2 会偶发"首帧不呈现"——页面早已加载完,
+            // 但合成器不刷新,窗口持续白屏,任何窗口尺寸变化都会立即恢复。
+            // 启动后前 2.7 秒做几次 1px 尺寸抖动强制合成器出帧(视觉无感),
+            // 该时段恰为启动动画展示期,必须保证可见。
+            let handle_nudge = app.handle().clone();
+            std::thread::spawn(move || {
+                for interval_ms in [250u64, 800, 800, 800] {
+                    std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+                    if let Some(w) = handle_nudge.get_webview_window("main") {
+                        if let Ok(sz) = w.inner_size() {
+                            let bumped = tauri::PhysicalSize::new(sz.width + 1, sz.height + 1);
+                            let _ = w.set_size(bumped);
+                            std::thread::sleep(std::time::Duration::from_millis(60));
+                            let _ = w.set_size(sz);
+                        }
+                    }
+                }
             });
 
             TrayIconBuilder::with_id("main-tray")
