@@ -104,6 +104,8 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   // 安装包下载状态(与顶部横幅共享后端状态)
   const [dlState, setDlState] = useState<DownloadState | null>(null);
   const [installing, setInstalling] = useState(false);
+  // 高级选项:自定义更新源清单(默认收起,零配置使用 GitHub Releases)
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   const [mcp, setMcp] = useState<McpStatus | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -569,28 +571,41 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
         </div>
       </section>
 
-      {/* 检查更新：远程版本比对 */}
+      {/* 检查更新：自动对比 GitHub Releases 版本 */}
       <section className="card" style={{ padding: 18 }}>
         <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>检查更新</div>
         <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>
           当前版本 {checkResult?.currentVersion || currentVersion || updateInfo?.currentVersion || ''}
-          （配置更新源后，启动时会自动检查并在顶部提示新版本）
+          (自动与 GitHub Releases 最新版本比对,发现新版本可一键下载安装,无需配置)
         </div>
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <input
-            value={sourceUrl}
-            onChange={(e) => setSourceUrl(e.target.value)}
-            placeholder="更新源地址（JSON 清单 URL，如 https://example.com/latest.json）"
-            style={{ flex: 1, border: '1px solid var(--border-hairline)', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, outline: 'none', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
-          />
-          <button className="btn-ghost" style={{ fontSize: 12.5, flexShrink: 0 }} onClick={submitSource}>
-            保存
-          </button>
-          <button className="btn-primary" style={{ fontSize: 12.5, flexShrink: 0 }} disabled={checkState === 'checking'} onClick={doCheckUpdate}>
+          <button className="btn-primary" style={{ fontSize: 12.5 }} disabled={checkState === 'checking'} onClick={doCheckUpdate}>
             {checkState === 'checking' ? '检查中…' : '检查更新'}
           </button>
+          <button className="btn-ghost" style={{ fontSize: 12.5 }} onClick={() => setShowAdvanced((v) => !v)}>
+            {showAdvanced ? '收起高级选项' : '高级选项'}
+          </button>
         </div>
+
+        {showAdvanced && (
+          <div style={{ marginTop: 10 }}>
+            <div className="muted" style={{ fontSize: 11.5, marginBottom: 6 }}>
+              高级:自定义更新源清单 URL(默认无需配置,仅在使用自托管清单时填写)
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+                placeholder="JSON 清单 URL(留空使用 GitHub Releases)"
+                style={{ flex: 1, border: '1px solid var(--border-hairline)', borderRadius: 9, padding: '7px 11px', fontSize: 12.5, outline: 'none', background: 'var(--bg-card)', color: 'var(--text-primary)' }}
+              />
+              <button className="btn-ghost" style={{ fontSize: 12.5, flexShrink: 0 }} onClick={submitSource}>
+                保存
+              </button>
+            </div>
+          </div>
+        )}
 
         {checkState === 'done' && checkResult && (
           <div

@@ -109,37 +109,68 @@ async function resolveGithubReleaseAsset() {
 
 /**
  * 执行一次远程检查。
+ * 默认直接对比 GitHub Releases 最新版本与本程序版本（无需用户配置任何地址），
+ * 资产名匹配 MRSLIY-Setup-*.exe 即为安装包直链。
+ * 仍支持高级用法：配置了更新源清单 URL 时以清单为准（version/notes/download 字段）。
  * 返回 { checked, currentVersion, latestVersion?, updateAvailable?, notes?, url?, download?, reason? }
- * download 为安装包直链（优先取清单 download 字段，否则从 GitHub Releases 解析），为空时前端回退打开下载页。
  */
 async function checkRemoteUpdate() {
   const currentVersion = pkg.version;
   const manifestUrl = getUpdateSourceUrl();
-  if (!manifestUrl) {
-    return { checked: false, currentVersion, reason: '尚未配置更新源地址' };
+
+  // 高级模式：用户配置了清单地址,以清单为准
+  if (manifestUrl) {
+    try {
+      const manifest = await fetchJson(manifestUrl);
+      const latestVersion = String((manifest && manifest.version) || '').trim();
+      if (!/^\d+(\.\d+){1,3}/.test(latestVersion)) {
+        return { checked: false, currentVersion, reason: '清单中的版本号无效' };
+      }
+      const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
+      let download = String((manifest && manifest.download) || '');
+      if (updateAvailable && !/^https:\/\//i.test(download)) {
+        download = await resolveGithubReleaseAsset();
+      }
+      return {
+        checked: true,
+        currentVersion,
+        latestVersion,
+        updateAvailable,
+        notes: String((manifest && manifest.notes) || ''),
+        url: String((manifest && manifest.url) || ''),
+        download: /^https:\/\//i.test(download) ? download : ''
+      };
+    } catch (e) {
+      return { checked: false, currentVersion, reason: `无法连接更新源（${e.message}）` };
+    }
   }
+
+  // 默认模式:直接读 GitHub Releases,零配置
   try {
-    const manifest = await fetchJson(manifestUrl);
-    const latestVersion = String((manifest && manifest.version) || '').trim();
+    const release = await fetchJson(GITHUB_LATEST_API);
+    const latestVersion = String((release && release.tag_name) || '').replace(/^v/i, '').trim();
     if (!/^\d+(\.\d+){1,3}/.test(latestVersion)) {
-      return { checked: false, currentVersion, reason: '清单中的版本号无效' };
+      return { checked: false, currentVersion, reason: 'GitHub Releases 版本号无效' };
     }
     const updateAvailable = compareVersions(latestVersion, currentVersion) > 0;
-    let download = String((manifest && manifest.download) || '');
-    if (updateAvailable && !/^https:\/\//i.test(download)) {
-      download = await resolveGithubReleaseAsset();
+    let download = '';
+    if (updateAvailable) {
+      const assets = Array.isArray(release.assets) ? release.assets : [];
+      const hit = assets.find((a) => INSTALLER_ASSET_RE.test(String(a.name || '')));
+      const url = String((hit && hit.browser_download_url) || '');
+      download = /^https:\/\//i.test(url) ? url : '';
     }
     return {
       checked: true,
       currentVersion,
       latestVersion,
       updateAvailable,
-      notes: String((manifest && manifest.notes) || ''),
-      url: String((manifest && manifest.url) || ''),
-      download: /^https:\/\//i.test(download) ? download : ''
+      notes: String((release && release.body) || '').slice(0, 200),
+      url: String((release && release.html_url) || ''),
+      download
     };
   } catch (e) {
-    return { checked: false, currentVersion, reason: `无法连接更新源（${e.message}）` };
+    return { checked: false, currentVersion, reason: `无法连接 GitHub（${e.message}）` };
   }
 }
 
