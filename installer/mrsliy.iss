@@ -45,7 +45,7 @@ Source: "{#ProjRoot}\.env.example"; DestDir: "{app}"; Flags: ignoreversion skipi
 Source: "{#ProjRoot}\README.md"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 Source: "{#ProjRoot}\src\*"; DestDir: "{app}\src"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#ProjRoot}\database\*"; DestDir: "{app}\database"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist; Excludes: "*.db,*.db-shm,*.db-wal"
-Source: "{#ProjRoot}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules;node_modules\*;package.json;package-lock.json"
+Source: "{#ProjRoot}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "node_modules,node_modules\*,package.json,package-lock.json"
 ; 生产依赖（含 tree-sitter wasm 与原生模块，与内置 node ABI 匹配）
 Source: "{#ProjRoot}\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
 
