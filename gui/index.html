@@ -4,6 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>MR·SLIY 代码优化智能体</title>
+  <script>
+    // 防白闪：首帧前同步恢复日/夜模式（appearance.ts 每次应用时镜像到 localStorage）
+    try {
+      if (localStorage.getItem('mrsliy.mode') === 'dark') document.documentElement.setAttribute('data-mode', 'dark');
+    } catch (e) { /* 忽略 */ }
+  </script>
+  <style>
+    html { background: #F6F6F4; }
+    html[data-mode='dark'] { background: #161513; }
+  </style>
 </head>
 <body>
   <div id="root"></div>

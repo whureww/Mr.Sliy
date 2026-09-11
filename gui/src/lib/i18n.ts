@@ -555,6 +555,19 @@ const DICT: Record<string, Entry> = {
     en: 'Auto: night mode from 18:00 to 7:00, day mode otherwise'
   },
 
+  // ---------- 通用：折叠 / 展开 ----------
+  'common.collapse': { zh: '收起', en: 'Collapse' },
+  'common.expand': { zh: '展开', en: 'Expand' },
+  'llm.activeSummary': { zh: '当前使用：{name}', en: 'In use: {name}' },
+  'llm.count': { zh: '{n} 个提供商', en: '{n} providers' },
+  'updates.latest': { zh: '最新：{content}', en: 'Latest: {content}' },
+
+  // ---------- 启动画面 ----------
+  'splash.tagline': { zh: '代码优化智能体', en: 'Code Optimization Agent' },
+  'splash.boot.init': { zh: '正在初始化引擎…', en: 'Initializing engine…' },
+  'splash.boot.services': { zh: '正在启动后台服务…', en: 'Starting background services…' },
+  'splash.boot.ready': { zh: '即将就绪', en: 'Almost ready' },
+
   // ---------- 通用错误兜底 ----------
   'err.requestFailed': { zh: '请求失败', en: 'Request failed' },
   'err.desktopOnlyInstall': { zh: '仅桌面端支持一键安装', en: 'One-click install is desktop-only' },

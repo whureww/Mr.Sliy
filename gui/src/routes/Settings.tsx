@@ -29,7 +29,7 @@ import {
   saveUpdateSource,
   startUpdateDownload
 } from '../ipc/client';
-import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, paletteOf } from '../lib/appearance';
+import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, paletteOf, themeOf } from '../lib/appearance';
 import { Lang, setLang, t, useLang } from '../lib/i18n';
 
 interface Props {
@@ -81,6 +81,20 @@ const UPDATE_STATUS_STYLE: Record<string, { color: string; mixKey: 'success' | '
   running: { color: 'var(--warning-text)', mixKey: 'warning' }
 };
 
+/** 折叠箭头按钮（旋转指示展开方向） */
+function CollapseToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      className="btn-ghost"
+      style={{ fontSize: 12, padding: '4px 11px', flexShrink: 0, fontFamily: 'var(--font-mono)' }}
+      onClick={onClick}
+      title={open ? t('common.collapse') : t('common.expand')}
+    >
+      {open ? '▾' : '▸'}
+    </button>
+  );
+}
+
 export default function Settings({ mode, onModeChange, appearance, onAppearanceChange, updateInfo, onUpdateInfoChange }: Props) {
   const lang = useLang();
   // auto 日夜跨越阈值时强制刷新（主题预览色跟随实际生效变体）
@@ -120,6 +134,10 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   const [installing, setInstalling] = useState(false);
   // 高级选项:自定义更新源清单(默认收起,零配置使用 GitHub Releases)
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // 折叠区:主题网格 / 大模型提供商列表 / 更新记录(默认收起,减少页面长度)
+  const [themeOpen, setThemeOpen] = useState(false);
+  const [providersOpen, setProvidersOpen] = useState(false);
+  const [updatesOpen, setUpdatesOpen] = useState(false);
 
   const [mcp, setMcp] = useState<McpStatus | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -420,21 +438,31 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
 
       {/* 大模型提供商 */}
       <section className="card" style={{ padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <div style={{ fontWeight: 650, fontSize: 14 }}>{t('settings.llm.title')}</div>
-          <div className="muted" style={{ fontSize: 12 }}>{t('settings.llm.hint')}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ fontWeight: 650, fontSize: 14, flexShrink: 0 }}>{t('settings.llm.title')}</div>
+          {providersOpen && <div className="muted" style={{ fontSize: 12 }}>{t('settings.llm.hint')}</div>}
+          {!providersOpen && payload && (
+            <span className="muted" style={{ fontSize: 11.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {payload.active
+                ? t('llm.activeSummary', { name: providerLabel(payload.active) })
+                : t('llm.count', { n: payload.providers.length })}
+            </span>
+          )}
           <div style={{ flex: 1 }} />
           <button
             className="btn-ghost"
             style={{ fontSize: 12, padding: '5px 12px' }}
-            onClick={() => setCustomOpen((v) => !v)}
+            onClick={() => { setProvidersOpen(true); setCustomOpen((v) => !v); }}
             title={t('llm.custom.tip')}
           >
             {t('llm.custom')}
           </button>
           <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }} onClick={() => refresh()}>{t('llm.refresh')}</button>
+          <CollapseToggle open={providersOpen} onClick={() => setProvidersOpen((v) => !v)} />
         </div>
 
+        {providersOpen && (
+        <>
         {customOpen && (
           <div style={{ marginTop: 12, padding: 14, border: '1px dashed var(--border-hairline)', borderRadius: 12, background: 'var(--bg-recessed)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ fontSize: 12.5, fontWeight: 650 }}>{t('llm.custom.title')}</div>
@@ -534,6 +562,8 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
           })}
           {!payload && <div className="muted" style={{ fontSize: 13 }}>{t('common.loading')}</div>}
         </div>
+        </>
+        )}
       </section>
 
       {/* 记忆库：跨会话记忆管理 */}
@@ -689,9 +719,21 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
 
       {/* 更新记录：自更新/自修复历史 */}
       <section className="card" style={{ padding: 18 }}>
-        <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>{t('settings.updates.title')}</div>
-        <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{t('settings.updates.desc')}</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <div style={{ flexShrink: 0 }}>
+            <div style={{ fontWeight: 650, fontSize: 14 }}>{t('settings.updates.title')}</div>
+            <div className="muted" style={{ fontSize: 12 }}>{t('settings.updates.desc')}</div>
+          </div>
+          {!updatesOpen && updates && updates.length > 0 && (
+            <span className="muted" style={{ fontSize: 11.5, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={updates[0].updateContent || ''}>
+              {t('updates.latest', { content: updates[0].updateContent || '—' })}
+            </span>
+          )}
+          <div style={{ flex: 1 }} />
+          <CollapseToggle open={updatesOpen} onClick={() => setUpdatesOpen((v) => !v)} />
+        </div>
+        {updatesOpen && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
           {updates === null && <div className="muted" style={{ fontSize: 12.5 }}>{t('updates.loadFail')}</div>}
           {updates?.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>{t('updates.empty')}</div>}
           {updates?.map((u, i) => {
@@ -716,6 +758,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             );
           })}
         </div>
+        )}
       </section>
 
       {/* MCP 接入：让外部程序通过 Model Context Protocol 调用智能体 */}
@@ -821,7 +864,18 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
         )}
         <div style={{ height: 14 }} />
 
-        <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>{t('appearance.theme')}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ fontSize: 12.5, fontWeight: 650 }}>{t('appearance.theme')}</div>
+          {!themeOpen && (
+            <>
+              <span style={{ width: 11, height: 11, borderRadius: 3, background: 'var(--accent)', flexShrink: 0 }} />
+              <span className="muted" style={{ fontSize: 11.5 }}>{t(themeOf(appearance?.theme ?? 'amber').name)}</span>
+            </>
+          )}
+          <div style={{ flex: 1 }} />
+          <CollapseToggle open={themeOpen} onClick={() => setThemeOpen((v) => !v)} />
+        </div>
+        {themeOpen && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
           {THEMES.map((th) => {
             const active = appearance?.theme === th.key;
@@ -863,6 +917,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
             );
           })}
         </div>
+        )}
 
         <div style={{ fontSize: 12.5, fontWeight: 650, marginBottom: 8 }}>{t('appearance.scale')}</div>
         <div style={{ display: 'flex', gap: 8 }}>

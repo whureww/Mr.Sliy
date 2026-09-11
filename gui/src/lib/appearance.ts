@@ -133,6 +133,8 @@ function applyInternal(a: Appearance) {
   const tx = dark ? TEXT.dark : TEXT.light;
 
   root.setAttribute('data-mode', dark ? 'dark' : 'light');
+  // 镜像到 localStorage，供 index.html 首帧前同步恢复日/夜（防白闪）
+  try { localStorage.setItem('mrsliy.mode', dark ? 'dark' : 'light'); } catch { /* 忽略 */ }
   root.style.setProperty('--accent', c.accent);
   root.style.setProperty('--accent-tint', c.accentTint);
   root.style.setProperty('--accent-hover', c.accentHover);

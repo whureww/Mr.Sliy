@@ -28,6 +28,7 @@ data/
 .vscode/
 .idea/
 *.swp
+.trae/
 *.swo
 *~
 

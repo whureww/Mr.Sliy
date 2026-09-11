@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { TabKey, WorkbenchMode } from '../../App';
 import { WindowControls } from './WindowControls';
 import { t, useLang } from '../../lib/i18n';
+import logoUrl from '../../assets/logo.svg';
 
 interface Props {
   tab: TabKey;
@@ -53,19 +54,12 @@ export default function TopBar({ tab, onTabChange, mode, onModeChange }: Props) 
       }}
     >
       <div data-tauri-drag-region style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-        <div
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: 5,
-            background: 'var(--accent)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-        >
-          <div style={{ width: 7, height: 7, borderRadius: 2, background: '#FFFFFF' }} />
-        </div>
+        <img
+          src={logoUrl}
+          alt="MR·SLIY"
+          draggable={false}
+          style={{ width: 22, height: 22, borderRadius: 6, display: 'block' }}
+        />
         <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: 0.5 }}>MR·SLIY</span>
       </div>
       <nav data-tauri-drag-region style={{ display: 'flex', gap: 4 }}>

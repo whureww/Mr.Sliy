@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import TopBar from './components/common/TopBar';
 import StatusBar from './components/common/StatusBar';
 import ContextMenuLayer from './components/common/ContextMenuLayer';
 import CloseDialog, { CloseDialogGate } from './components/common/CloseDialog';
+import Splash from './components/common/Splash';
 import UpdateBanner from './components/common/UpdateBanner';
 import Workbench from './routes/Workbench';
 import DiffReview from './routes/DiffReview';
@@ -30,6 +31,28 @@ export default function App() {
   const [appearance, setAppearance] = useState<Appearance | null>(null);
   const [closeDialog, setCloseDialog] = useState(false);
   const [updateInfo, setUpdateInfo] = useState<CheckUpdatePayload | null>(null);
+  // 启动画面：on(展示) → exit(淡出并显示主窗口) → off(卸载)
+  const [splash, setSplash] = useState<'on' | 'exit' | 'off'>('on');
+  const splashPhase = useRef<'on' | 'exit' | 'off'>('on');
+  const minTimeDone = useRef(false);
+  const appReady = useRef(false);
+
+  /** 条件满足(最短展示时长 + 外观已应用)后收场：淡出 splash，同时让主窗口可见 */
+  const reveal = useCallback(() => {
+    if (!minTimeDone.current || !appReady.current || splashPhase.current !== 'on') return;
+    splashPhase.current = 'exit';
+    setSplash('exit');
+    setTimeout(async () => {
+      try {
+        if ('__TAURI_INTERNALS__' in window) {
+          const { getCurrentWindow } = await import('@tauri-apps/api/window');
+          await getCurrentWindow().show();
+        }
+      } catch { /* 忽略：非 Tauri 环境 */ }
+      splashPhase.current = 'off';
+      setSplash('off');
+    }, 520);
+  }, []);
 
   // Rust 拦截窗口关闭（自绘按钮 / Alt+F4 / 任务栏）后转发到前端，弹关闭确认对话框
   useEffect(() => {
@@ -146,6 +169,8 @@ export default function App() {
       <ContextMenuLayer />
       {/* 关闭确认：最小化到托盘（后台运行）/ 退出程序 */}
       <CloseDialogGate open={closeDialog} onClose={() => setCloseDialog(false)} />
+      {/* 启动画面：覆盖首帧到服务就绪，淡出后卸载 */}
+      {splash !== 'off' && <Splash exiting={splash === 'exit'} />}
     </div>
   );
 }
