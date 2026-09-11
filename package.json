@@ -26,6 +26,8 @@
     "dev": "nodemon src/agent.js",
     "test": "jest",
     "test:coverage": "jest --coverage",
+    "bump": "node scripts/bump-version.js",
+    "bump:gui": "node scripts/bump-version.js gui",
     "lint": "eslint src/",
     "init": "node database/init.js",
     "seed": "node database/seed.js",

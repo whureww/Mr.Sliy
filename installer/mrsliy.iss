@@ -3,7 +3,7 @@
 
 #define MyAppName "MR·SLIY 代码优化智能体"
 #define MyAppExeName "mrsliy-desktop.exe"
-#define MyAppVersion "3.15.2"
+#define MyAppVersion "0.0.1"
 #define ProjRoot "d:\Final\final"
 
 [Setup]

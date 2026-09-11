@@ -1,7 +1,7 @@
 {
   "name": "mrsliy-gui",
   "private": true,
-  "version": "3.8.6",
+  "version": "0.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

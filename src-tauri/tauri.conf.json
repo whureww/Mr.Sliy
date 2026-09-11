@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "MRSLIY Code Optimizer",
-  "version": "3.16.0",
+  "version": "0.0.1",
   "identifier": "com.mrsliy.optimizer",
   "build": {
     "beforeDevCommand": "npm run dev --prefix gui",
@@ -28,7 +28,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "icon": ["icons/icon.ico"]
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons/icon.ico"
+    ]
   }
 }
