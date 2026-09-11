@@ -3,7 +3,7 @@
 
 #define MyAppName "MR·SLIY 代码优化智能体"
 #define MyAppExeName "mrsliy-desktop.exe"
-#define MyAppVersion "0.1.1"
+#define MyAppVersion "0.1.2"
 #define ProjRoot "d:\Final\final"
 
 [Setup]
@@ -50,9 +50,11 @@ Source: "{#ProjRoot}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion 
 Source: "{#ProjRoot}\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\mrsliy.ico"
-Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"; IconFilename: "{app}\mrsliy.ico"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\mrsliy.ico"; Tasks: desktopicon
+; 图标直接取 exe 内嵌资源(exe 已打包 icon.ico);此前引用 {app}\mrsliy.ico
+; 但该文件从未随 [Files] 安装,导致快捷方式显示未知图标
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
+Name: "{group}\卸载 {#MyAppName}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "立即运行 {#MyAppName}"; Flags: nowait postinstall skipifsilent

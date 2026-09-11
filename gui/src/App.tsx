@@ -9,7 +9,7 @@ import Workbench from './routes/Workbench';
 import DiffReview from './routes/DiffReview';
 import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
-import { AnalysisMode, CheckUpdatePayload, OptimizeResult, checkForUpdate, getUpdateDownloadStatus, loadState, saveState } from './ipc/client';
+import { AnalysisMode, APP_VERSION, CheckUpdatePayload, OptimizeResult, checkForUpdate, getUpdateDownloadStatus, loadState, saveState } from './ipc/client';
 import { Appearance, applyAppearance, normalizeAppearance } from './lib/appearance';
 
 export type TabKey = 'workbench' | 'diff' | 'dashboard' | 'settings';
@@ -158,13 +158,24 @@ export default function App() {
   useEffect(() => {
     if (!('__TAURI_INTERNALS__' in window)) return;
     let cancelled = false;
+    // 语义化版本比较:恢复扫描到的安装包必须比当前版本新才提示,
+    // 否则覆盖安装同版本后每次启动都会再次唤起安装程序
+    const isNewer = (a: string, b: string) => {
+      const pa = a.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+      const pb = b.replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+        const d = (pa[i] || 0) - (pb[i] || 0);
+        if (d !== 0) return d > 0;
+      }
+      return false;
+    };
     const timer = setTimeout(async () => {
       const st = await getUpdateDownloadStatus().catch(() => null);
       if (cancelled) return;
-      if (st?.status === 'done') {
+      if (st?.status === 'done' && isNewer(st.version || '', APP_VERSION)) {
         setUpdateInfo({
           checked: true,
-          currentVersion: '',
+          currentVersion: APP_VERSION,
           latestVersion: st.version || '',
           updateAvailable: true,
           notes: ''
