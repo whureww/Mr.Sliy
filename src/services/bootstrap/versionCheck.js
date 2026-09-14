@@ -41,8 +41,8 @@ function saveUpdateSourceUrl(url) {
   return t;
 }
 
-/** 以 HTTP GET 拉取 JSON（最长等待 REQUEST_TIMEOUT） */
-function fetchJson(target, timeoutMs = REQUEST_TIMEOUT) {
+/** 以 HTTP GET 拉取 JSON（最长等待 REQUEST_TIMEOUT;跟随 301/302/307/308 重定向,最多 5 跳） */
+function fetchJson(target, timeoutMs = REQUEST_TIMEOUT, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     let settled = false;
     const done = (fn, val) => {
@@ -56,6 +56,15 @@ function fetchJson(target, timeoutMs = REQUEST_TIMEOUT) {
         target,
         { headers: { 'User-Agent': 'MRSliy-Desktop-Updater' } },
         (res) => {
+          // 仓库迁移/地址变更时 GitHub 会 301(如 Mr.Sliy → Mr.Sliy--AI_Agent),
+          // Node 原生请求不自动跟随,必须手动重发到 Location,否则永远 "HTTP 301"
+          if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
+            res.resume();
+            if (maxRedirects <= 0) return done(reject, new Error('重定向次数过多'));
+            const next = new URL(res.headers.location, target).toString();
+            if (!/^https?:\/\//i.test(next)) return done(reject, new Error(`非法重定向地址: ${next}`));
+            return done(resolve, fetchJson(next, timeoutMs, maxRedirects - 1));
+          }
           if (res.statusCode !== 200) {
             res.resume();
             return done(reject, new Error(`HTTP ${res.statusCode}`));
@@ -91,7 +100,8 @@ function compareVersions(a, b) {
   return 0;
 }
 
-const GITHUB_LATEST_API = 'https://api.github.com/repos/whureww/Mr.Sliy/releases/latest';
+// 仓库已迁移至 Mr.Sliy--AI_Agent(旧名 Mr.Sliy 会 301;fetchJson 现可跟随重定向,双保险)
+const GITHUB_LATEST_API = 'https://api.github.com/repos/whureww/Mr.Sliy--AI_Agent/releases/latest';
 const INSTALLER_ASSET_RE = /^MRSLIY-Setup-.*\.exe$/i;
 
 /** 从资产对象提取安装包信息:{ url, digest, size };无资产返回空对象 */
