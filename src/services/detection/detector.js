@@ -854,10 +854,12 @@ function detectMissingComments(tree, sourceCode, filePath) {
 async function batchDetect(filePaths, options = {}) {
   const results = [];
   const startTime = Date.now();
-  
+  let totalLines = 0; // 成功读取文件的累计行数,供项目规模(质量评分分母)使用
+
   for (const filePath of filePaths) {
     try {
       const sourceCode = require('fs').readFileSync(filePath, 'utf-8');
+      totalLines += sourceCode.split('\n').length;
       const result = await detectIssues(sourceCode, filePath, options);
       results.push(result);
     } catch (error) {
@@ -869,13 +871,14 @@ async function batchDetect(filePaths, options = {}) {
       });
     }
   }
-  
+
   return {
     success: true,
     totalFiles: filePaths.length,
     scannedFiles: results.filter(r => r.success).length,
     failedFiles: results.filter(r => !r.success).length,
     totalIssues: results.reduce((sum, r) => sum + (r.totalIssues || 0), 0),
+    totalLines,
     results,
     durationMs: Date.now() - startTime
   };

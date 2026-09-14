@@ -4,6 +4,7 @@ import {
   DownloadState,
   getUpdateDownloadStatus,
   startUpdateDownload,
+  cancelUpdateDownload,
   installUpdate,
   openExternal
 } from '../../ipc/client';
@@ -26,8 +27,8 @@ function fmtMB(n?: number): string {
 
 /**
  * 顶部更新提示条：发现新版本时显示。
- * 有安装包直链(info.download)时自动开始下载并显示进度;完成后一键启动安装器并退出应用。
- * 同一版本关闭后不再提示;下载中不可关闭(后台继续,重开或重启后由状态恢复)。
+ * 仅提示,不自动下载——用户点"下载"才开始;下载中显示进度并可取消;
+ * 完成后"安装"一键启动安装器并退出应用。同一版本关闭后不再提示。
  */
 export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePayload; onClose: () => void }) {
   useLang();
@@ -43,20 +44,15 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
     };
   }, []);
 
-  // 挂载/新版本时恢复下载状态;未开始且有直链则自动开始下载
+  // 挂载/新版本时恢复下载状态(仅恢复显示,绝不自动开始新下载)
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const st = await getUpdateDownloadStatus().catch(() => null);
       if (cancelled || !st) return;
-      if (st.status === 'downloading' || st.status === 'done') {
+      // 仅当任务属于当前提示的版本时才接管显示,避免旧版本残留状态串场
+      if ((st.status === 'downloading' || st.status === 'done') && (!st.version || st.version === info.latestVersion)) {
         setDl(st);
-        return;
-      }
-      // idle / error:有直链则(重新)开始下载
-      if (info.download && info.latestVersion) {
-        const s = await startUpdateDownload(info.download, info.latestVersion, info.digest).catch(() => null);
-        if (!cancelled && s) setDl(s);
       }
     })();
     return () => {
@@ -189,6 +185,35 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
         </button>
       )}
 
+      {/* 手动开始下载:仅空闲且未开始时显示(用户点"下载"才开始,不再自动下载) */}
+      {phase === 'idle' && info.download && (
+        <button
+          className="btn-primary"
+          style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
+          onClick={async () => {
+            const s = await startUpdateDownload(info.download!, info.latestVersion!, info.digest).catch(() => null);
+            if (s) setDl(s);
+          }}
+        >
+          {t('update.startDownload')}
+        </button>
+      )}
+
+      {/* 下载中:可取消(终止请求并复位状态) */}
+      {phase === 'downloading' && (
+        <button
+          className="btn-ghost"
+          style={{ fontSize: 12, padding: '4px 12px', flexShrink: 0 }}
+          onClick={async () => {
+            await cancelUpdateDownload().catch(() => {});
+            const st = await getUpdateDownloadStatus().catch(() => null);
+            setDl(st && st.status !== 'idle' ? st : null);
+          }}
+        >
+          {t('update.cancel')}
+        </button>
+      )}
+
       {phase === 'error' && info.download && (
         <button
           className="btn-primary"
@@ -223,20 +248,21 @@ export default function UpdateBanner({ info, onClose }: { info: CheckUpdatePaylo
         </button>
       )}
 
-      {/* 下载中不允许关闭,避免完成提示丢失 */}
-      {phase !== 'downloading' && (
-        <button
-          className="btn-ghost"
-          title={t('update.dismissTip')}
-          aria-label={t('update.dismissAria')}
-          onClick={dismiss}
-          style={{ width: 26, height: 26, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
-        >
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
-            <path d="M18 6 6 18M6 6l12 12" />
-          </svg>
-        </button>
-      )}
+      {/* 关闭:下载中点关闭视为放弃下载(先取消后台请求),其余状态直接收起 */}
+      <button
+        className="btn-ghost"
+        title={t('update.dismissTip')}
+        aria-label={t('update.dismissAria')}
+        onClick={() => {
+          if (phase === 'downloading') cancelUpdateDownload().catch(() => {});
+          dismiss();
+        }}
+        style={{ width: 26, height: 26, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+          <path d="M18 6 6 18M6 6l12 12" />
+        </svg>
+      </button>
     </div>
   );
 

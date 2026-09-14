@@ -91,6 +91,7 @@ function startDownload(url, version, digest) {
     filePath: finalPath,
     error: '',
     via: '',
+    aborted: false, // 用户主动取消标志:置位后 failover 直接返回,不再换源续传
     req: null
   };
   current = state;
@@ -141,8 +142,17 @@ function startDownload(url, version, digest) {
         /* ignore */
       }
       state.status = 'error';
-      state.error = errMsg || '下载失败';
-      logger.warn(`更新下载失败: ${state.error}`);
+      // 用户主动取消:状态归位 idle 语义(下次仍可重下),文案不吓人
+      if (state.aborted) {
+        state.status = 'idle';
+        state.error = '';
+        state.percent = 0;
+        state.received = 0;
+        logger.info('更新下载已取消,状态已复位');
+      } else {
+        state.error = errMsg || '下载失败';
+        logger.warn(`更新下载失败: ${state.error}`);
+      }
     }
     state.req = null;
   };
@@ -171,6 +181,9 @@ function startDownload(url, version, digest) {
   const request = (targetUrl, redirects, candidates) => {
     // 网络级失败后的回退入口:弹出下一个候选(直链 → 镜像1 → 镜像2)
     const failover = (reason) => {
+      // 用户主动取消后禁止 failover:req.destroy('已取消') 会触发 error 事件,
+      // 不加此守卫会静默切换下一源继续下载,表现为"取消不了"
+      if (state.aborted) return;
       const next = candidates.shift();
       if (next) {
         logger.warn(`下载源失败(${reason}),切换源: ${next.slice(0, 80)}...`);
@@ -326,7 +339,9 @@ function cancelDownload() {
   if (current && current.status === 'downloading' && current.req) {
     const req = current.req;
     current.req = null;
+    current.aborted = true; // 阻止 failover 把"取消"当成网络错误继续换源下载
     req.destroy(new Error('已取消'));
+    logger.info('用户取消了更新下载');
     return true;
   }
   return false;

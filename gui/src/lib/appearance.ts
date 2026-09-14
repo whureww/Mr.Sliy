@@ -157,6 +157,9 @@ function applyInternal(a: Appearance) {
   root.style.setProperty('--pulse-ring', `rgba(${rgb}, 0.35)`);
   root.style.setProperty('--pulse-halo', `rgba(${rgb}, 0.08)`);
   root.style.setProperty('--focus-ring', `rgba(${rgb}, 0.10)`);
+  // 派生色:禁用态底色/文字也随主题 accent 换算(发送按钮/主按钮禁用时不再残留默认琥珀色)
+  root.style.setProperty('--disabled-bg', `rgba(${rgb}, ${dark ? 0.13 : 0.10})`);
+  root.style.setProperty('--disabled-text', `rgba(${rgb}, ${dark ? 0.45 : 0.55})`);
   root.style.setProperty(
     '--shadow-soft',
     dark ? '0 12px 40px rgba(0, 0, 0, 0.45)' : '0 12px 40px rgba(38, 37, 35, 0.08)'

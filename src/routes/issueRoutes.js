@@ -153,13 +153,33 @@ router.get('/stats', (req, res) => {
     const fixedStmt = db.prepare(`SELECT COUNT(*) as fixed FROM code_issue WHERE is_fixed = 1${projectId ? ' AND project_id = ?' : ''}`);
     const fixedResult = fixedStmt.get(...filterParams);
 
+    // 未修复缺陷按严重度分布(质量评分的加权输入;severityStats 含已修复,评分不可用)
+    const unfixedSevStmt = db.prepare(`
+      SELECT severity, COUNT(*) as count
+      FROM code_issue
+      WHERE is_fixed = 0${projectId ? ' AND project_id = ?' : ''}
+      GROUP BY severity
+    `);
+    const unfixedSeverityStats = unfixedSevStmt.all(...filterParams);
+
+    // 项目规模(加权缺陷密度评分的分母;旧数据可能为 0,由扫描完成时补记)
+    let projectSize = { totalFiles: 0, totalLines: 0 };
+    if (projectId) {
+      const sizeRow = db.prepare('SELECT total_files, total_lines FROM scan_project WHERE id = ?').get(projectId);
+      if (sizeRow) {
+        projectSize = { totalFiles: sizeRow.total_files || 0, totalLines: sizeRow.total_lines || 0 };
+      }
+    }
+
     return res.json(success({
       total: totalResult.total,
       fixed: fixedResult.fixed,
       unfixed: totalResult.total - fixedResult.fixed,
       typeStats,
       severityStats,
-      languageStats
+      languageStats,
+      unfixedSeverityStats,
+      projectSize
     }));
   } catch (err) {
     logger.error('获取缺陷统计失败:', err);

@@ -22,11 +22,11 @@
   --shadow-lift: 0 4px 16px rgba(38, 37, 35, 0.06);
   --font-ui: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "Cascadia Code", Consolas, "JetBrains Mono", monospace;
-  /* 日夜共用/分态变量（暗色值由 data-mode='dark' 覆盖） */
+  /* 日夜共用/分态变量（暗色值由 data-mode='dark' 覆盖;运行时由 applyAppearance 按主题 accent 派生覆盖） */
   --scrollbar-thumb: #D8D6D0;
   --typing-dot: #CFCDC7;
-  --disabled-bg: #F0D9B8;
-  --disabled-text: #C4C2BC;
+  --disabled-bg: rgba(232, 135, 10, 0.10);
+  --disabled-text: rgba(232, 135, 10, 0.55);
   --danger-hover-bg: #FBF0EE;
   --pulse-ring: rgba(232, 135, 10, 0.35);
   --pulse-halo: rgba(232, 135, 10, 0.08);
@@ -38,8 +38,8 @@
 :root[data-mode='dark'] {
   --scrollbar-thumb: #3A3E46;
   --typing-dot: #4A4E56;
-  --disabled-bg: #2E2A22;
-  --disabled-text: #5C5952;
+  --disabled-bg: rgba(232, 135, 10, 0.13);
+  --disabled-text: rgba(232, 135, 10, 0.45);
   --danger-hover-bg: rgba(199, 84, 80, 0.16);
   --danger-hover: #E06A63;
   --success-text: #4EC98C;
@@ -89,7 +89,7 @@ button {
   font-weight: 600;
 }
 .btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { background: var(--disabled-bg); cursor: not-allowed; }
+.btn-primary:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 
 .btn-ghost {
   background: var(--bg-card);
@@ -232,7 +232,8 @@ button {
 }
 .ask-send:hover:not(:disabled) { background: var(--accent-hover); }
 .ask-send:active:not(:disabled) { transform: scale(0.93); }
-.ask-send:disabled { background: var(--disabled-bg); cursor: not-allowed; }
+/* 禁用态(输入为空/锁定):底色与图标色均为主题 accent 派生的半透明色,随主题实时变化 */
+.ask-send:disabled { background: var(--disabled-bg); color: var(--disabled-text); cursor: not-allowed; }
 .ask-send.stopping { background: var(--danger); }
 .ask-send.stopping:hover { background: var(--danger-hover); }
 

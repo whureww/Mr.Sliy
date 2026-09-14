@@ -223,6 +223,8 @@ const DICT: Record<string, Entry> = {
   'update.failed': { zh: '下载失败：{err}', en: 'Download failed: {err}' },
   'update.unknownReason': { zh: '未知原因', en: 'unknown reason' },
   'update.install': { zh: '安装更新', en: 'Install update' },
+  'update.startDownload': { zh: '下载更新', en: 'Download update' },
+  'update.cancel': { zh: '取消', en: 'Cancel' },
   'update.installing': { zh: '正在启动安装器…', en: 'Launching installer…' },
   'update.retry': { zh: '重试', en: 'Retry' },
   'update.goDownload': { zh: '前往下载', en: 'Go to download' },

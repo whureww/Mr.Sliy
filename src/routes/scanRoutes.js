@@ -125,10 +125,22 @@ router.post('/project', async (req, res) => {
     
     // 执行批量扫描
     const scanResults = await batchDetect(filesToScan);
-    
+
     // 创建扫描任务记录
     const taskId = generateUUID();
     const projectId = await createProjectRecord(projectPath);
+
+    // 补记项目规模(total_files/total_lines 此前从未填充恒为 0):
+    // 质量评分采用加权缺陷密度,需要代码行数作为分母
+    try {
+      getDatabase().prepare(`
+        UPDATE scan_project
+        SET total_files = ?, total_lines = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(filesToScan.length, scanResults.totalLines || 0, projectId);
+    } catch (sizeErr) {
+      logger.warn('记录项目规模失败:', sizeErr.message);
+    }
     
     await createTaskRecord(taskId, projectId, {
       scanMode: mode,
