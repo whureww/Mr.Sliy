@@ -481,6 +481,8 @@ const DICT: Record<string, Entry> = {
   'dash.empty': { zh: '暂无统计数据', en: 'No statistics yet' },
   'dash.emptyDesc': { zh: '执行一次项目扫描后,这里会展示质量概览', en: 'Run a project scan to see the quality overview here' },
   'dash.overview': { zh: '项目概览', en: 'Project Overview' },
+  'dash.selectProject': { zh: '项目', en: 'Project' },
+  'dash.scannedAt': { zh: '最近扫描', en: 'Last scan' },
   'dash.totalIssues': { zh: '缺陷总数', en: 'Total Issues' },
   'dash.fixed': { zh: '已修复', en: 'Fixed' },
   'dash.pending': { zh: '待处理', en: 'Pending' },

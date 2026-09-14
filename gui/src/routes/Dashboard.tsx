@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { issueStats } from '../ipc/client';
-import { t, useLang } from '../lib/i18n';
+import { issueStats, listProjects, type ProjectRow } from '../ipc/client';
+import { t } from '../lib/i18n';
 
 interface StatRow {
   [k: string]: unknown;
@@ -24,20 +24,61 @@ function sevBucket(sev: unknown): 'high' | 'medium' | 'low' {
 }
 
 export default function Dashboard({ onReady }: { onReady?: () => void }) {
+  const [projects, setProjects] = useState<ProjectRow[]>([]);
+  const [projectId, setProjectId] = useState<number | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [err, setErr] = useState('');
 
+  // 加载项目列表，默认选中最近扫描(无扫描时间则按创建时间)的项目
   useEffect(() => {
-    issueStats()
+    listProjects()
+      .then((rows) => {
+        setProjects(rows);
+        if (rows.length === 0) {
+          setErr('dash.empty');
+          onReady?.();
+          return;
+        }
+        const latest = [...rows].sort((a, b) =>
+          String(b.last_scan_at || b.created_at || '').localeCompare(String(a.last_scan_at || a.created_at || ''))
+        )[0];
+        setProjectId(latest.id);
+      })
+      .catch(() => {
+        setErr('dash.loadFail');
+        onReady?.();
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 切换项目后按该项目重新取统计（质量评分只反映当前项目的扫描情况）
+  useEffect(() => {
+    if (projectId == null) return;
+    let cancelled = false;
+    setStats(null);
+    issueStats(projectId)
       .then((r: { success: boolean; data?: unknown }) => {
+        if (cancelled) return;
         const d = r?.data as Stats | undefined;
         if (d && typeof d.total === 'number') setStats(d);
         else setErr('dash.empty');
+        onReady?.();
       })
-      .catch(() => setErr('dash.loadFail'));
-  }, []);
+      .catch(() => {
+        if (cancelled) return;
+        setErr('dash.loadFail');
+        onReady?.();
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
 
-  if (err) {
+  const projectName = (id: number | null) => {
+    const p = projects.find((x) => x.id === id);
+    return p ? String(p.project_name || p.project_path || `#${p.id}`) : '';
+  };
+
+  if (projects.length === 0 && err) {
     return <div className="card" style={{ padding: 40, textAlign: 'center' }}><span className="muted">{t(err)}</span></div>;
   }
 
@@ -65,64 +106,83 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
     .slice(0, 5);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: 'minmax(170px, auto)', gap: 16, overflow: 'auto', paddingBottom: 8 }}>
-      <div className="card" style={bento(2)}>
-        <CardTitle>{t('dash.overview')}</CardTitle>
-        {total === 0 ? (
-          <Empty>{t('dash.emptyDesc')}</Empty>
-        ) : (
-          <>
-            <StatRow label={t('dash.totalIssues')} value={String(total)} />
-            <StatRow label={t('dash.fixed')} value={String(fixed)} color="var(--success)" />
-            <StatRow label={t('dash.pending')} value={String(unfixed)} color={unfixed > 0 ? 'var(--warning)' : undefined} />
-            <div style={{ marginTop: 4 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                <span className="muted">{t('dash.fixRate')}</span>
-                <span style={{ fontWeight: 650 }}>{fixRate}%</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', paddingBottom: 8 }}>
+      {/* 项目选择器：概览与评分仅反映所选项目 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span className="muted" style={{ fontSize: 12.5 }}>{t('dash.selectProject')}</span>
+        <select
+          value={projectId ?? ''}
+          onChange={(e) => setProjectId(Number(e.target.value))}
+          style={{ maxWidth: 360, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-recessed)', color: 'var(--text-primary)' }}
+        >
+          {projects.map((p) => (
+            <option key={p.id} value={p.id}>{String(p.project_name || p.project_path || `#${p.id}`)}</option>
+          ))}
+        </select>
+        {stats && <span className="muted" style={{ fontSize: 12 }}>{projectName(projectId)} · {t('dash.scannedAt')} {String(projects.find((x) => x.id === projectId)?.last_scan_at || '—').replace('T', ' ').slice(0, 19)}</span>}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: 'minmax(170px, auto)', gap: 16 }}>
+        <div className="card" style={bento(2)}>
+          <CardTitle>{t('dash.overview')}</CardTitle>
+          {err && !stats ? (
+            <Empty>{t(err)}</Empty>
+          ) : total === 0 ? (
+            <Empty>{t('dash.noData')}</Empty>
+          ) : (
+            <>
+              <StatRow label={t('dash.totalIssues')} value={String(total)} />
+              <StatRow label={t('dash.fixed')} value={String(fixed)} color="var(--success)" />
+              <StatRow label={t('dash.pending')} value={String(unfixed)} color={unfixed > 0 ? 'var(--warning)' : undefined} />
+              <div style={{ marginTop: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
+                  <span className="muted">{t('dash.fixRate')}</span>
+                  <span style={{ fontWeight: 650 }}>{fixRate}%</span>
+                </div>
+                <div style={{ height: 8, borderRadius: 4, background: 'var(--bg-recessed)', overflow: 'hidden' }}>
+                  <div style={{ width: `${fixRate}%`, height: '100%', background: 'var(--success)', borderRadius: 4, transition: 'width 0.6s ease' }} />
+                </div>
               </div>
-              <div style={{ height: 8, borderRadius: 4, background: 'var(--bg-recessed)', overflow: 'hidden' }}>
-                <div style={{ width: `${fixRate}%`, height: '100%', background: 'var(--success)', borderRadius: 4, transition: 'width 0.6s ease' }} />
+            </>
+          )}
+        </div>
+
+        <div className="card" style={bento(1)}>
+          <CardTitle>{t('dash.severity')}</CardTitle>
+          {err && !stats ? <Empty>{t(err)}</Empty> : total === 0 ? <Empty>{t('dash.noData')}</Empty> : (
+            <>
+              <StatRow label={t('dash.high')} value={String(sev.high)} color="var(--danger)" />
+              <StatRow label={t('dash.medium')} value={String(sev.medium)} color="var(--warning)" />
+              <StatRow label={t('dash.low')} value={String(sev.low)} />
+            </>
+          )}
+        </div>
+
+        <div className="card" style={bento(1)}>
+          <CardTitle>{t('dash.score')}</CardTitle>
+          <div style={{ fontSize: 44, fontWeight: 700, color: scoreColor }}>{stats ? score : '—'}</div>
+          <div className="muted" style={{ fontSize: 12 }}>{t('dash.scoreDesc')}</div>
+        </div>
+
+        <div className="card" style={bento(2)}>
+          <CardTitle>{t('dash.languages')}</CardTitle>
+          {langs.length === 0 ? <Empty>{t('dash.noData')}</Empty> : langs.map((l) => (
+            <div key={l.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span className="mono" style={{ fontSize: 12, width: 90, textAlign: 'right' }}>{l.name}</span>
+              <div style={{ flex: 1, height: 10, borderRadius: 5, background: 'var(--bg-recessed)', overflow: 'hidden' }}>
+                <div style={{ width: `${(l.count / langMax) * 100}%`, height: '100%', background: 'var(--accent)', borderRadius: 5, transition: 'width 0.6s ease' }} />
               </div>
+              <span style={{ fontSize: 12, fontWeight: 650, width: 30 }}>{l.count}</span>
             </div>
-          </>
-        )}
-      </div>
+          ))}
+        </div>
 
-      <div className="card" style={bento(1)}>
-        <CardTitle>{t('dash.severity')}</CardTitle>
-        {total === 0 ? <Empty>{t('dash.noData')}</Empty> : (
-          <>
-            <StatRow label={t('dash.high')} value={String(sev.high)} color="var(--danger)" />
-            <StatRow label={t('dash.medium')} value={String(sev.medium)} color="var(--warning)" />
-            <StatRow label={t('dash.low')} value={String(sev.low)} />
-          </>
-        )}
-      </div>
-
-      <div className="card" style={bento(1)}>
-        <CardTitle>{t('dash.score')}</CardTitle>
-        <div style={{ fontSize: 44, fontWeight: 700, color: scoreColor }}>{total === 0 ? '—' : score}</div>
-        <div className="muted" style={{ fontSize: 12 }}>{t('dash.scoreDesc')}</div>
-      </div>
-
-      <div className="card" style={bento(2)}>
-        <CardTitle>{t('dash.languages')}</CardTitle>
-        {langs.length === 0 ? <Empty>{t('dash.noData')}</Empty> : langs.map((l) => (
-          <div key={l.name} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span className="mono" style={{ fontSize: 12, width: 90, textAlign: 'right' }}>{l.name}</span>
-            <div style={{ flex: 1, height: 10, borderRadius: 5, background: 'var(--bg-recessed)', overflow: 'hidden' }}>
-              <div style={{ width: `${(l.count / langMax) * 100}%`, height: '100%', background: 'var(--accent)', borderRadius: 5, transition: 'width 0.6s ease' }} />
-            </div>
-            <span style={{ fontSize: 12, fontWeight: 650, width: 30 }}>{l.count}</span>
-          </div>
-        ))}
-      </div>
-
-      <div className="card" style={bento(1)}>
-        <CardTitle>{t('dash.topTypes')}</CardTitle>
-        {types.length === 0 ? <Empty>{t('dash.noData')}</Empty> : types.map((ty) => (
-          <StatRow key={ty.name} label={ty.name} value={String(ty.count)} />
-        ))}
+        <div className="card" style={bento(1)}>
+          <CardTitle>{t('dash.topTypes')}</CardTitle>
+          {types.length === 0 ? <Empty>{t('dash.noData')}</Empty> : types.map((ty) => (
+            <StatRow key={ty.name} label={ty.name} value={String(ty.count)} />
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -140,7 +200,7 @@ function Empty({ children }: { children: React.ReactNode }) {
   return <div className="muted" style={{ fontSize: 12.5, lineHeight: 1.7, margin: 'auto 0' }}>{children}</div>;
 }
 
-function StatRow({ label, value, color }: { label: string; value: string; color?: string }) {
+function StatRow({ label, value, color }: { label: string, value: string, color?: string }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
       <span className="muted" style={{ fontSize: 12.5 }}>{label}</span>

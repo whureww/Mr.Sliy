@@ -231,17 +231,49 @@ function collectFiles(projectPath, extensions = ['.js', '.ts', '.jsx', '.tsx', '
 
 /**
  * 创建项目记录
+ * 同一路径复用最近的项目记录(扫描次数+1),避免同一项目反复扫描产生重复记录、
+ * 缺陷重复累计导致质量评分失真;历史遗留的同路径重复记录,其缺陷与任务并入
+ * 复用记录后标记 deleted(幂等,无重复时为空操作)
  */
 async function createProjectRecord(projectPath) {
   const db = getDatabase();
   const projectName = path.basename(projectPath);
-  
-  const stmt = db.prepare(`
-    INSERT INTO scan_project (project_name, project_path, total_files)
-    VALUES (?, ?, ?)
+  // 归一化比较键:去尾部斜杠 + 忽略大小写(Windows 路径不区分大小写)
+  const normKey = String(projectPath).replace(/[\\/]+$/, '').toLowerCase();
+
+  const findStmt = db.prepare(`
+    SELECT id FROM scan_project
+    WHERE status != 'deleted' AND LOWER(RTRIM(project_path, '\\/')) = ?
+    ORDER BY id DESC LIMIT 1
   `);
-  
-  const result = stmt.run(projectName, projectPath, 0);
+  const existing = findStmt.get(normKey);
+
+  if (existing) {
+    db.prepare(`
+      UPDATE scan_project
+      SET scan_count = scan_count + 1, last_scan_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(existing.id);
+
+    const dupes = db.prepare(`
+      SELECT id FROM scan_project
+      WHERE status != 'deleted' AND id != ? AND LOWER(RTRIM(project_path, '\\/')) = ?
+    `).all(existing.id, normKey);
+    for (const d of dupes) {
+      db.prepare('UPDATE code_issue SET project_id = ? WHERE project_id = ?').run(existing.id, d.id);
+      db.prepare('UPDATE scan_task SET project_id = ? WHERE project_id = ?').run(existing.id, d.id);
+      db.prepare(`UPDATE scan_project SET status = 'deleted' WHERE id = ?`).run(d.id);
+      logger.info(`合并重复项目记录: #${d.id} -> #${existing.id} (${projectPath})`);
+    }
+    return existing.id;
+  }
+
+  const stmt = db.prepare(`
+    INSERT INTO scan_project (project_name, project_path, total_files, scan_count, last_scan_at)
+    VALUES (?, ?, 0, 1, CURRENT_TIMESTAMP)
+  `);
+
+  const result = stmt.run(projectName, projectPath);
   return result.lastInsertRowid;
 }
 

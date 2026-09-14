@@ -14,11 +14,12 @@ router.get('/', (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const pageSize = parseInt(req.query.pageSize) || 20;
     
-    const countStmt = db.prepare('SELECT COUNT(*) as total FROM scan_project WHERE status != "deleted"');
+    // 注:better-sqlite3 编译时禁用了双引号字符串(SQLITE_DQS=0),字符串字面量必须用单引号
+    const countStmt = db.prepare(`SELECT COUNT(*) as total FROM scan_project WHERE status != 'deleted'`);
     const countResult = countStmt.get();
-    
+
     const offset = (page - 1) * pageSize;
-    const dataStmt = db.prepare(`SELECT * FROM scan_project WHERE status != "deleted" ORDER BY created_at DESC LIMIT ? OFFSET ?`);
+    const dataStmt = db.prepare(`SELECT * FROM scan_project WHERE status != 'deleted' ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`);
     const projects = dataStmt.all(pageSize, offset);
     
     return res.json(paginate(projects, countResult.total, page, pageSize));

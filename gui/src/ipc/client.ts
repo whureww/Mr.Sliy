@@ -421,8 +421,28 @@ export async function openExternal(url: string): Promise<void> {
   await sidecarRequest('POST', '/api/open-url', { url });
 }
 
-export async function issueStats(): Promise<{ success: boolean; data: unknown }> {
-  return sidecarRequest('GET', '/api/issues/stats');
+export async function issueStats(projectId?: number): Promise<{ success: boolean; data: unknown }> {
+  const q = projectId != null ? `?projectId=${projectId}` : '';
+  return sidecarRequest('GET', `/api/issues/stats${q}`);
+}
+
+// ---------- 扫描项目（质量概览按项目查看） ----------
+
+export interface ProjectRow {
+  id: number;
+  project_name?: string;
+  project_path?: string;
+  scan_count?: number;
+  last_scan_at?: string | null;
+  created_at?: string | null;
+  [k: string]: unknown;
+}
+
+/** 项目列表（按创建时间倒序）；质量概览用它做项目选择器 */
+export async function listProjects(pageSize = 100): Promise<ProjectRow[]> {
+  const raw = await sidecarRequest<unknown>('GET', `/api/projects?pageSize=${pageSize}`);
+  const d = unwrapData<{ list?: ProjectRow[] }>(raw);
+  return d?.list || [];
 }
 
 // ---------- MCP 接入（设置页） ----------

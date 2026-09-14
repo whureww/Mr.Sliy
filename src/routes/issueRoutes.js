@@ -77,11 +77,21 @@ router.get('/', (req, res) => {
 
 /**
  * 获取缺陷统计信息
+ * 支持 ?projectId= 按项目过滤（质量概览按单个项目的扫描情况展示评分）；
+ * 不传 projectId 时为全库聚合（历史行为兼容）
  * 注意：必须注册在 GET /:id 之前，否则 "stats" 会被当作缺陷 id 捕获
  */
 router.get('/stats', (req, res) => {
   try {
     const db = getDatabase();
+
+    const projectId = req.query.projectId;
+    let projectFilter = '';
+    const filterParams = [];
+    if (projectId) {
+      projectFilter = ' WHERE project_id = ?';
+      filterParams.push(projectId);
+    }
 
     // 一次性回填历史遗留的空语言字段（按文件扩展名推断），幂等
     try {
@@ -112,36 +122,36 @@ router.get('/stats', (req, res) => {
     // 按类型统计
     const typeStmt = db.prepare(`
       SELECT issue_type, COUNT(*) as count
-      FROM code_issue
+      FROM code_issue${projectFilter}
       GROUP BY issue_type
       ORDER BY count DESC
     `);
-    const typeStats = typeStmt.all();
+    const typeStats = typeStmt.all(...filterParams);
 
     // 按严重程度统计
     const severityStmt = db.prepare(`
       SELECT severity, COUNT(*) as count
-      FROM code_issue
+      FROM code_issue${projectFilter}
       GROUP BY severity
     `);
-    const severityStats = severityStmt.all();
+    const severityStats = severityStmt.all(...filterParams);
 
     // 按语言统计
     const languageStmt = db.prepare(`
       SELECT language, COUNT(*) as count
-      FROM code_issue
+      FROM code_issue${projectFilter}
       GROUP BY language
       ORDER BY count DESC
     `);
-    const languageStats = languageStmt.all();
+    const languageStats = languageStmt.all(...filterParams);
 
     // 总数统计
-    const totalStmt = db.prepare('SELECT COUNT(*) as total FROM code_issue');
-    const totalResult = totalStmt.get();
+    const totalStmt = db.prepare(`SELECT COUNT(*) as total FROM code_issue${projectFilter}`);
+    const totalResult = totalStmt.get(...filterParams);
 
     // 已修复统计
-    const fixedStmt = db.prepare('SELECT COUNT(*) as fixed FROM code_issue WHERE is_fixed = 1');
-    const fixedResult = fixedStmt.get();
+    const fixedStmt = db.prepare(`SELECT COUNT(*) as fixed FROM code_issue WHERE is_fixed = 1${projectId ? ' AND project_id = ?' : ''}`);
+    const fixedResult = fixedStmt.get(...filterParams);
 
     return res.json(success({
       total: totalResult.total,
