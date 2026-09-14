@@ -387,9 +387,14 @@ export async function startUpdateDownload(url: string, version: string, digest?:
   return env.data || { status: 'error', error: t('err.requestFailed') };
 }
 
-/** 查询下载状态/进度(轮询) */
+/** 查询下载状态/进度(轮询)。
+ *  自动携带 GUI 当前版本:后端恢复扫描据此做版本门控,只把比当前版本新的
+ *  已下载安装包恢复为"可安装",防止残留的同版安装包被一键装回(装完仍提示更新的死循环)。 */
 export async function getUpdateDownloadStatus(): Promise<DownloadState> {
-  const env = await sidecarRequest<{ success: boolean; data: DownloadState }>('GET', '/api/update-download/status');
+  const env = await sidecarRequest<{ success: boolean; data: DownloadState }>(
+    'GET',
+    `/api/update-download/status?currentVersion=${encodeURIComponent(APP_VERSION)}`
+  );
   return env?.data || { status: 'idle' };
 }
 

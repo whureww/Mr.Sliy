@@ -277,9 +277,9 @@ router.post('/update-download/start', (req, res) => {
   }
 });
 
-/** 查询下载进度/状态（前端轮询） */
+/** 查询下载进度/状态（前端轮询）;currentVersion 供恢复扫描做版本门控(只恢复比当前版本新的安装包) */
 router.get('/update-download/status', (req, res) => {
-  res.json({ success: true, data: downloader.getStatus() });
+  res.json({ success: true, data: downloader.getStatus(req.query && req.query.currentVersion) });
 });
 
 /** 取消当前下载 */

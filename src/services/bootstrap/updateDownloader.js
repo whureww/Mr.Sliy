@@ -20,6 +20,7 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 const { logger } = require('../../utils/logger');
+const { compareVersions } = require('./versionCheck');
 
 const UPDATES_DIR = path.join(os.homedir(), '.mr-sliy', 'updates');
 const MAX_SIZE = 500 * 1024 * 1024; // 500MB
@@ -254,25 +255,32 @@ function snapshot(state) {
   };
 }
 
-/** 查询状态;首次调用时扫描更新目录,恢复"已下载完成但未安装"的状态 */
-function getStatus() {
+/** 查询状态;首次调用时扫描更新目录,恢复"已下载完成但未安装"的状态。
+ *  currentVersion(可选,GUI 上报自身版本):恢复时仅采纳比它更新的安装包——
+ *  否则历史残留的同版/旧版安装包会被恢复成"可安装",用户点检查更新后一键装回同版本。 */
+function getStatus(currentVersion) {
   if (!current && !scanned) {
     scanned = true;
     try {
+      // 门控版本非法时视为未传(保持旧行为),正常只有 GUI 调用且始终携带合法版本
+      const gate =
+        typeof currentVersion === 'string' && /^\d+(\.\d+){1,3}/.test(currentVersion.trim())
+          ? currentVersion.trim()
+          : '';
       const files = fs
         .readdirSync(UPDATES_DIR)
         .filter((f) => /^MRSLIY-Setup-.+\.exe$/i.test(f))
         .map((f) => {
           const p = path.join(UPDATES_DIR, f);
-          return { p, mtime: fs.statSync(p).mtimeMs };
+          const m = f.match(/^MRSLIY-Setup-(.+)\.exe$/i);
+          return { p, version: m ? m[1] : '', mtime: fs.statSync(p).mtimeMs };
         })
+        .filter((x) => !gate || compareVersions(x.version, gate) > 0)
         .sort((a, b) => b.mtime - a.mtime);
       if (files.length > 0) {
-        const name = path.basename(files[0].p);
-        const m = name.match(/^MRSLIY-Setup-(.+)\.exe$/i);
         current = {
           status: 'done',
-          version: m ? m[1] : '',
+          version: files[0].version,
           url: '',
           received: 0,
           total: 0,
