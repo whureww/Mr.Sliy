@@ -2,7 +2,7 @@
   <img src="gui/src/assets/logo.svg" width="120" alt="MR·SLIY">
 </p>
 
-# MR·SLIY Code Optimization Agent
+<h1 align="center">MR·SLIY Code Optimization Agent</h1>
 
 <p align="center">
   <a href="https://github.com/whureww/Mr.Sliy--AI_Agent/releases/latest"><img src="https://img.shields.io/github/v/release/whureww/Mr.Sliy--AI_Agent?color=2EA043" alt="Release"></a>
@@ -15,7 +15,9 @@
   <a href="https://github.com/whureww/Mr.Sliy--AI_Agent">GitHub</a> · <a href="https://github.com/whureww/Mr.Sliy--AI_Agent/releases">Releases</a> · <a href="https://github.com/whureww/Mr.Sliy--AI_Agent/issues">Issues</a> · <a href="README.md">简体中文</a> · English
 </p>
 
-**Evidence-based detection, gated modification.** A multilingual code optimization agent built on Tree-sitter and RAG — available as a desktop app (Tauri architecture: React frontend + Node.js sidecar + Rust shell) and a CLI, supporting 15+ languages, offline/online modes, and multiple LLM providers.
+**Evidence-based detection, gated modification.** A multilingual code optimization agent built on Tree-sitter and RAG — available as a desktop app (Tauri architecture: React frontend + Node.js sidecar + Rust shell) and a CLI, one capability set with two experiences.
+
+One engine covers 15+ languages: JavaScript / TypeScript / Python / Java / Go / C++ / C# / Rust / Swift / Kotlin / PHP / Ruby / Scala, and more. Tree-sitter WASM parsers build ASTs; 14+ detection rules and 50+ offline rules form the foundation; 3,000+ RAG knowledge entries and 2,100+ optimization cases enrich the analysis; LLMs (DeepSeek / Zhipu / Qwen / OpenAI / Ollama / OpenAI-compatible endpoints) make the final synthesis — in offline mode the rules and knowledge base work standalone without any API, while online mode streams output and can be interrupted at any time.
 
 > MR·SLIY is not a "wrapper" that forwards scan results to an LLM. Here the LLM acts as the **decision-making hub**: through a multi-turn loop of *think → tool call → observe*, it orchestrates 25 tools — AST parsing, rule detection, knowledge retrieval, code modification, rollback verification — to carry a single code change through the full closed loop of **detect → risk grading → diff confirmation → apply → automatic verification**. Code and data never leave your machine; nothing is uploaded to third-party servers.
 

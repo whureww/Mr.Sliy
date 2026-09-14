@@ -2,7 +2,7 @@
   <img src="gui/src/assets/logo.svg" width="120" alt="MR·SLIY">
 </p>
 
-# MR·SLIY 代码优化智能体
+<h1 align="center">MR·SLIY 代码优化智能体</h1>
 
 <p align="center">
   <a href="https://github.com/whureww/Mr.Sliy--AI_Agent/releases/latest"><img src="https://img.shields.io/github/v/release/whureww/Mr.Sliy--AI_Agent?color=2EA043" alt="Release"></a>
@@ -15,7 +15,9 @@
   <a href="https://github.com/whureww/Mr.Sliy--AI_Agent">GitHub</a> · <a href="https://github.com/whureww/Mr.Sliy--AI_Agent/releases">Releases</a> · <a href="https://github.com/whureww/Mr.Sliy--AI_Agent/issues">Issues</a> · 简体中文 · <a href="README.en.md">English</a>
 </p>
 
-**检测有据，修改有门。** 基于 Tree-sitter 与 RAG 的多语言代码优化智能体——桌面端（Tauri 架构：React 前端 + Node.js Sidecar + Rust 外壳）与 CLI 双形态，支持 15+ 语言、离线/在线双模式、多提供商大模型。
+**检测有据，修改有门。** 基于 Tree-sitter 与 RAG 的多语言代码优化智能体——桌面端（Tauri 架构：React 前端 + Node.js Sidecar + Rust 外壳）与 CLI 双形态，同一套能力两种体验。
+
+一套引擎覆盖 15+ 语言：JavaScript / TypeScript / Python / Java / Go / C++ / C# / Rust / Swift / Kotlin / PHP / Ruby / Scala 等。Tree-sitter WASM 解析器构建 AST，14+ 检测规则与 50+ 离线规则打底，3000+ 条 RAG 知识与 2100+ 优化案例增色，大模型（DeepSeek / 智谱 / 通义 / OpenAI / Ollama / OpenAI 兼容接口）综合决策收尾——离线模式下规则与知识库独立工作，不依赖任何 API；在线模式下流式输出、随时可中断。
 
 > MR·SLIY 不是把扫描结果转发给大模型的"套壳"工具。LLM 在这里扮演**决策中枢**：围绕"思考 → 工具调用 → 观察"多轮循环，调度 AST 解析、规则检测、知识检索、代码修改、回滚验证等 25 个工具，把一次代码修改走完 **检测 → 风险分级 → Diff 确认 → 应用 → 自动验证** 的完整闭环。代码与数据始终留在本机，不上传任何第三方服务器。
 
