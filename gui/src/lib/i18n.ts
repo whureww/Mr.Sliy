@@ -69,14 +69,26 @@ const DICT: Record<string, Entry> = {
   // ---------- Settings：记忆库 ----------
   'settings.memory.title': { zh: '记忆库', en: 'Memory' },
   'settings.memory.desc': {
-    zh: 'AI 助手的跨会话记忆：在对话中说「记住……」即可保存偏好，以下条目会自动注入每次对话提示词',
-    en: 'Cross-session memory for the AI assistant: say "remember ..." in chat to save a preference; entries below are injected into every prompt'
+    zh: '全自动记忆：每轮对话结束后由 AI 自动提取值得记住的偏好与约定（零操作），并注入后续对话提示词；此列表仅用于查看与纠错',
+    en: 'Fully automatic memory: preferences and conventions are extracted by AI after each chat turn (zero effort) and injected into later prompts; this list is for review only'
   },
-  'memory.addPh': { zh: '手动添加一条记忆，例如：使用 4 空格缩进', en: 'Add a memory manually, e.g. Use 4-space indentation' },
+  'memory.crossChat': { zh: '跨对话记忆', en: 'Cross-conversation memory' },
+  'memory.crossChatTip': {
+    zh: '开启后所有对话共享同一份记忆；关闭后每个对话独立记忆、互不共享',
+    en: 'When on, all conversations share one memory; when off, each conversation keeps its own memory'
+  },
+  'memory.isolatedDesc': {
+    zh: '跨对话记忆已关闭：记忆功能仍然生效，但每个对话（工作区）独立记忆、互不共享，也不会读取全局记忆。',
+    en: 'Cross-conversation memory is off: memory still works, but each conversation (workspace) keeps its own memory, isolated from others and from the global store.'
+  },
+  'memory.auto': { zh: '自动', en: 'Auto' },
+  'memory.manual': { zh: '手动', en: 'Manual' },
+  'memory.autoTip': { zh: '对话后由 AI 自动提取', en: 'Extracted automatically by AI after chat' },
+  'memory.manualTip': { zh: '手动添加', en: 'Added manually' },
   'memory.clear': { zh: '清空全部', en: 'Clear all' },
   'memory.empty': {
-    zh: '暂无记忆。在对话中说「记住：……」即可自动保存。',
-    en: 'No memories yet. Say "remember: ..." in chat to save one automatically.'
+    zh: '暂无记忆。与 AI 助手对话即会自动记录偏好与约定。',
+    en: 'No memories yet. Chatting with the AI assistant records preferences automatically.'
   },
   'memory.count': { zh: '{n} 条', en: '{n} items' },
 
@@ -150,7 +162,6 @@ const DICT: Record<string, Entry> = {
   'toast.needKey': { zh: '请填写 API Key', en: 'Please enter the API key' },
   'toast.needName': { zh: '请填写提供商名称', en: 'Please enter a provider name' },
   'toast.needUrl': { zh: '请填写 API 地址', en: 'Please enter the API URL' },
-  'toast.memoryAdded': { zh: '记忆已添加', en: 'Memory added' },
   'toast.memoryDeleted': { zh: '记忆已删除', en: 'Memory deleted' },
   'toast.memoryCleared': { zh: '已清空全部记忆', en: 'All memories cleared' },
   'toast.memFail': { zh: '记忆操作失败：{msg}', en: 'Memory operation failed: {msg}' },
@@ -251,6 +262,11 @@ const DICT: Record<string, Entry> = {
   'nav.loadFail': { zh: '无法读取', en: 'Cannot read' },
   'nav.pickFolderFail': { zh: '文件夹选择失败（需在应用窗口内使用）', en: 'Folder picker failed (must run inside the app window)' },
   'nav.newTip': { zh: '新建工作区（每个目录对应一个独立对话）', en: 'New workspace (each folder maps to an independent session)' },
+  'nav.collapse': { zh: '收起侧栏', en: 'Collapse sidebar' },
+  'nav.expand': { zh: '展开侧栏', en: 'Expand sidebar' },
+  'wb.panelCollapse': { zh: '收起问题面板', en: 'Collapse issues panel' },
+  'wb.panelExpand': { zh: '展开问题面板', en: 'Expand issues panel' },
+  'ui.resizeHint': { zh: '拖拽调整宽度，双击重置', en: 'Drag to resize, double-click to reset' },
   'nav.switchTo': { zh: '切换到此对话', en: 'Switch to this session' },
   'nav.copyPath': { zh: '复制路径', en: 'Copy path' },
   'nav.lock': { zh: '锁定会话', en: 'Lock session' },
@@ -312,7 +328,7 @@ const DICT: Record<string, Entry> = {
   'an.copyMsg': { zh: '复制消息内容', en: 'Copy message' },
   'an.me': { zh: '我', en: 'Me' },
   'an.phLocked': { zh: '会话已锁定，请先解锁', en: 'Session locked; unlock it first' },
-  'an.phDescribe': { zh: '描述你的问题，或输入"分析"触发检测流水线', en: 'Describe your issue, or type "analyze" to run detection' },
+  'an.phDescribe': { zh: '描述你的问题…', en: 'Describe your issue…' },
   'an.phPickFile': { zh: '请先在左侧选择文件', en: 'Pick a file on the left first' },
   'an.stopTip': { zh: '中断当前回复 / 扫描', en: 'Interrupt the current reply / scan' },
   'an.sendTip': { zh: '发送 (Enter)', en: 'Send (Enter)' },

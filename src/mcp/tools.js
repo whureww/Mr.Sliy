@@ -190,19 +190,22 @@ async function chatHandler(args) {
     .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }));
   hist.push({ role: 'user', content: String(message).slice(0, 2000) });
 
-  // 与桌面端一致：自动提取记忆 + 注入记忆块 + 早期历史压缩
-  try {
-    if (typeof aiShared.extractMemoryFromText === 'function') {
-      aiShared.extractMemoryFromText(hist[hist.length - 1].content);
-    }
-  } catch (e) {
-    logger.warn(`MCP 对话记忆提取失败: ${e.message}`);
-  }
+  // 与桌面端一致：注入记忆块 + 早期历史压缩（自动提取在回复完成后由 scheduleAutoMemory 进行）
 
   const systemPrompt = aiShared.CHAT_SYSTEM_PROMPT + (aiShared.memoryPromptBlock ? aiShared.memoryPromptBlock() : '');
   const chatMessages = aiShared.buildChatMessages(systemPrompt, hist);
   const result = await provider.chat(chatMessages, { temperature: 0.8, maxTokens: 2048 });
   const reply = typeof result.content === 'string' ? result.content : String(result.content || '');
+
+  // 与桌面端一致：回复完成后异步自动提取记忆（不阻塞、失败静默）
+  try {
+    if (typeof aiShared.scheduleAutoMemory === 'function') {
+      aiShared.scheduleAutoMemory({ provider, userText: hist[hist.length - 1].content, assistantText: reply });
+    }
+  } catch (e) {
+    logger.warn(`MCP 自动记忆调度失败: ${e.message}`);
+  }
+
   return { reply: clip(reply, 12000), usage: result.usage || null };
 }
 

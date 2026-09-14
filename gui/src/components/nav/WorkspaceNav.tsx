@@ -25,6 +25,9 @@ interface Props {
   onProjectScan: () => void;
   onSelect: (path: string) => void;
   onOpenFile: (node: FileNode) => void;
+  /** 折叠为窄条（宽度由 Workbench 布局状态控制） */
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
 }
 
 /** 左侧导航：会话列表（每个目录 = 一个独立对话）+ 新建 + 折叠式文件树 */
@@ -40,7 +43,9 @@ export default function WorkspaceNav({
   onSchedule,
   onProjectScan,
   onSelect,
-  onOpenFile
+  onOpenFile,
+  collapsed,
+  onToggleCollapse
 }: Props) {
   useLang();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -131,24 +136,53 @@ export default function WorkspaceNav({
     else closeDialog();
   };
 
+  // 折叠态：48px 窄条（展开按钮 + 竖排标题）
+  if (collapsed) {
+    return (
+      <aside className="card" style={{ padding: '10px 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, minHeight: 0, flex: 1 }}>
+        <button
+          className="btn-ghost"
+          onClick={onToggleCollapse}
+          title={t('nav.expand')}
+          style={{ width: 30, height: 30, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}
+        >
+          »
+        </button>
+        <div className="muted" style={{ writingMode: 'vertical-rl', fontSize: 10.5, letterSpacing: 1.5 }}>
+          WORKSPACE
+        </div>
+      </aside>
+    );
+  }
+
   return (
-    <aside className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <aside className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
         <div className="muted" style={{ fontSize: 11, letterSpacing: 1.2 }}>WORKSPACE</div>
-        <button
-          onClick={() => setDialogOpen(true)}
-          title={t('nav.newTip')}
-          style={{
-            background: 'var(--accent-tint)',
-            color: 'var(--accent)',
-            fontSize: 12,
-            fontWeight: 650,
-            padding: '3px 10px',
-            borderRadius: 7
-          }}
-        >
-          + 新建
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button
+            onClick={() => setDialogOpen(true)}
+            title={t('nav.newTip')}
+            style={{
+              background: 'var(--accent-tint)',
+              color: 'var(--accent)',
+              fontSize: 12,
+              fontWeight: 650,
+              padding: '3px 10px',
+              borderRadius: 7
+            }}
+          >
+            + 新建
+          </button>
+          <button
+            className="btn-ghost"
+            onClick={onToggleCollapse}
+            title={t('nav.collapse')}
+            style={{ width: 22, height: 22, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}
+          >
+            «
+          </button>
+        </div>
       </div>
 
       {/* 会话搜索 */}
@@ -162,8 +196,8 @@ export default function WorkspaceNav({
             boxSizing: 'border-box',
             border: '1px solid var(--border-hairline)',
             borderRadius: 8,
-            padding: '5px 10px',
-            fontSize: 12,
+            padding: '8px 12px',
+            fontSize: 13,
             outline: 'none',
             background: 'var(--bg-card)',
             color: 'var(--text-primary)'

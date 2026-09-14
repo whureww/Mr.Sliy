@@ -8,6 +8,7 @@ const router = express.Router();
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 const { optimizeWithRAG } = require('../services/rag/agent');
 const { success, error } = require('../utils/response');
 const { logger } = require('../utils/logger');
@@ -17,14 +18,26 @@ const { providerManager } = require('../services/llm/providers');
 /**
  * 跨会话记忆库：~/.mr-sliy/chat_memory.json
  * 用户级偏好与项目约定（例："这个项目用 4 空格缩进"、"别用 var"），
- * 对话中自动提取 + 手动管理，注入聊天系统提示词。
+ * 对话中由 LLM 自动提取，注入聊天系统提示词。
+ *
+ * 作用域（scope）：跨对话记忆开启时 scope 为空 → 读写全局文件；
+ * 关闭跨对话时 scope 为对话标识（如工作区路径）→ 读写按对话隔离的独立文件，
+ * 记忆功能仍然生效但各对话互不共享。
  */
 const MEMORY_FILE = path.join(os.homedir(), '.mr-sliy', 'chat_memory.json');
 const MEMORY_MAX = 50;
 
-function loadMemories() {
+/** scope → 存储文件：空 = 全局 chat_memory.json；非空 = chat_memory_<hash>.json */
+function memoryFileForScope(scope) {
+  const s = String(scope || '').trim();
+  if (!s) return MEMORY_FILE;
+  const hash = crypto.createHash('sha1').update(s).digest('hex').slice(0, 12);
+  return path.join(path.dirname(MEMORY_FILE), `chat_memory_${hash}.json`);
+}
+
+function loadMemories(scope) {
   try {
-    const raw = fs.readFileSync(MEMORY_FILE, 'utf-8');
+    const raw = fs.readFileSync(memoryFileForScope(scope), 'utf-8');
     const arr = JSON.parse(raw);
     return Array.isArray(arr) ? arr : [];
   } catch (e) {
@@ -32,26 +45,28 @@ function loadMemories() {
   }
 }
 
-function saveMemories(list) {
-  fs.mkdirSync(path.dirname(MEMORY_FILE), { recursive: true });
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(list.slice(-MEMORY_MAX), null, 2), 'utf-8');
+function saveMemories(list, scope) {
+  const file = memoryFileForScope(scope);
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(list.slice(-MEMORY_MAX), null, 2), 'utf-8');
 }
 
-function addMemory(text) {
+function addMemory(text, source = 'manual', scope) {
   const t = String(text || '').trim();
   if (!t) return null;
-  const list = loadMemories();
+  const list = loadMemories(scope);
   // 去重（完全相同的文本）
   if (list.some((m) => m.text === t)) return null;
-  const item = { id: `mem-${Date.now()}-${Math.floor(Math.random() * 10000)}`, text: t.slice(0, 200), createdAt: new Date().toISOString() };
+  const item = { id: `mem-${Date.now()}-${Math.floor(Math.random() * 10000)}`, text: t.slice(0, 200), source: source === 'auto' ? 'auto' : 'manual', createdAt: new Date().toISOString() };
   list.push(item);
-  saveMemories(list);
+  saveMemories(list, scope);
   return item;
 }
 
 /** 从用户消息中启发式提取值得记住的偏好/约定（记忆条数满时静默跳过） */
 const MEMORY_PATTERNS = /(记住|以后都?要|以后请|请记住|偏好|我喜欢|我不喜欢|不要用|别用|我们用|我们使用|我们的项目|约定|规范是|统一用|一律用)/;
 
+/** @deprecated 已被 LLM 自动提取 scheduleAutoMemory 取代（双通道会产生重复低质条目）；保留导出防外部引用 */
 function extractMemoryFromText(text) {
   try {
     if (!text || text.length > 500) return;
@@ -69,9 +84,83 @@ function extractMemoryFromText(text) {
   }
 }
 
-/** 记忆注入文本（无记忆时返回空串） */
-function memoryPromptBlock() {
-  const list = loadMemories();
+/**
+ * 全自动记忆：对话结束后异步调用 LLM 从本轮对话提取值得长期记住的内容
+ * （用户偏好/项目约定/重要事实），零人工干预。
+ *
+ * 设计要点:
+ * - setImmediate 异步执行，不阻塞对话响应；全程静默失败（仅 warn 日志）
+ * - 单飞互斥（autoMemoryBusy）：上一轮提取未完成时跳过本轮，避免并发重复
+ * - 提取 prompt 携带已知记忆列表供 LLM 去重；结果再与现有记忆做兜底去重
+ * - 成本控制：消息过短跳过、maxTokens 300、最多提取 3 条
+ */
+let autoMemoryBusy = false;
+
+function scheduleAutoMemory({ provider, userText, assistantText, scope }) {
+  try {
+    if (!provider || typeof provider.chat !== 'function') return;
+    const u = String(userText || '').trim();
+    if (u.length < 16) return; // 过短消息无提取价值
+    if (autoMemoryBusy || loadMemories(scope).length >= MEMORY_MAX) return;
+    autoMemoryBusy = true;
+
+    setImmediate(async () => {
+      try {
+        const known = loadMemories(scope).map((m) => `- ${m.text}`).join('\n');
+        const system =
+          '你是对话记忆提取器。从对话中提取值得长期记住的信息（用户偏好/项目约定/重要事实）。' +
+          '排除一次性任务请求、闲聊和代码本身。若已被已知记忆覆盖或没有新信息，返回空数组 []。' +
+          '只输出 JSON 字符串数组，最多 3 条，每条为独立陈述句且不超过 100 字。';
+        const user =
+          `已知记忆:\n${known || '（无）'}\n\n对话:\n用户: ${u.slice(0, 800)}\n助手: ${String(assistantText || '').trim().slice(0, 400)}`;
+        const r = await provider.chat(
+          [
+            { role: 'system', content: system },
+            { role: 'user', content: user }
+          ],
+          { temperature: 0.2, maxTokens: 300 }
+        );
+        const raw = typeof r.content === 'string' ? r.content : String(r.content || '');
+        const stripped = raw.replace(/```(?:json)?/g, '').trim();
+        let arr = null;
+        try {
+          arr = JSON.parse(stripped);
+        } catch {
+          const m = raw.match(/\[[\s\S]*\]/);
+          if (m) {
+            try {
+              arr = JSON.parse(m[0]);
+            } catch {
+              /* 放弃本轮 */
+            }
+          }
+        }
+        if (!Array.isArray(arr)) return;
+        const norm = (s) => String(s || '').replace(/\s+/g, '').toLowerCase();
+        const existing = loadMemories(scope);
+        const picked = arr
+          .filter((s) => typeof s === 'string' && s.trim().length >= 4)
+          .map((s) => s.trim().slice(0, 200))
+          .filter((s) => !existing.some((m) => norm(m.text) === norm(s) || m.text.includes(s) || s.includes(m.text)))
+          .slice(0, 3);
+        for (const s of picked) {
+          if (addMemory(s, 'auto', scope)) logger.info(`自动记忆: ${s}`);
+        }
+      } catch (e) {
+        logger.warn('自动记忆提取失败:', e.message);
+      } finally {
+        autoMemoryBusy = false;
+      }
+    });
+  } catch (e) {
+    autoMemoryBusy = false;
+    logger.warn('自动记忆调度失败:', e.message);
+  }
+}
+
+/** 记忆注入文本（无记忆时返回空串）；scope 空 = 全局记忆，非空 = 对话隔离记忆 */
+function memoryPromptBlock(scope) {
+  const list = loadMemories(scope);
   if (list.length === 0) return '';
   return `\n\n已知用户偏好与项目约定（请遵守，不要重复询问）：\n${list.map((m) => `- ${m.text}`).join('\n')}`;
 }
@@ -203,7 +292,7 @@ const CHAT_MESSAGE_MAX_CHARS = 2000;
  */
 router.post('/chat', async (req, res) => {
   try {
-    const { messages, context } = req.body || {};
+    const { messages, context, memoryScope } = req.body || {};
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json(error('缺少对话消息', 400));
@@ -223,16 +312,18 @@ router.post('/chat', async (req, res) => {
       return res.status(400).json(error('对话格式不正确', 400));
     }
 
-    // 跨会话记忆：从用户消息自动提取偏好/约定（异步无关，失败不影响回复）
-    extractMemoryFromText(history[history.length - 1].content);
-
     // 上下文压缩（早期历史 → 摘要）+ 记忆与工作区上下文注入
-    const systemPrompt = CHAT_SYSTEM_PROMPT + memoryPromptBlock() + contextPromptBlock(context);
+    // memoryScope: 空串/未传 = 跨对话全局记忆；非空 = 按对话隔离的记忆
+    const scope = typeof memoryScope === 'string' ? memoryScope : '';
+    const systemPrompt = CHAT_SYSTEM_PROMPT + memoryPromptBlock(scope) + contextPromptBlock(context);
     const chatMessages = buildChatMessages(systemPrompt, history);
 
     const result = await provider.chat(chatMessages, { temperature: 0.8, maxTokens: 2048 });
 
     const reply = typeof result.content === 'string' ? result.content : String(result.content || '');
+
+    // 全自动记忆：响应完成后异步提取（不阻塞、失败静默）
+    scheduleAutoMemory({ provider, userText: history[history.length - 1].content, assistantText: reply, scope });
 
     return res.json(success({
       reply,
@@ -257,7 +348,7 @@ router.post('/chat/stream', async (req, res) => {
   });
 
   try {
-    const { messages, context } = req.body || {};
+    const { messages, context, memoryScope } = req.body || {};
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json(error('缺少对话消息', 400));
     }
@@ -274,9 +365,8 @@ router.post('/chat/stream', async (req, res) => {
       return res.status(400).json(error('对话格式不正确', 400));
     }
 
-    extractMemoryFromText(history[history.length - 1].content);
-
-    const systemPrompt = CHAT_SYSTEM_PROMPT + memoryPromptBlock() + contextPromptBlock(context);
+    const scope = typeof memoryScope === 'string' ? memoryScope : '';
+    const systemPrompt = CHAT_SYSTEM_PROMPT + memoryPromptBlock(scope) + contextPromptBlock(context);
     const chatMessages = buildChatMessages(systemPrompt, history);
 
     res.writeHead(200, {
@@ -289,15 +379,23 @@ router.post('/chat/stream', async (req, res) => {
       if (!closed) res.write(`data: ${JSON.stringify(obj)}\n\n`);
     };
 
+    let replyBuf = ''; // 累积完整回复，供结束后自动记忆提取
     const result = await provider.chatStream(
       chatMessages,
       { temperature: 0.8, maxTokens: 2048 },
-      (delta) => sendSSE({ delta }),
+      (delta) => {
+        replyBuf += delta;
+        sendSSE({ delta });
+      },
       controller.signal
     );
 
     sendSSE({ done: true, usage: result.usage || null });
     if (!closed) res.end();
+    // 全自动记忆：仅在流正常结束（未被客户端中断）时提取，中断时上下文不完整
+    if (!closed) {
+      scheduleAutoMemory({ provider, userText: history[history.length - 1].content, assistantText: replyBuf, scope });
+    }
   } catch (err) {
     if (err && err.name === 'AbortError') {
       logger.info('AI流式对话被客户端中断');
@@ -315,36 +413,21 @@ router.post('/chat/stream', async (req, res) => {
 });
 
 /**
- * 跨会话记忆管理：列表 / 新增 / 删除 / 清空
+ * 跨会话记忆管理：列表 / 删除 / 清空
+ * 记忆写入完全由对话过程中的 LLM 自动提取完成，不再提供 HTTP 手动新增入口；
+ * scope 为对话标识（关闭跨对话记忆时按对话隔离），空 = 全局。
  */
 router.get('/memory/list', (req, res) => {
-  return res.json(success({ memories: loadMemories(), file: MEMORY_FILE }));
-});
-
-router.post('/memory', (req, res) => {
-  try {
-    const { text } = req.body || {};
-    if (!text || !String(text).trim()) {
-      return res.status(400).json(error('缺少记忆内容', 400));
-    }
-    const list = loadMemories();
-    if (list.length >= MEMORY_MAX) {
-      return res.json(error(`记忆已达上限（${MEMORY_MAX} 条），请先删除部分记忆`, 400));
-    }
-    const item = addMemory(text);
-    if (!item) return res.json(error('该记忆已存在', 400));
-    return res.json(success(item));
-  } catch (err) {
-    logger.error('新增记忆失败:', err);
-    return res.status(500).json(error(err.message));
-  }
+  const scope = typeof req.query.scope === 'string' ? req.query.scope : '';
+  return res.json(success({ memories: loadMemories(scope), file: memoryFileForScope(scope) }));
 });
 
 router.delete('/memory/:id', (req, res) => {
   try {
-    const list = loadMemories();
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : '';
+    const list = loadMemories(scope);
     const next = list.filter((m) => m.id !== req.params.id);
-    saveMemories(next);
+    saveMemories(next, scope);
     return res.json(success({ removed: list.length - next.length }));
   } catch (err) {
     return res.status(500).json(error(err.message));
@@ -353,7 +436,8 @@ router.delete('/memory/:id', (req, res) => {
 
 router.delete('/memory', (req, res) => {
   try {
-    saveMemories([]);
+    const scope = typeof req.query.scope === 'string' ? req.query.scope : '';
+    saveMemories([], scope);
     return res.json(success({ cleared: true }));
   } catch (err) {
     return res.status(500).json(error(err.message));
@@ -413,7 +497,8 @@ module.exports = router;
 module.exports.CHAT_SYSTEM_PROMPT = CHAT_SYSTEM_PROMPT;
 module.exports.buildChatMessages = buildChatMessages;
 module.exports.memoryPromptBlock = memoryPromptBlock;
-module.exports.extractMemoryFromText = extractMemoryFromText;
+module.exports.extractMemoryFromText = extractMemoryFromText; // @deprecated 保留防外部引用
+module.exports.scheduleAutoMemory = scheduleAutoMemory;
 module.exports.loadMemories = loadMemories;
 module.exports.saveMemories = saveMemories;
 module.exports.addMemory = addMemory;

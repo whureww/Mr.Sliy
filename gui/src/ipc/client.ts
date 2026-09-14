@@ -174,10 +174,10 @@ export interface ChatResult {
   usage?: unknown;
 }
 
-export async function chatWithAI(messages: ChatMsg[], context?: ChatContext | null, signal?: AbortSignal): Promise<ChatResult> {
+export async function chatWithAI(messages: ChatMsg[], context?: ChatContext | null, signal?: AbortSignal, memoryScope?: string): Promise<ChatResult> {
   const raw = IS_TAURI
-    ? await sidecarRequest<unknown>('POST', '/api/ai/chat', { messages, context }, signal)
-    : await httpPost<unknown>('/api/ai/chat', { messages, context });
+    ? await sidecarRequest<unknown>('POST', '/api/ai/chat', { messages, context, memoryScope }, signal)
+    : await httpPost<unknown>('/api/ai/chat', { messages, context, memoryScope });
   return unwrapData<ChatResult>(raw);
 }
 
@@ -196,13 +196,13 @@ export interface ChatContext {
 export async function chatWithAIStream(
   messages: ChatMsg[],
   context: ChatContext | null,
-  opts: { onDelta: (delta: string) => void; signal?: AbortSignal }
+  opts: { onDelta: (delta: string) => void; signal?: AbortSignal; memoryScope?: string }
 ): Promise<{ reply: string; usage?: unknown }> {
   const port = IS_TAURI ? await sidecarPort() : DEV_PORT;
   const res = await fetch(`http://127.0.0.1:${port}/api/ai/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ messages, context }),
+    body: JSON.stringify({ messages, context, memoryScope: opts.memoryScope }),
     signal: opts.signal
   });
   if (!res.ok || !res.body) {
@@ -245,6 +245,8 @@ export async function chatWithAIStream(
 export interface MemoryItem {
   id: string;
   text: string;
+  /** 来源：auto=对话后 LLM 自动提取，manual=手动添加；旧数据无此字段按 manual 渲染 */
+  source?: 'auto' | 'manual';
   createdAt: string;
 }
 
@@ -253,16 +255,42 @@ export async function getMemories(): Promise<MemoryItem[]> {
   return r.memories;
 }
 
-export async function addMemory(text: string): Promise<MemoryItem> {
-  return unwrapData<MemoryItem>(await sidecarRequest('POST', '/api/ai/memory', { text }));
-}
-
 export async function deleteMemory(id: string): Promise<void> {
   unwrapData(await sidecarRequest('DELETE', `/api/ai/memory/${id}`));
 }
 
 export async function clearMemories(): Promise<void> {
   unwrapData(await sidecarRequest('DELETE', '/api/ai/memory'));
+}
+
+// ---------- 记忆作用域（跨对话开关） ----------
+
+/** 跨对话记忆开关的本地持久化键（默认开启） */
+const MEMORY_CROSS_CHAT_KEY = 'mrsliy.memoryCrossChat';
+
+export function isMemoryCrossChat(): boolean {
+  try {
+    return localStorage.getItem(MEMORY_CROSS_CHAT_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+export function setMemoryCrossChat(v: boolean): void {
+  try {
+    localStorage.setItem(MEMORY_CROSS_CHAT_KEY, v ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 计算聊天请求应携带的 memoryScope:
+ * - 跨对话开启 → ''(全局记忆,所有对话共享)
+ * - 跨对话关闭 → 对话标识(工作区路径),记忆按对话隔离
+ */
+export function memoryScopeFor(crossChat: boolean, conversationId: string | null | undefined): string {
+  return crossChat ? '' : String(conversationId || 'default');
 }
 
 // ---------- 项目级扫描与分析报告 ----------

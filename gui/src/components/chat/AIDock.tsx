@@ -12,6 +12,8 @@ interface Props {
   scanning: boolean;
   analysisMode: AnalysisMode;
   locked?: boolean; // 会话锁定：助手输入禁用
+  /** 记忆作用域：空串 = 跨对话全局记忆；非空 = 按对话隔离（由父组件按开关状态计算） */
+  memoryScope?: string;
   /** 门控：应用代码修改（在当前文件中定位替换并保存），返回错误信息或 null（成功） */
   onApplyCode?: (originalCode: string, modifiedCode: string) => Promise<string | null>;
 }
@@ -59,7 +61,7 @@ const RISK_KEY: Record<string, string> = {
 };
 
 /** 编辑模式悬浮 AI 小框：收纳为右下角气泡，展开为紧凑对话窗 */
-export default function AIDock({ currentFile, result, scanning, analysisMode, locked, onApplyCode }: Props) {
+export default function AIDock({ currentFile, result, scanning, analysisMode, locked, memoryScope, onApplyCode }: Props) {
   useLang();
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState('');
@@ -120,7 +122,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
           role: m.from === 'user' ? 'user' : 'assistant',
           content: m.raw ?? m.text
         }));
-        const res = await chatWithAI(history, null, controller.signal);
+        const res = await chatWithAI(history, null, controller.signal, memoryScope ?? '');
         const replyStr = typeof res.reply === 'string' ? res.reply : String(res.reply || '');
         const { text: display, mod, parseFailed } = parseReply(replyStr);
         const note = parseFailed ? '\n\n' + t('ai.parseFail') : '';

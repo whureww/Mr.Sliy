@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { analyzeFile, AnalysisMode, AnalyzeResult, Issue, listDir, readFile, saveFile, loadState, saveState, chatWithAIStream, getLlmProviders, projectScan, generateReport, ProjectScanResult } from '../ipc/client';
+import { analyzeFile, AnalysisMode, AnalyzeResult, Issue, listDir, readFile, saveFile, loadState, saveState, chatWithAIStream, getLlmProviders, projectScan, generateReport, ProjectScanResult, isMemoryCrossChat, memoryScopeFor } from '../ipc/client';
 import { DiffPayload } from '../App';
 import { optimizeCode } from '../ipc/client';
 import { openContextMenu, copyText } from '../lib/contextMenu';
@@ -7,6 +7,7 @@ import { ModProposal, parseReply } from '../lib/modProposal';
 import AnalysisView from './AnalysisView';
 import AIDock from '../components/chat/AIDock';
 import CodeEditor from '../components/editor/CodeEditor';
+import ResizeHandle from '../components/common/ResizeHandle';
 import WorkspaceNav, { Workspace } from '../components/nav/WorkspaceNav';
 import {
   WorkbenchMode,
@@ -58,6 +59,47 @@ const PIPELINE: Omit<AnalysisStep, 'done'>[] = [
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+// ---------- 可调布局 ----------
+/** 布局状态：侧栏/问题面板宽度与折叠，持久化到 localStorage（独立于会话数据 guiState） */
+interface LayoutState {
+  navWidth: number;
+  panelWidth: number;
+  navCollapsed: boolean;
+  panelCollapsed: boolean;
+}
+const LAYOUT_KEY = 'mrsliy.layout';
+const NAV_DEFAULT = 240;
+const NAV_MIN = 180;
+const NAV_MAX = 400;
+const PANEL_DEFAULT = 320;
+const PANEL_MIN = 260;
+const PANEL_MAX = 560;
+/** 折叠后的窄条宽度 */
+const COLLAPSED_W = 48;
+
+const clampW = (v: unknown, min: number, max: number, dft: number) => {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dft;
+};
+
+function loadLayout(): LayoutState {
+  try {
+    const raw = localStorage.getItem(LAYOUT_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) || {};
+      return {
+        navWidth: clampW(p.navWidth, NAV_MIN, NAV_MAX, NAV_DEFAULT),
+        panelWidth: clampW(p.panelWidth, PANEL_MIN, PANEL_MAX, PANEL_DEFAULT),
+        navCollapsed: Boolean(p.navCollapsed),
+        panelCollapsed: Boolean(p.panelCollapsed)
+      };
+    }
+  } catch {
+    /* 损坏数据走默认 */
+  }
+  return { navWidth: NAV_DEFAULT, panelWidth: PANEL_DEFAULT, navCollapsed: false, panelCollapsed: false };
+}
+
 export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode, onReady }: Props) {
   useLang(); // 订阅语言切换，触发重渲染
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
@@ -82,6 +124,31 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const restoring = useRef(false);
   const loaded = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---------- 可调布局状态 ----------
+  const [layout, setLayout] = useState<LayoutState>(loadLayout);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  /** 拖拽中仅更新内存态；mouseup 提交时统一持久化 */
+  const persistLayout = useCallback(() => {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify(layoutRef.current));
+    } catch {
+      /* 存储不可用忽略 */
+    }
+  }, []);
+  const patchLayout = useCallback((patch: Partial<LayoutState>) => {
+    setLayout((l) => {
+      const next = { ...l, ...patch };
+      layoutRef.current = next;
+      try {
+        localStorage.setItem(LAYOUT_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
 
   /** 持久化（防抖 600ms）到 ~/.mr-sliy/gui-state/guiState.json */
   const scheduleSave = useCallback(() => {
@@ -479,7 +546,9 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         setMessages((m) => m.map((msg) => (msg.id === aid ? { ...msg, typing: false, text: '', streaming: true } : msg)));
         const res = await chatWithAIStream(hist, chatContext(), {
           signal: controller.signal,
-          onDelta: (d) => setMessages((m) => m.map((msg) => (msg.id === aid ? { ...msg, text: (msg.text || '') + d } : msg)))
+          onDelta: (d) => setMessages((m) => m.map((msg) => (msg.id === aid ? { ...msg, text: (msg.text || '') + d } : msg))),
+          // 跨对话记忆关闭时按工作区隔离记忆;开启时空串=全局
+          memoryScope: memoryScopeFor(isMemoryCrossChat(), activeWs)
         });
         const raw = res.reply;
         const parsed = parseReply(raw);
@@ -743,26 +812,41 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   }, []);
 
   const nav = (
-    <WorkspaceNav
-      workspaces={workspaces}
-      activeWs={activeWs}
-      currentFile={currentFile}
-      loadDir={listDir}
-      onAdd={addWorkspace}
-      onRemove={removeWorkspace}
-      onToggleLock={toggleLock}
-      onArchive={(p) => {
-        setWorkspaces((ws) => ws.map((w) => (w.path === p ? { ...w, archived: !w.archived } : w)));
-        scheduleSave();
-      }}
-      onSchedule={(p, minutes) => {
-        setWorkspaces((ws) => ws.map((w) => (w.path === p ? { ...w, scheduleMinutes: minutes } : w)));
-        scheduleSave();
-      }}
-      onProjectScan={runProjectScan}
-      onSelect={(p) => switchTo(p)}
-      onOpenFile={openFile}
-    />
+    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0 }}>
+      <WorkspaceNav
+        workspaces={workspaces}
+        activeWs={activeWs}
+        currentFile={currentFile}
+        loadDir={listDir}
+        onAdd={addWorkspace}
+        onRemove={removeWorkspace}
+        onToggleLock={toggleLock}
+        onArchive={(p) => {
+          setWorkspaces((ws) => ws.map((w) => (w.path === p ? { ...w, archived: !w.archived } : w)));
+          scheduleSave();
+        }}
+        onSchedule={(p, minutes) => {
+          setWorkspaces((ws) => ws.map((w) => (w.path === p ? { ...w, scheduleMinutes: minutes } : w)));
+          scheduleSave();
+        }}
+        onProjectScan={runProjectScan}
+        onSelect={(p) => switchTo(p)}
+        onOpenFile={openFile}
+        collapsed={layout.navCollapsed}
+        onToggleCollapse={() => patchLayout({ navCollapsed: !layoutRef.current.navCollapsed })}
+      />
+      {!layout.navCollapsed && (
+        <ResizeHandle
+          dir="right"
+          width={layout.navWidth}
+          min={NAV_MIN}
+          max={NAV_MAX}
+          onWidth={(w) => setLayout((l) => ({ ...l, navWidth: w }))}
+          onCommit={persistLayout}
+          onReset={() => patchLayout({ navWidth: NAV_DEFAULT, navCollapsed: false })}
+        />
+      )}
+    </div>
   );
 
   /** 聊天/扫描进行中（用于停止按钮） */
@@ -770,7 +854,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
 
   if (mode === 'analysis') {
     return (
-      <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 16, height: '100%' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: layout.navCollapsed ? `${COLLAPSED_W}px 1fr` : `${layout.navWidth}px 1fr`, gap: 16, height: '100%' }}>
         {nav}
         <AnalysisView
           currentFile={currentFile}
@@ -791,8 +875,9 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     );
   }
 
+  const panelCol = layout.panelCollapsed ? `${COLLAPSED_W}px` : `${layout.panelWidth}px`;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr 320px', gap: 16, height: '100%', position: 'relative' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: `${layout.navCollapsed ? `${COLLAPSED_W}px` : `${layout.navWidth}px`} 1fr ${panelCol}`, gap: 16, height: '100%', position: 'relative' }}>
       {nav}
 
       {/* 中栏 · 编辑器（编辑模式主区域）：彩色语法高亮 + 可编辑任意行 */}
@@ -905,61 +990,95 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         </div>
       </section>
 
-      {/* 右栏 · 问题精简面板：分析过程只显示部分 */}
-      <aside className="card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, padding: 14, position: 'relative' }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
-          <strong style={{ fontSize: 14 }}>{t('wb.issues')}</strong>
-          {result && <span className="muted" style={{ fontSize: 12 }}>{t('wb.issueCount', { n: result.totalIssues, lang: result.language })}</span>}
-        </div>
-        <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-hairline)' }}>
-          {scanning ? (
-            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('wb.analyzingPipeline')}</span>
-          ) : (
-            t('wb.pipelineDesc')
-          )}
-        </div>
-        <div style={{ overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!result && !scanning && <div className="muted" style={{ fontSize: 13 }}>{t('wb.scanToSee')}</div>}
-          {scanning && (
-            <div style={{ background: 'var(--accent-tint)', borderRadius: 10, padding: 12, fontSize: 12.5, color: 'var(--accent)', lineHeight: 1.7 }}>
-              {t('wb.analyzingFile', { file: currentFile ? fileName(currentFile.path) : '' })}
-            </div>
-          )}
-          {result?.issues?.slice(0, 3).map((iss, i) => (
-            <div key={i} style={{ background: 'var(--bg-recessed)', borderRadius: 10, padding: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: severityColor(iss.severity) }} />
-                <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{iss.issueType}</span>
-                {iss.line != null && <span className="muted" style={{ fontSize: 11 }}>L{iss.line}</span>}
-              </div>
-              <div style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.6 }}>{iss.message}</div>
-              <button
-                className="btn-primary"
-                style={{ fontSize: 12, padding: '5px 12px' }}
-                onClick={() => fix(iss)}
-                disabled={fixing !== null}
-              >
-                {fixing === iss.issueType ? t('wb.optimizing') : t('an.fix')}
-              </button>
-            </div>
-          ))}
-          {result && result.totalIssues === 0 && (
-            <div style={{ color: 'var(--success)', fontSize: 13 }}>{t('wb.noIssues')}</div>
-          )}
-        </div>
-        {result && (result.issues?.length || 0) > 3 && (
+      {/* 右栏 · 问题精简面板：分析过程只显示部分；可拖拽调宽 / 折叠为窄条 */}
+      {layout.panelCollapsed ? (
+        <aside className="card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: '10px 0', minHeight: 0 }}>
           <button
             className="btn-ghost"
-            style={{ marginTop: 10, fontSize: 12.5 }}
-            onClick={() => onModeChange('analysis')}
+            onClick={() => patchLayout({ panelCollapsed: false })}
+            title={t('wb.panelExpand')}
+            style={{ width: 30, height: 30, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}
           >
-            {t('wb.moreIssues', { n: (result.issues?.length || 0) - 3 })}
+            »
           </button>
-        )}
-      </aside>
+          <div className="muted" style={{ writingMode: 'vertical-rl', fontSize: 10.5, letterSpacing: 1.5 }}>
+            {t('wb.issues')}
+          </div>
+        </aside>
+      ) : (
+        <aside className="card" style={{ display: 'flex', flexDirection: 'column', minHeight: 0, padding: 14, position: 'relative' }}>
+          <ResizeHandle
+            dir="left"
+            width={layout.panelWidth}
+            min={PANEL_MIN}
+            max={PANEL_MAX}
+            onWidth={(w) => setLayout((l) => ({ ...l, panelWidth: w }))}
+            onCommit={persistLayout}
+            onReset={() => patchLayout({ panelWidth: PANEL_DEFAULT, panelCollapsed: false })}
+          />
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 10 }}>
+            <strong style={{ fontSize: 14 }}>{t('wb.issues')}</strong>
+            {result && <span className="muted" style={{ fontSize: 12 }}>{t('wb.issueCount', { n: result.totalIssues, lang: result.language })}</span>}
+            <div style={{ flex: 1 }} />
+            <button
+              className="btn-ghost"
+              onClick={() => patchLayout({ panelCollapsed: true })}
+              title={t('wb.panelCollapse')}
+              style={{ width: 22, height: 22, padding: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 }}
+            >
+              «
+            </button>
+          </div>
+          <div className="muted" style={{ fontSize: 11.5, lineHeight: 1.7, marginBottom: 12, paddingBottom: 10, borderBottom: '1px solid var(--border-hairline)' }}>
+            {scanning ? (
+              <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{t('wb.analyzingPipeline')}</span>
+            ) : (
+              t('wb.pipelineDesc')
+            )}
+          </div>
+          <div style={{ overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {!result && !scanning && <div className="muted" style={{ fontSize: 13 }}>{t('wb.scanToSee')}</div>}
+            {scanning && (
+              <div style={{ background: 'var(--accent-tint)', borderRadius: 10, padding: 12, fontSize: 12.5, color: 'var(--accent)', lineHeight: 1.7 }}>
+                {t('wb.analyzingFile', { file: currentFile ? fileName(currentFile.path) : '' })}
+              </div>
+            )}
+            {result?.issues?.slice(0, 3).map((iss, i) => (
+              <div key={i} style={{ background: 'var(--bg-recessed)', borderRadius: 10, padding: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: '50%', background: severityColor(iss.severity) }} />
+                  <span className="mono" style={{ fontSize: 12, fontWeight: 600 }}>{iss.issueType}</span>
+                  {iss.line != null && <span className="muted" style={{ fontSize: 11 }}>L{iss.line}</span>}
+                </div>
+                <div style={{ fontSize: 12.5, marginBottom: 10, lineHeight: 1.6 }}>{iss.message}</div>
+                <button
+                  className="btn-primary"
+                  style={{ fontSize: 12, padding: '5px 12px' }}
+                  onClick={() => fix(iss)}
+                  disabled={fixing !== null}
+                >
+                  {fixing === iss.issueType ? t('wb.optimizing') : t('an.fix')}
+                </button>
+              </div>
+            ))}
+            {result && result.totalIssues === 0 && (
+              <div style={{ color: 'var(--success)', fontSize: 13 }}>{t('wb.noIssues')}</div>
+            )}
+          </div>
+          {result && (result.issues?.length || 0) > 3 && (
+            <button
+              className="btn-ghost"
+              style={{ marginTop: 10, fontSize: 12.5 }}
+              onClick={() => onModeChange('analysis')}
+            >
+              {t('wb.moreIssues', { n: (result.issues?.length || 0) - 3 })}
+            </button>
+          )}
+        </aside>
+      )}
 
       {/* 编辑模式专属：AI 悬浮小框 */}
-      <AIDock currentFile={currentFile} result={result} scanning={scanning} analysisMode={analysisMode} locked={activeLocked} onApplyCode={applyCodeChange} />
+      <AIDock currentFile={currentFile} result={result} scanning={scanning} analysisMode={analysisMode} locked={activeLocked} onApplyCode={applyCodeChange} memoryScope={memoryScopeFor(isMemoryCrossChat(), activeWs)} />
     </div>
   );
 }

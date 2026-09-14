@@ -11,7 +11,6 @@ import {
   APP_VERSION,
   activateLlmProvider,
   addCustomProvider,
-  addMemory,
   checkForUpdate,
   clearMemories,
   deleteLlmProvider,
@@ -24,9 +23,11 @@ import {
   getUpdateDownloadStatus,
   getUpdateSource,
   installUpdate,
+  isMemoryCrossChat,
   openExternal,
   saveLlmProvider,
   saveUpdateSource,
+  setMemoryCrossChat,
   startUpdateDownload
 } from '../ipc/client';
 import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, paletteOf, themeOf } from '../lib/appearance';
@@ -159,7 +160,8 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   const [customModel, setCustomModel] = useState('');
   // 记忆库
   const [memories, setMemories] = useState<MemoryItem[] | null>(null);
-  const [memDraft, setMemDraft] = useState('');
+  // 跨对话记忆开关:开启=全局共享;关闭=按对话隔离(记忆仍生效但互不共享)
+  const [crossChat, setCrossChat] = useState(() => isMemoryCrossChat());
   // 更新记录
   const [updates, setUpdates] = useState<UpdateRecord[] | null>(null);
   // 检查更新
@@ -389,19 +391,6 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
     }
   };
 
-  const submitMemory = async () => {
-    const text = memDraft.trim();
-    if (!text) return;
-    try {
-      await addMemory(text);
-      setMemDraft('');
-      flash(true, t('toast.memoryAdded'));
-      await refreshMemories();
-    } catch (e) {
-      flash(false, t('toast.memFail', { msg: (e as Error).message }));
-    }
-  };
-
   const removeMemory = async (id: string) => {
     try {
       await deleteMemory(id);
@@ -612,53 +601,105 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
         </Collapse>
       </section>
 
-      {/* 记忆库：跨会话记忆管理 */}
+      {/* 记忆库:全自动记忆(LLM 对话中自动提取),仅提供查看/纠错与作用域开关 */}
       <section className="card" style={{ padding: 18 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
           <div style={{ fontWeight: 650, fontSize: 14 }}>{t('settings.memory.title')}</div>
           <div className="muted" style={{ fontSize: 12, flex: 1 }}>{t('settings.memory.desc')}</div>
-          {(memories?.length || 0) > 0 && (
+          {crossChat && (memories?.length || 0) > 0 && (
             <button className="btn-ghost" style={{ fontSize: 12, padding: '5px 12px', color: 'var(--danger)' }} onClick={clearAllMemories}>
               {t('memory.clear')}
             </button>
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <input
-            value={memDraft}
-            onChange={(e) => setMemDraft(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && submitMemory()}
-            placeholder={t('memory.addPh')}
-            style={{ ...inputStyle, flex: 1 }}
-          />
-          <button className="btn-primary" style={{ fontSize: 12.5 }} disabled={!memDraft.trim()} onClick={submitMemory}>
-            {t('common.add')}
+        {/* 跨对话记忆开关:开启=所有对话共享记忆;关闭=每个对话独立记忆,互不共享 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+          <button
+            role="switch"
+            aria-checked={crossChat}
+            onClick={() => {
+              const next = !crossChat;
+              setCrossChat(next);
+              setMemoryCrossChat(next);
+            }}
+            style={{
+              width: 36,
+              height: 20,
+              borderRadius: 10,
+              border: 'none',
+              padding: 0,
+              cursor: 'pointer',
+              flexShrink: 0,
+              background: crossChat ? 'var(--accent)' : 'var(--bg-recessed)',
+              boxShadow: 'inset 0 0 0 1px var(--border-hairline)',
+              position: 'relative',
+              transition: 'background 0.18s ease'
+            }}
+          >
+            <span
+              style={{
+                position: 'absolute',
+                top: 2,
+                left: crossChat ? 18 : 2,
+                width: 16,
+                height: 16,
+                borderRadius: '50%',
+                background: crossChat ? '#FFFFFF' : 'var(--text-muted)',
+                transition: 'left 0.18s ease, background 0.18s ease'
+              }}
+            />
           </button>
+          <div style={{ fontSize: 13 }}>
+            <span style={{ fontWeight: 600 }}>{t('memory.crossChat')}</span>
+            <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>{t('memory.crossChatTip')}</span>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
-          {memories === null && <div className="muted" style={{ fontSize: 13 }}>{t('common.loading')}</div>}
-          {memories?.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>{t('memory.empty')}</div>}
-          {memories?.map((m) => (
-            <div
-              key={m.id}
-              className="selectable"
-              style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg-recessed)', borderRadius: 9, fontSize: 12.5 }}
-            >
-              <span style={{ flex: 1, lineHeight: 1.6 }}>{m.text}</span>
-              {m.createdAt && <span className="muted mono" style={{ fontSize: 10.5, flexShrink: 0 }}>{String(m.createdAt).slice(0, 16).replace('T', ' ')}</span>}
-              <button
-                className="btn-ghost"
-                style={{ fontSize: 11.5, padding: '2px 8px', flexShrink: 0 }}
-                title={t('provider.delete')}
-                onClick={() => removeMemory(m.id)}
+        {crossChat ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 12 }}>
+            {memories === null && <div className="muted" style={{ fontSize: 13 }}>{t('common.loading')}</div>}
+            {memories?.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>{t('memory.empty')}</div>}
+            {memories?.map((m) => (
+              <div
+                key={m.id}
+                className="selectable"
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: 'var(--bg-recessed)', borderRadius: 9, fontSize: 12.5 }}
               >
-                ×
-              </button>
-            </div>
-          ))}
-        </div>
+                <span style={{ flex: 1, lineHeight: 1.6 }}>{m.text}</span>
+                {m.source && (
+                  <span
+                    title={m.source === 'auto' ? t('memory.autoTip') : t('memory.manualTip')}
+                    style={{
+                      fontSize: 10.5,
+                      flexShrink: 0,
+                      padding: '1px 8px',
+                      borderRadius: 6,
+                      fontWeight: 600,
+                      color: m.source === 'auto' ? 'var(--accent)' : 'var(--text-muted)',
+                      background: m.source === 'auto' ? 'var(--accent-tint)' : 'color-mix(in srgb, var(--text-muted) 12%, transparent)'
+                    }}
+                  >
+                    {m.source === 'auto' ? t('memory.auto') : t('memory.manual')}
+                  </span>
+                )}
+                {m.createdAt && <span className="muted mono" style={{ fontSize: 10.5, flexShrink: 0 }}>{String(m.createdAt).slice(0, 16).replace('T', ' ')}</span>}
+                <button
+                  className="btn-ghost"
+                  style={{ fontSize: 11.5, padding: '2px 8px', flexShrink: 0 }}
+                  title={t('provider.delete')}
+                  onClick={() => removeMemory(m.id)}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 12, lineHeight: 1.7, padding: '10px 14px', background: 'var(--bg-recessed)', borderRadius: 9 }}>
+            {t('memory.isolatedDesc')}
+          </div>
+        )}
       </section>
 
       {/* 检查更新：自动对比 GitHub Releases 版本 */}

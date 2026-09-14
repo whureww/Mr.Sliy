@@ -188,11 +188,11 @@ button {
 .ask-bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   border: 1px solid var(--border-hairline);
   border-radius: 12px;
   background: var(--bg-card);
-  padding: 5px 5px 5px 14px;
+  padding: 7px 7px 7px 16px;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .ask-bar:focus-within {
@@ -206,16 +206,16 @@ button {
   border: none;
   outline: none;
   background: transparent;
-  font-size: 13.5px;
+  font-size: 14px;
   font-family: var(--font-ui);
   color: var(--text-primary);
-  padding: 6px 0;
+  padding: 10px 0;
 }
 .ask-input::placeholder { color: var(--text-muted); }
 .ask-send {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
   background: var(--accent);
   color: #FFFFFF;
   display: inline-flex;
@@ -280,16 +280,16 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
+  margin-top: 7px;
   padding: 0 4px;
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--text-muted);
 }
 .ask-hint kbd {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 10.5px;
   background: var(--bg-recessed);
   border: 1px solid var(--border-hairline);
   border-radius: 4px;
-  padding: 1px 5px;
+  padding: 1px 6px;
 }
