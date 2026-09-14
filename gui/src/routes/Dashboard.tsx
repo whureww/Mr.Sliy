@@ -13,6 +13,8 @@ interface Stats {
   typeStats: StatRow[];
   severityStats: StatRow[];
   languageStats: StatRow[];
+  unfixedSeverityStats?: StatRow[];
+  projectSize?: { totalFiles?: number; totalLines?: number };
 }
 
 /** 严重度归一化：检测器可能输出 high/error、medium/warning、其余归低 */
@@ -21,6 +23,30 @@ function sevBucket(sev: unknown): 'high' | 'medium' | 'low' {
   if (s.includes('high') || s.includes('error') || s.includes('critical')) return 'high';
   if (s.includes('medium') || s.includes('warn') || s.includes('moderate')) return 'medium';
   return 'low';
+}
+
+// ---- 质量评分:加权缺陷密度(兼顾问题占比与严重等级) ----
+// 加权缺陷 = 高危×10 + 中危×3 + 低危×1(仅未修复)
+// 密度 = 加权缺陷 / 每千行代码(KLOC 下限 1,小项目不吃亏)
+// 扣分 = 密度 × 15 → 每千行 1 个加权缺陷扣 15 分,封顶扣 100
+// 分母(项目行数)缺失时(旧版本扫描的存量项目)回退为加权计数 ×2 扣减
+const W_HIGH = 10;
+const W_MEDIUM = 3;
+const W_LOW = 1;
+const DENSITY_FACTOR = 15;
+
+function computeQualityScore(
+  unfixedSev: { high: number; medium: number; low: number },
+  totalLines: number
+): { score: number; densityBased: boolean } {
+  const weighted = unfixedSev.high * W_HIGH + unfixedSev.medium * W_MEDIUM + unfixedSev.low * W_LOW;
+  if (weighted === 0) return { score: 100, densityBased: totalLines > 0 };
+  if (totalLines > 0) {
+    const kloc = Math.max(totalLines / 1000, 1);
+    const density = weighted / kloc;
+    return { score: Math.round(Math.max(0, 100 - density * DENSITY_FACTOR)), densityBased: true };
+  }
+  return { score: Math.max(0, 100 - weighted * 2), densityBased: false };
 }
 
 export default function Dashboard({ onReady }: { onReady?: () => void }) {
@@ -86,7 +112,14 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
   const fixed = stats?.fixed ?? 0;
   const unfixed = stats?.unfixed ?? 0;
   const fixRate = total > 0 ? Math.round((fixed / total) * 100) : 0;
-  const score = Math.max(0, Math.min(100, 100 - unfixed * 2));
+
+  // 未修复缺陷按严重度分桶 → 加权缺陷密度评分
+  const unfixedSev = { high: 0, medium: 0, low: 0 };
+  (stats?.unfixedSeverityStats || []).forEach((r) => {
+    unfixedSev[sevBucket(r.severity)] += Number(r.count) || 0;
+  });
+  const totalLines = Number(stats?.projectSize?.totalLines) || 0;
+  const { score, densityBased } = computeQualityScore(unfixedSev, totalLines);
   const scoreColor = score >= 80 ? 'var(--success)' : score >= 60 ? 'var(--warning)' : 'var(--danger)';
 
   const sev = { high: 0, medium: 0, low: 0 };
@@ -161,7 +194,9 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
         <div className="card" style={bento(1)}>
           <CardTitle>{t('dash.score')}</CardTitle>
           <div style={{ fontSize: 44, fontWeight: 700, color: scoreColor }}>{stats ? score : '—'}</div>
-          <div className="muted" style={{ fontSize: 12 }}>{t('dash.scoreDesc')}</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {densityBased ? t('dash.scoreDescDensity') : t('dash.scoreDescLegacy')}
+          </div>
         </div>
 
         <div className="card" style={bento(2)}>

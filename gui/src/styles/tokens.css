@@ -11,6 +11,11 @@
   --success: #3D9A6C;
   --warning: #D9930D;
   --danger: #C75450;
+  --danger-hover: #B03F3B;
+  /* 状态文字色(更新记录/任务状态等):亮色取加深变体保证白底可读 */
+  --success-text: #2E7D57;
+  --warning-text: #A87408;
+  --danger-text: #B03F3B;
   --radius: 14px;
   --radius-sm: 8px;
   --shadow-soft: 0 12px 40px rgba(38, 37, 35, 0.08);
@@ -36,6 +41,7 @@
   --disabled-bg: #2E2A22;
   --disabled-text: #5C5952;
   --danger-hover-bg: rgba(199, 84, 80, 0.16);
+  --danger-hover: #E06A63;
   --success-text: #4EC98C;
   --warning-text: #E0B34D;
   --danger-text: #FF8B84;
@@ -83,7 +89,7 @@ button {
   font-weight: 600;
 }
 .btn-primary:hover { background: var(--accent-hover); }
-.btn-primary:disabled { background: #F0D9B8; cursor: not-allowed; }
+.btn-primary:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 
 .btn-ghost {
   background: var(--bg-card);
@@ -134,15 +140,15 @@ button {
 
 /* 分析流水线当前执行步骤呼吸光环 */
 @keyframes stepPulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 135, 10, 0.35); }
-  50% { box-shadow: 0 0 0 5px rgba(232, 135, 10, 0.08); }
+  0%, 100% { box-shadow: 0 0 0 0 var(--pulse-ring); }
+  50% { box-shadow: 0 0 0 5px var(--pulse-halo); }
 }
 .step-active-ring {
   animation: stepPulse 1.6s infinite ease-in-out;
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #D8D6D0; border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
 /* 自定义右键菜单（屏蔽 WebView2 默认菜单） */
@@ -175,9 +181,9 @@ button {
   transition: background 0.25s ease;
 }
 .ctx-item:hover:not(:disabled) { background: var(--bg-recessed); }
-.ctx-item:disabled { color: #C4C2BC; cursor: default; }
+.ctx-item:disabled { color: var(--disabled-text); cursor: default; }
 .ctx-danger { color: var(--danger); }
-.ctx-danger:hover:not(:disabled) { background: #FBF0EE; }
+.ctx-danger:hover:not(:disabled) { background: var(--danger-hover-bg); }
 .ctx-sep {
   height: 1px;
   background: var(--border-hairline);
@@ -197,7 +203,7 @@ button {
 }
 .ask-bar:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(232, 135, 10, 0.10);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .ask-bar.disabled { opacity: 0.55; }
 .ask-input {
@@ -228,7 +234,7 @@ button {
 .ask-send:active:not(:disabled) { transform: scale(0.93); }
 .ask-send:disabled { background: var(--disabled-bg); cursor: not-allowed; }
 .ask-send.stopping { background: var(--danger); }
-.ask-send.stopping:hover { background: #B03F3B; }
+.ask-send.stopping:hover { background: var(--danger-hover); }
 
 /* ---------- 丝滑折叠:grid-rows 0fr↔1fr 过渡,高度自适应内容 ---------- */
 .collapse {

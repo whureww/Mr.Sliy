@@ -112,6 +112,14 @@ export function paletteOf(key: string, dark: boolean): ThemeColors {
   return dark ? p.dark : p;
 }
 
+/** '#RRGGBB' → 'r, g, b'(供 rgba 派生色拼接);非法输入回退橙色 */
+function hexToRgb(hex: string): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex || '').trim());
+  if (!m) return '232, 135, 10';
+  const n = parseInt(m[1], 16);
+  return `${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}`;
+}
+
 const TEXT = {
   light: { primary: '#262523', muted: '#8B8985' },
   dark: { primary: '#E8E6E2', muted: '#98958E' }
@@ -144,6 +152,11 @@ function applyInternal(a: Appearance) {
   root.style.setProperty('--border-hairline', c.border);
   root.style.setProperty('--text-primary', tx.primary);
   root.style.setProperty('--text-muted', tx.muted);
+  // 派生色:呼吸光环/聚焦环/脉冲底色随主题 accent 动态换算,保证任意主题色下都协调
+  const rgb = hexToRgb(c.accent);
+  root.style.setProperty('--pulse-ring', `rgba(${rgb}, 0.35)`);
+  root.style.setProperty('--pulse-halo', `rgba(${rgb}, 0.08)`);
+  root.style.setProperty('--focus-ring', `rgba(${rgb}, 0.10)`);
   root.style.setProperty(
     '--shadow-soft',
     dark ? '0 12px 40px rgba(0, 0, 0, 0.45)' : '0 12px 40px rgba(38, 37, 35, 0.08)'

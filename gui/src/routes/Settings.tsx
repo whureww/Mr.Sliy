@@ -6,6 +6,7 @@ import {
   LlmKeyInfo,
   LlmProvidersPayload,
   McpStatus,
+  McpSelftest,
   MemoryItem,
   UpdateRecord,
   APP_VERSION,
@@ -18,6 +19,7 @@ import {
   getLlmKeys,
   getLlmProviders,
   getMcpStatus,
+  runMcpSelftest,
   getMemories,
   getUpdateRecords,
   getUpdateDownloadStatus,
@@ -182,6 +184,8 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   const [showOlderUpdates, setShowOlderUpdates] = useState(false);
 
   const [mcp, setMcp] = useState<McpStatus | null>(null);
+  const [selftesting, setSelftesting] = useState(false);
+  const [selftest, setSelftest] = useState<McpSelftest | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
   const refresh = useCallback(async (retried?: boolean) => {
@@ -217,6 +221,23 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       setMcp(await getMcpStatus());
     } catch {
       setMcp(null);
+    }
+  }, []);
+
+  /** MCP 可用性自检:服务端真实走一遍 HTTP JSON-RPC 三步握手 */
+  const runSelftest = useCallback(async () => {
+    setSelftesting(true);
+    setSelftest(null);
+    try {
+      setSelftest(await runMcpSelftest());
+    } catch {
+      setSelftest({
+        available: false,
+        url: '',
+        steps: [{ step: 'selftest', ok: false, elapsed: 0, error: t('mcp.loadFail') }]
+      });
+    } finally {
+      setSelftesting(false);
     }
   }, []);
 
@@ -532,7 +553,7 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px', background: isActive ? 'var(--accent-tint)' : 'var(--bg-card)' }}>
                   <span
                     title={p.available ? t('provider.available') : t('provider.unavailable')}
-                    style={{ width: 9, height: 9, borderRadius: '50%', background: p.available ? 'var(--success)' : '#D8D6D0', flexShrink: 0 }}
+                    style={{ width: 9, height: 9, borderRadius: '50%', background: p.available ? 'var(--success)' : 'var(--text-muted)', flexShrink: 0 }}
                   />
                   <strong style={{ fontSize: 13 }}>{providerLabel(p.name)}</strong>
                   {isActive && (
@@ -903,6 +924,27 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                 {copiedKey === 'http' ? t('mcp.copied') : t('mcp.copy')}
               </button>
             </div>
+
+            {/* 可用性自检:真实走一遍 initialize → tools/list → ping */}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14 }}>
+              <button className="btn-ghost" style={{ fontSize: 12, padding: '6px 14px' }} disabled={selftesting} onClick={runSelftest}>
+                {selftesting ? t('mcp.selftest.running') : t('mcp.selftest.run')}
+              </button>
+              {selftest && (
+                <span style={{ fontSize: 12.5, fontWeight: 650, color: selftest.available ? 'var(--success)' : 'var(--danger)' }}>
+                  {selftest.available ? t('mcp.selftest.ok', { n: selftest.toolCount ?? 0, ms: selftest.totalMs ?? 0 }) : t('mcp.selftest.fail')}
+                </span>
+              )}
+            </div>
+            {selftest && !selftest.available && (
+              <div style={{ marginTop: 8, fontSize: 11.5, lineHeight: 1.7 }}>
+                {selftest.steps.map((s) => (
+                  <div key={s.step} className="mono" style={{ color: s.ok ? 'var(--success)' : 'var(--danger)' }}>
+                    {s.ok ? '✓' : '✗'} {s.step} ({s.elapsed}ms){s.error ? ` — ${s.error}` : ''}
+                  </div>
+                ))}
+              </div>
+            )}
           </>
         )}
       </section>

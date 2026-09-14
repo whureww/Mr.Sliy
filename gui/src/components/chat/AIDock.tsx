@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { AnalysisMode, AnalyzeResult, ChatMsg, chatWithAI, getLlmProviders } from '../../ipc/client';
+import { AnalysisMode, AnalyzeResult, ChatMsg, chatWithAIStream, getLlmProviders } from '../../ipc/client';
 import { fileName } from '../../lib/analysis';
 import { openContextMenu, copyText } from '../../lib/contextMenu';
 import { ModProposal, ModStatus, RISK_STYLE, parseReply } from '../../lib/modProposal';
@@ -32,6 +32,8 @@ interface Msg {
   mod?: ModProposal | null;
   modStatus?: ModStatusLocal;
   applyError?: string;
+  /** 流式输出中:气泡正在逐字填充,隐藏操作按钮 */
+  streaming?: boolean;
   /** 大模型用量（tokens/缓存命中率）与耗时 */
   llm?: { tokens: number; cacheHitRate: number | null; requests: number; model: string | null };
   elapsed?: number;
@@ -117,42 +119,61 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
       const started = Date.now();
       const controller = new AbortController();
       abortRef.current = controller;
+      // 流式:占位气泡立即出现,逐 delta 填充(与分析模式主对话一致)
+      const streamIdx = nextMsgs.length;
+      setMsgs((m) => [...m, { from: 'ai', text: '', streaming: true, mode: 'cloud' }]);
       try {
         const history: ChatMsg[] = nextMsgs.slice(-12).map((m) => ({
           role: m.from === 'user' ? 'user' : 'assistant',
           content: m.raw ?? m.text
         }));
-        const res = await chatWithAI(history, null, controller.signal, memoryScope ?? '');
-        const replyStr = typeof res.reply === 'string' ? res.reply : String(res.reply || '');
+        const res = await chatWithAIStream(history, null, {
+          signal: controller.signal,
+          memoryScope: memoryScope ?? '',
+          onDelta: (d) =>
+            setMsgs((m) => m.map((x, j) => (j === streamIdx ? { ...x, raw: (x.raw || '') + d, text: (x.text || '') + d } : x)))
+        });
+        const replyStr = res.reply;
         const { text: display, mod, parseFailed } = parseReply(replyStr);
         const note = parseFailed ? '\n\n' + t('ai.parseFail') : '';
         // 用量换算：与服务端 scanRoutes 的 cacheHitRate 口径一致
         const u = (res.usage || null) as { totalTokens?: number; cacheHitTokens?: number; cacheMissTokens?: number } | null;
         const cacheTotal = u ? (u.cacheHitTokens || 0) + (u.cacheMissTokens || 0) : 0;
-        setMsgs((m) => [
-          ...m,
-          {
-            from: 'ai',
-            text: display + note,
-            raw: replyStr,
-            mode: 'cloud',
-            mod,
-            modStatus: mod ? 'pending' : undefined,
-            elapsed: Date.now() - started,
-            llm:
-              u && (u.totalTokens || 0) > 0
-                ? {
-                    tokens: u.totalTokens || 0,
-                    cacheHitRate: cacheTotal > 0 ? Math.round(((u.cacheHitTokens || 0) / cacheTotal) * 1000) / 10 : null,
-                    requests: 1,
-                    model: null
-                  }
-                : undefined
-          }
-        ]);
+        setMsgs((m) =>
+          m.map((x, j) =>
+            j === streamIdx
+              ? {
+                  ...x,
+                  streaming: false,
+                  text: display + note,
+                  raw: replyStr,
+                  mod,
+                  modStatus: mod ? 'pending' : undefined,
+                  elapsed: Date.now() - started,
+                  llm:
+                    u && (u.totalTokens || 0) > 0
+                      ? {
+                          tokens: u.totalTokens || 0,
+                          cacheHitRate: cacheTotal > 0 ? Math.round(((u.cacheHitTokens || 0) / cacheTotal) * 1000) / 10 : null,
+                          requests: 1,
+                          model: null
+                        }
+                      : undefined
+                }
+              : x
+          )
+        );
       } catch {
-        // 用户主动停止时不再回退到本地兜底提示
-        setMsgs((m) => [...m, { from: 'ai', text: controller.signal.aborted ? t('ai.stopped') : localReply(text), mode: 'local' }]);
+        // 用户主动停止:保留已流出的部分文本;完全失败时回退本地兜底提示
+        setMsgs((m) =>
+          m.map((x, j) =>
+            j === streamIdx
+              ? x.raw
+                ? { ...x, streaming: false, text: x.raw + (controller.signal.aborted ? '\n\n' + t('ai.stopped') : ''), mode: 'cloud' }
+                : { from: 'ai', text: controller.signal.aborted ? t('ai.stopped') : localReply(text), mode: 'local' }
+              : x
+          )
+        );
       } finally {
         abortRef.current = null;
         setThinking(false);
@@ -260,9 +281,10 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                     </span>
                   )}
                   {m.text}
+                  {m.streaming && <span className="stream-cursor">▍</span>}
 
                   {/* 门控卡片：代码修改确认 */}
-                  {m.from === 'ai' && m.mod && (
+                  {m.from === 'ai' && m.mod && !m.streaming && (
                     <div
                       style={{
                         marginTop: 8,
@@ -325,7 +347,7 @@ export default function AIDock({ currentFile, result, scanning, analysisMode, lo
                   )}
 
                   {/* 大模型用量：耗时 / tokens / 缓存命中率 */}
-                  {m.from === 'ai' && m.mode === 'cloud' && (m.llm || m.elapsed != null) && (
+                  {m.from === 'ai' && m.mode === 'cloud' && !m.streaming && (m.llm || m.elapsed != null) && (
                     <div
                       className="muted mono"
                       style={{

@@ -116,6 +116,10 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const [savedFlash, setSavedFlash] = useState(false);
   /** 编辑器多标签页（编辑模式）：与 currentFile 双向同步 */
   const [tabs, setTabs] = useState<EditorTab[]>([]);
+  /** 标签栏溢出检测:溢出时收起为下拉面板(▼ n),未溢出正常平铺 */
+  const tabBarRef = useRef<HTMLDivElement | null>(null);
+  const [tabOverflow, setTabOverflow] = useState(false);
+  const [tabMenuOpen, setTabMenuOpen] = useState(false);
   /** 聊天/扫描中断控制器：停止按钮使用 */
   const chatAbort = useRef<AbortController | null>(null);
   const scanAbort = useRef<AbortController | null>(null);
@@ -160,6 +164,28 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       saveState('guiState', JSON.stringify({ workspaces, activeWs, sessions })).catch(() => {});
     }, 600);
   }, [workspaces, activeWs]);
+
+  /** 标签栏溢出检测:内容宽度超出容器 → 收起为下拉面板 */
+  useEffect(() => {
+    const el = tabBarRef.current;
+    if (!el) {
+      setTabOverflow(false);
+      return;
+    }
+    const measure = () => {
+      // 内层实际内容宽度(scrollWidth) > 容器可视宽度 → 溢出
+      const overflow = tabs.length > 0 && el.scrollWidth > el.clientWidth + 1;
+      setTabOverflow((prev) => {
+        // 收起溢出时若下拉开着,先收起,避免面板指向过期的溢出集合
+        if (overflow && !prev) setTabMenuOpen(false);
+        return overflow;
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [tabs]);
 
   /** 会话内容（文件/结果/消息/标签页）变化时写回当前工作区的会话缓存 */
   useEffect(() => {
@@ -906,12 +932,18 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
             {scanning ? t('wb.scanning') : t('wb.scanFile')}
           </button>
         </div>
-        {/* 多标签页：同一会话可同时打开多个文件 */}
+        {/* 多标签页：同一会话可同时打开多个文件;溢出时收起为 ▼ 下拉面板选择 */}
         {tabs.length > 0 && (
-          <div style={{ display: 'flex', gap: 4, padding: '6px 10px', borderBottom: '1px solid var(--border-hairline)', overflowX: 'auto' }}>
-            {tabs.map((tab) => {
+          <div
+            ref={tabBarRef}
+            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 10px', borderBottom: '1px solid var(--border-hairline)', overflow: 'hidden', position: 'relative', minHeight: 34 }}
+          >
+            {tabs.map((tab, i) => {
               const active = currentFile?.path === tab.path;
               const tabDirty = tab.content !== tab.disk;
+              // 溢出收起时:隐藏全部平铺标签,只留下拉按钮(容器仍保留测量用原始宽度,
+              // 用 visibility 而非移除节点,避免 ResizeObserver 测量死循环)
+              const hidden = tabOverflow;
               return (
                 <div
                   key={tab.path}
@@ -923,7 +955,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
                     ])
                   }
                   style={{
-                    display: 'flex',
+                    display: hidden ? 'none' : 'flex',
                     alignItems: 'center',
                     gap: 6,
                     padding: '4px 10px',
@@ -931,26 +963,106 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
                     fontSize: 12,
                     cursor: 'pointer',
                     whiteSpace: 'nowrap',
+                    flexShrink: 0,
+                    maxWidth: 180,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                     background: active ? 'var(--accent-tint)' : 'transparent',
                     color: active ? 'var(--accent)' : 'var(--text-muted)',
                     fontWeight: active ? 600 : 400
                   }}
                 >
-                  <span>{fileName(tab.path)}</span>
-                  {tabDirty && <span title={t('wb.tabUnsaved')} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)' }} />}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{fileName(tab.path)}</span>
+                  {tabDirty && <span title={t('wb.tabUnsaved')} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />}
                   <span
                     title={t('win.close')}
                     onClick={(e) => {
                       e.stopPropagation();
                       closeTab(tab.path);
                     }}
-                    style={{ opacity: 0.55, padding: '0 2px' }}
+                    style={{ opacity: 0.55, padding: '0 2px', flex: 'none' }}
                   >
                     ×
                   </span>
                 </div>
               );
             })}
+
+            {/* 溢出指示与下拉面板:列出全部已开文件供选择 */}
+            {tabOverflow && (
+              <div style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', display: 'flex', alignItems: 'center', background: 'linear-gradient(90deg, transparent, var(--bg-card) 28%)', paddingLeft: 22 }}>
+                <div style={{ position: 'relative' }}>
+                  <button
+                    className="btn-ghost"
+                    title={t('wb.tabOverflow')}
+                    onClick={() => setTabMenuOpen((v) => !v)}
+                    style={{ fontSize: 11.5, padding: '3px 9px', display: 'flex', alignItems: 'center', gap: 4 }}
+                  >
+                    {tabMenuOpen ? '▲' : '▼'} {tabs.length}
+                  </button>
+                  {tabMenuOpen && (
+                    <div
+                      className="selectable"
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: 'calc(100% + 6px)',
+                        zIndex: 60,
+                        minWidth: 240,
+                        maxHeight: 320,
+                        overflowY: 'auto',
+                        background: 'var(--bg-card)',
+                        border: '1px solid var(--border-hairline)',
+                        borderRadius: 10,
+                        boxShadow: 'var(--menu-shadow)',
+                        padding: 5
+                      }}
+                    >
+                      {tabs.map((tab) => {
+                        const active = currentFile?.path === tab.path;
+                        const tabDirty = tab.content !== tab.disk;
+                        return (
+                          <div
+                            key={tab.path}
+                            onClick={() => {
+                              switchTab(tab.path);
+                              setTabMenuOpen(false);
+                            }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 7,
+                              padding: '6px 9px',
+                              borderRadius: 7,
+                              fontSize: 12,
+                              cursor: 'pointer',
+                              background: active ? 'var(--accent-tint)' : 'transparent',
+                              color: active ? 'var(--accent)' : 'var(--text-primary)',
+                              fontWeight: active ? 600 : 400
+                            }}
+                          >
+                            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={tab.path}>
+                              {fileName(tab.path)}
+                            </span>
+                            {tabDirty && <span title={t('wb.tabUnsaved')} style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)', flex: 'none' }} />}
+                            <span
+                              title={t('win.close')}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                closeTab(tab.path);
+                              }}
+                              style={{ opacity: 0.55, padding: '0 3px', flex: 'none' }}
+                            >
+                              ×
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
         <div style={{ flex: 1, minHeight: 0, overflow: 'hidden', padding: 0, display: 'flex', flexDirection: 'column' }}>

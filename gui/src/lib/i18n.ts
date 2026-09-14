@@ -108,6 +108,13 @@ const DICT: Record<string, Entry> = {
   },
   'mcp.server': { zh: '服务信息', en: 'Server' },
   'mcp.tools': { zh: '可用工具（{n}）', en: 'Available tools ({n})' },
+  'mcp.selftest.run': { zh: '检测可用性', en: 'Test availability' },
+  'mcp.selftest.running': { zh: '检测中…', en: 'Testing…' },
+  'mcp.selftest.ok': {
+    zh: 'MCP 可用：{n} 个工具，三步握手 {ms}ms',
+    en: 'MCP available: {n} tools, handshake {ms}ms'
+  },
+  'mcp.selftest.fail': { zh: 'MCP 不可用', en: 'MCP unavailable' },
   'mcp.stdio.title': { zh: 'stdio 接入（推荐，桌面客户端）', en: 'stdio (recommended for desktop clients)' },
   'mcp.stdio.desc': {
     zh: '把下面的 JSON 合并进客户端配置文件：Claude Desktop 为 claude_desktop_config.json，Cursor 为 .cursor/mcp.json，Cline 为 cline_mcp_settings.json，保存后重启客户端即可',
@@ -455,6 +462,7 @@ const DICT: Record<string, Entry> = {
   },
   'wb.reportFail': { zh: '报告生成失败：{msg}', en: 'Report generation failed: {msg}' },
   'wb.optimizeFail': { zh: '优化请求失败', en: 'Optimization request failed' },
+  'wb.tabOverflow': { zh: '全部已打开文件', en: 'All open files' },
   'wb.closeTab': { zh: '关闭标签页', en: 'Close tab' },
   'wb.copySel': { zh: '复制选中内容', en: 'Copy selection' },
   'wb.selectAllCode': { zh: '全选代码', en: 'Select all code' },
@@ -624,7 +632,14 @@ const DICT: Record<string, Entry> = {
   // ---------- Dashboard 补充 ----------
   'dash.loadFail': { zh: '获取统计数据失败，请确认服务已启动', en: 'Failed to load statistics; make sure the service is running' },
   'dash.noData': { zh: '暂无数据', en: 'No data' },
-  'dash.scoreDesc': { zh: '按未处理缺陷数扣减（每个 -2 分）', en: 'Deducted per unresolved issue (-2 points each)' },
+  'dash.scoreDescDensity': {
+    zh: '加权缺陷密度:高危×10 中危×3 低危×1,每千行代码 1 个加权缺陷扣 15 分',
+    en: 'Weighted defect density: high×10 med×3 low×1; 15 points off per weighted defect per KLOC'
+  },
+  'dash.scoreDescLegacy': {
+    zh: '项目行数未知(旧版本扫描),按加权缺陷数扣减;重新扫描后启用密度评分',
+    en: 'Project size unknown (scanned by an older version), weighted count used; rescan to enable density scoring'
+  },
 
   // ---------- CodeEditor 补充 ----------
   'ed.findPh': { zh: '查找（Enter 下一个 / Shift+Enter 上一个）', en: 'Find (Enter next / Shift+Enter prev)' },

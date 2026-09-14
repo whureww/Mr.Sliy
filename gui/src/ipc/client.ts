@@ -499,6 +499,30 @@ export async function getMcpStatus(): Promise<McpStatus> {
   return unwrapData<McpStatus>(await sidecarRequest('GET', '/api/mcp/status'));
 }
 
+export interface McpSelftestStep {
+  step: string;
+  ok: boolean;
+  elapsed: number;
+  error: string;
+  toolCount?: number;
+}
+
+export interface McpSelftest {
+  available: boolean;
+  url: string;
+  steps: McpSelftestStep[];
+  totalMs?: number;
+  toolCount?: number;
+}
+
+/**
+ * MCP 真实可用性自检：服务端对自身 HTTP 端点跑一遍
+ * initialize → tools/list → ping，三步全通才算可用。
+ */
+export async function runMcpSelftest(): Promise<McpSelftest> {
+  return unwrapData<McpSelftest>(await sidecarRequest('GET', '/api/mcp/selftest'));
+}
+
 // ---------- LLM 提供商管理（设置页） ----------
 
 export interface LlmProviderInfo {
