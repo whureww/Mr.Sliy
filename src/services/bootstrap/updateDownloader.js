@@ -97,14 +97,17 @@ function startDownload(url, version, digest) {
 
   logger.info(`开始下载更新安装包: v${ver} <- ${target}${expectHash ? ' (带 sha256 校验)' : ''}`);
 
-  const file = fs.createWriteStream(partPath);
-  let hash = expectHash ? crypto.createHash('sha256') : null; // 切换下载源时必须重建(重置已哈希的部分数据)
   let settled = false;
+  // 下载写流;换源时必须重建('w' 打开即截断)——若直接续写,上一源已写入的字节会
+  // 残留在文件头部,与新源数据拼成损坏安装包(实测:直连慢速被看门狗掐断后切镜像,
+  // 产出 [1MB残页+49MB镜像数据] 的缝合文件,且 sha256 只覆盖新源数据反而校验通过,
+  // 启动时报 os error 14001)
+  let file;
   const finish = (ok, errMsg) => {
     if (settled) return;
     settled = true;
     try {
-      file.end();
+      if (file) file.end();
     } catch (e2) {
       /* ignore */
     }
@@ -144,6 +147,18 @@ function startDownload(url, version, digest) {
     state.req = null;
   };
 
+  /** 打开 .part 写流('w' 模式截断写),并挂上完成回调 */
+  const openPart = () => {
+    const f = fs.createWriteStream(partPath);
+    f.on('finish', () => finish(true));
+    // 吞掉换源竞态错误:旧响应被掐断时,pipe 会向已销毁的旧写流调 end()/write(),
+    // 触发 ERR_STREAM_DESTROYED;无监听会导致进程崩溃(真实 CDN 网络 100% 复现)
+    f.on('error', () => {});
+    return f;
+  };
+  file = openPart();
+  let hash = expectHash ? crypto.createHash('sha256') : null; // 切换下载源时必须重建(重置已哈希的部分数据)
+
   /** 候选地址序列:直链在前,github 资产失败后追加镜像前缀 */
   const buildCandidates = () => {
     const list = [target];
@@ -160,6 +175,14 @@ function startDownload(url, version, digest) {
       if (next) {
         logger.warn(`下载源失败(${reason}),切换源: ${next.slice(0, 80)}...`);
         state.via = next !== target ? 'mirror' : '';
+        // 换源必须重建写流并截断文件:旧流里可能已写入上一源的部分字节,
+        // 直接续写会产生 [残页+新数据] 缝合的损坏安装包
+        try {
+          file.destroy();
+        } catch (e2) {
+          /* ignore */
+        }
+        file = openPart();
         request(next, 0, candidates);
       } else {
         finish(false, reason);
