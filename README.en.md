@@ -61,14 +61,19 @@ $ mr-sliy
 **Desktop experience**
 
 - Dual work modes: Analysis mode (chat + detection pipeline) / Edit mode (code editing first, AI as a floating assistant)
+- Editor: line-level diff highlighting (AI-modified lines annotated), auto bracket pairing & indentation, font size presets, Ctrl+G go-to-line, Ctrl+F find
+- Ctrl+P quick open (fuzzy file search), Ctrl+/ shortcut cheat sheet; click a line number on an issue card to jump straight to that line in the editor
+- File tree name filter, session rename, one-click chat export to Markdown
+- Quality overview: quality score trend chart and two-scan comparison (newly introduced / resolved issues)
 - 10 theme palettes + light / dark / auto modes, adjustable UI scaling and workspace layout
 - Fully automatic chat memory: preferences and conventions extracted after every turn and injected into later context; shareable across chats or isolated per workspace
 - In-app update check: new version discovery, download verification (sha256), one-click install
+- Settings import / export: back up appearance and analysis preferences as JSON for device migration
 
 **Reliability & integration**
 
 - Self-sustaining engine: monitor → analyze → decide → execute → verify closed loop, with self-update, self-repair, and rollback
-- MCP integration: external clients call agent capabilities over the Model Context Protocol (HTTP / stdio)
+- MCP integration: external clients call agent capabilities over the Model Context Protocol (HTTP / stdio); the settings page shows recent tool call logs
 - Dual databases: SQLite (local) and MySQL (cloud) two-way sync
 
 ## Getting Started
@@ -197,6 +202,16 @@ MIT (see [package.json](package.json)).
 ## Changelog
 
 For the full history, see [GitHub Releases](https://github.com/whureww/Mr.Sliy--AI_Agent/releases).
+
+### v0.1.7 (2026-09-14)
+
+- Editor: line-level diff highlighting for AI modifications, auto bracket pairing & indentation, font size presets (S / M / L / XL)
+- Global shortcuts: Ctrl+P quick open (fuzzy file search), Ctrl+/ shortcut cheat sheet; issue-card line numbers jump straight to the editor line
+- Quality overview: quality score trend chart and two-scan comparison (newly introduced / resolved issues)
+- Settings: MCP tool call logs (last 50, with transport and latency), settings import / export (JSON backup)
+- Workspace: file tree name filter, session rename, one-click chat export to Markdown; cross-file full-text search
+- MCP Server: full `tools/call` logging across both HTTP and stdio transports
+- Fixed: dev-mode health check hardcoded 127.0.0.1 failing when the server binds to IPv6
 
 ### v0.1.6 (2026-09-14)
 

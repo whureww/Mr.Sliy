@@ -7,6 +7,7 @@ import {
   LlmProvidersPayload,
   McpStatus,
   McpSelftest,
+  McpCallLog,
   MemoryItem,
   UpdateRecord,
   APP_VERSION,
@@ -19,6 +20,7 @@ import {
   getLlmKeys,
   getLlmProviders,
   getMcpStatus,
+  getMcpLogs,
   runMcpSelftest,
   getMemories,
   getUpdateRecords,
@@ -27,13 +29,16 @@ import {
   installUpdate,
   isMemoryCrossChat,
   openExternal,
+  readFile,
+  saveFile,
   saveLlmProvider,
   saveUpdateSource,
   setMemoryCrossChat,
   startUpdateDownload
 } from '../ipc/client';
-import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, paletteOf, themeOf } from '../lib/appearance';
+import { MODE_CHANGE_EVENT, SCALES, THEMES, Appearance, ThemeMode, isDarkMode, normalizeAppearance, paletteOf, themeOf } from '../lib/appearance';
 import { Lang, setLang, t, useLang } from '../lib/i18n';
+import { getEditorFontSize, setEditorFontSize } from '../lib/editorPrefs';
 import Collapse from '../components/common/Collapse';
 
 interface Props {
@@ -187,6 +192,12 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
   const [selftesting, setSelftesting] = useState(false);
   const [selftest, setSelftest] = useState<McpSelftest | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  // MCP 调用日志（默认收起，展开时加载）
+  const [mcpLogs, setMcpLogs] = useState<McpCallLog[] | null>(null);
+  const [mcpLogsOpen, setMcpLogsOpen] = useState(false);
+  // 设置导入 / 导出结果提示
+  const [ioMsg, setIoMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [ioBusy, setIoBusy] = useState(false);
 
   const refresh = useCallback(async (retried?: boolean) => {
     try {
@@ -240,6 +251,93 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       setSelftesting(false);
     }
   }, []);
+
+  /** MCP 调用日志加载（服务端最近 50 条工具调用，含 HTTP / stdio 两个通道） */
+  const loadMcpLogs = useCallback(async () => {
+    try {
+      setMcpLogs(await getMcpLogs(50));
+    } catch {
+      setMcpLogs([]);
+    }
+  }, []);
+
+  /** 展开日志区时自动加载一次 */
+  const toggleMcpLogs = useCallback(() => {
+    setMcpLogsOpen((v) => {
+      if (!v) void loadMcpLogs();
+      return !v;
+    });
+  }, [loadMcpLogs]);
+
+  /** 导出偏好为 JSON 备份（外观 / 分析模式 / 编辑器字号；不含 API Key 等敏感信息） */
+  const exportSettings = useCallback(async () => {
+    setIoBusy(true);
+    setIoMsg(null);
+    try {
+      const data = {
+        kind: 'mrsliy-settings',
+        version: APP_VERSION,
+        exportedAt: new Date().toISOString(),
+        appearance,
+        analysisMode: mode,
+        editorFontSize: getEditorFontSize()
+      };
+      const json = JSON.stringify(data, null, 2);
+      const fname = `mrsliy-settings-${new Date().toISOString().slice(0, 10)}.json`;
+      if ('__TAURI_INTERNALS__' in window) {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const target = await save({ defaultPath: fname, filters: [{ name: 'JSON', extensions: ['json'] }] });
+        if (!target) return;
+        await saveFile(target, json);
+      } else {
+        // 浏览器调试环境：Blob 下载
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([json], { type: 'application/json;charset=utf-8' }));
+        a.download = fname;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }
+      setIoMsg({ ok: true, text: t('settings.io.exported') });
+    } catch (e) {
+      setIoMsg({ ok: false, text: t('settings.io.fail', { msg: (e as Error).message || '' }) });
+    } finally {
+      setIoBusy(false);
+    }
+  }, [appearance, mode]);
+
+  /** 从 JSON 备份恢复偏好并立即应用 */
+  const importSettings = useCallback(async () => {
+    setIoBusy(true);
+    setIoMsg(null);
+    try {
+      let json = '';
+      if ('__TAURI_INTERNALS__' in window) {
+        const { open } = await import('@tauri-apps/plugin-dialog');
+        const target = await open({ multiple: false, title: t('settings.io.import'), filters: [{ name: 'JSON', extensions: ['json'] }] });
+        if (!target || typeof target !== 'string') return;
+        const r = await readFile(target);
+        json = r.content;
+      } else {
+        json = await pickLocalJson();
+        if (!json) return;
+      }
+      const data = JSON.parse(json) as {
+        kind?: string;
+        appearance?: unknown;
+        analysisMode?: unknown;
+        editorFontSize?: unknown;
+      };
+      if (!data || typeof data !== 'object') throw new Error(t('settings.io.badFile'));
+      if (data.appearance) onAppearanceChange(normalizeAppearance(data.appearance));
+      if (data.analysisMode === 'local' || data.analysisMode === 'cloud') onModeChange(data.analysisMode);
+      if (typeof data.editorFontSize === 'number') setEditorFontSize(data.editorFontSize);
+      setIoMsg({ ok: true, text: t('settings.io.done') });
+    } catch (e) {
+      setIoMsg({ ok: false, text: t('settings.io.fail', { msg: (e as Error).message || '' }) });
+    } finally {
+      setIoBusy(false);
+    }
+  }, [onAppearanceChange, onModeChange]);
 
   const refreshSource = useCallback(async () => {
     try {
@@ -945,6 +1043,53 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
                 ))}
               </div>
             )}
+
+            {/* 调用日志：最近 50 条工具调用（HTTP / stdio 两通道） */}
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 14 }}>
+              <button className="btn-ghost" style={{ fontSize: 12, padding: '6px 14px' }} onClick={toggleMcpLogs}>
+                {mcpLogsOpen ? '▾ ' : '▸ '}
+                {t('mcp.logs.title', { n: 50 })}
+              </button>
+              {mcpLogsOpen && (
+                <button className="btn-ghost" style={{ fontSize: 12, padding: '6px 14px' }} onClick={() => void loadMcpLogs()}>
+                  {t('mcp.logs.refresh')}
+                </button>
+              )}
+            </div>
+            {mcpLogsOpen && (
+              mcpLogs === null ? (
+                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>…</div>
+              ) : mcpLogs.length === 0 ? (
+                <div className="muted" style={{ fontSize: 12, marginTop: 8 }}>{t('mcp.logs.empty')}</div>
+              ) : (
+                <div className="selectable" style={{ marginTop: 8, overflow: 'auto', maxHeight: 320, border: '1px solid var(--border-hairline)', borderRadius: 9 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11.5 }}>
+                    <thead>
+                      <tr style={{ background: 'var(--bg-recessed)', textAlign: 'left' }}>
+                        <th style={{ padding: '6px 10px', fontWeight: 650 }}>{t('mcp.logs.col.time')}</th>
+                        <th style={{ padding: '6px 10px', fontWeight: 650 }}>{t('mcp.logs.col.tool')}</th>
+                        <th style={{ padding: '6px 10px', fontWeight: 650 }}>{t('mcp.logs.col.transport')}</th>
+                        <th style={{ padding: '6px 10px', fontWeight: 650 }}>{t('mcp.logs.col.elapsed')}</th>
+                        <th style={{ padding: '6px 10px', fontWeight: 650 }}>{t('mcp.logs.col.status')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {mcpLogs.map((lg, i) => (
+                        <tr key={i} style={{ borderTop: '1px solid var(--border-hairline)' }} title={`${lg.args}${lg.error ? `\n${lg.error}` : ''}`}>
+                          <td className="mono" style={{ padding: '5px 10px', whiteSpace: 'nowrap' }}>{String(lg.ts).replace('T', ' ').slice(0, 19)}</td>
+                          <td className="mono" style={{ padding: '5px 10px' }}>{lg.tool}</td>
+                          <td className="mono" style={{ padding: '5px 10px' }}>{lg.transport}</td>
+                          <td className="mono" style={{ padding: '5px 10px', whiteSpace: 'nowrap' }}>{lg.elapsedMs}ms</td>
+                          <td className="mono" style={{ padding: '5px 10px', color: lg.ok ? 'var(--success)' : 'var(--danger)' }}>
+                            {lg.ok ? '✓' : `✗ ${lg.error.slice(0, 40)}`}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
           </>
         )}
       </section>
@@ -1106,6 +1251,23 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
         </div>
       </section>
 
+      {/* 设置导入 / 导出：偏好备份与迁移（不含 API Key 等敏感信息） */}
+      <section className="card" style={{ padding: 18 }}>
+        <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 4 }}>{t('settings.io.title')}</div>
+        <div className="muted" style={{ fontSize: 12, marginBottom: 12, lineHeight: 1.6 }}>{t('settings.io.desc')}</div>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button className="btn-ghost" style={{ fontSize: 12.5, padding: '6px 16px' }} disabled={ioBusy} onClick={() => void exportSettings()}>
+            {t('settings.io.export')}
+          </button>
+          <button className="btn-ghost" style={{ fontSize: 12.5, padding: '6px 16px' }} disabled={ioBusy} onClick={() => void importSettings()}>
+            {t('settings.io.import')}
+          </button>
+        </div>
+        {ioMsg && (
+          <div style={{ marginTop: 10, fontSize: 12.5, color: ioMsg.ok ? 'var(--success)' : 'var(--danger)' }}>{ioMsg.text}</div>
+        )}
+      </section>
+
       {/* 关于 */}
       <section className="card" style={{ padding: 18 }}>
         <div style={{ fontWeight: 650, fontSize: 14, marginBottom: 6 }}>{t('settings.about.title')}</div>
@@ -1117,6 +1279,21 @@ export default function Settings({ mode, onModeChange, appearance, onAppearanceC
       </section>
     </div>
   );
+}
+
+/** 浏览器调试环境选择本地 JSON 文件（Tauri 端走 dialog 插件） */
+function pickLocalJson(): Promise<string> {
+  return new Promise((resolve) => {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.json,application/json';
+    inp.onchange = () => {
+      const f = inp.files?.[0];
+      if (!f) return resolve('');
+      f.text().then(resolve).catch(() => resolve(''));
+    };
+    inp.click();
+  });
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

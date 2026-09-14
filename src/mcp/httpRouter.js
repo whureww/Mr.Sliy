@@ -20,7 +20,7 @@ router.post('/', async (req, res) => {
     const out = [];
     for (const m of msgs) {
       // eslint-disable-next-line no-await-in-loop
-      const r = await server.handleMessage(m);
+      const r = await server.handleMessage(m, { transport: 'http' });
       if (r) out.push(r);
     }
 

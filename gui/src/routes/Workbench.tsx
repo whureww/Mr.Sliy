@@ -4,10 +4,13 @@ import { DiffPayload } from '../App';
 import { optimizeCode } from '../ipc/client';
 import { openContextMenu, copyText } from '../lib/contextMenu';
 import { ModProposal, parseReply } from '../lib/modProposal';
+import { modHighlightLines } from '../lib/lineDiff';
 import AnalysisView from './AnalysisView';
 import AIDock from '../components/chat/AIDock';
-import CodeEditor from '../components/editor/CodeEditor';
+import CodeEditor, { CodeEditorApi } from '../components/editor/CodeEditor';
 import ResizeHandle from '../components/common/ResizeHandle';
+import QuickOpen, { QuickOpenItem, walkWorkspaceFiles } from '../components/common/QuickOpen';
+import ShortcutSheet from '../components/common/ShortcutSheet';
 import WorkspaceNav, { Workspace } from '../components/nav/WorkspaceNav';
 import {
   WorkbenchMode,
@@ -18,7 +21,8 @@ import {
   isHigh,
   nowTime,
   sanitizeMessages,
-  severityColor
+  severityColor,
+  chatToMarkdown
 } from '../lib/analysis';
 import { t, useLang } from '../lib/i18n';
 
@@ -128,6 +132,22 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const restoring = useRef(false);
   const loaded = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ---------- 编辑器行跳转 / 行内 Diff / 快速打开 ----------
+  /** 编辑器命令句柄：问题卡片跳转行、AI 修改高亮 */
+  const editorApiRef = useRef<CodeEditorApi | null>(null);
+  /** 行内 Diff：当前高亮的行号（AI 修改涉及的行，手动编辑/切换文件后清除） */
+  const [highlightLines, setHighlightLines] = useState<number[]>([]);
+  /** Ctrl+P 快速打开 */
+  const [quickOpen, setQuickOpen] = useState(false);
+  /** Ctrl+/ 快捷键速查表 */
+  const [cheat, setCheat] = useState(false);
+  const collectFilesCb = useCallback(
+    (root: string) => walkWorkspaceFiles(root, listDir),
+    []
+  );
+  /** 拖拽处理引用最新闭包（onDragDropEvent 只注册一次，见下方赋值） */
+  const dropRef = useRef<{ handleDrop: (p: string) => Promise<void>; openFile: (p: string) => Promise<void> } | null>(null);
 
   // ---------- 可调布局状态 ----------
   const [layout, setLayout] = useState<LayoutState>(loadLayout);
@@ -279,6 +299,12 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     scheduleSave();
   };
 
+  /** 会话重命名：设置显示别名；alias 为空串时恢复目录默认名 */
+  const renameWorkspace = (p: string, alias: string) => {
+    setWorkspaces((ws) => ws.map((w) => (w.path === p ? { ...w, alias: alias || undefined } : w)));
+    scheduleSave();
+  };
+
   /** 当前会话是否锁定 */
   const activeLocked = !!workspaces.find((w) => w.path === activeWs)?.locked;
 
@@ -302,8 +328,9 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     }
   };
 
-  /** 编辑内容更新：currentFile 与对应标签页同步 */
+  /** 编辑内容更新：currentFile 与对应标签页同步（手动编辑后清除行内 Diff 高亮） */
   const updateContent = (v: string) => {
+    setHighlightLines([]);
     setCurrentFile((f) => {
       if (!f) return f;
       setTabs((t) => t.map((x) => (x.path === f.path ? { ...x, content: v } : x)));
@@ -332,19 +359,25 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     const content = currentFile.content;
     const norm = (s: string) => s.replace(/\r\n/g, '\n');
     let next: string | null = null;
+    let hitOffset = -1;
+    let base = content;
     const i1 = content.indexOf(originalCode);
     if (i1 >= 0) {
+      hitOffset = i1;
       next = content.slice(0, i1) + modifiedCode + content.slice(i1 + originalCode.length);
     } else {
       // 行尾风格不一致（CRLF/LF）时按归一化匹配（整文件统一为 LF）
       const nc = norm(content);
-      const no = norm(originalCode);
-      const i2 = nc.indexOf(no);
+      const i2 = nc.indexOf(norm(originalCode));
       if (i2 >= 0) {
-        next = nc.slice(0, i2) + norm(modifiedCode) + nc.slice(i2 + no.length);
+        hitOffset = i2;
+        base = nc;
+        next = nc.slice(0, i2) + norm(modifiedCode) + nc.slice(i2 + norm(originalCode).length);
       }
     }
     if (next === null) return t('wb.locateFail');
+    // 行内 Diff：标记本次修改涉及的行（手动编辑或切换文件时自动清除）
+    setHighlightLines(modHighlightLines(originalCode, modifiedCode, hitOffset, base));
     const updated = { ...currentFile, content: next };
     setCurrentFile(updated);
     setTabs((t) => t.map((x) => (x.path === updated.path ? { ...x, content: updated.content, disk: updated.content } : x)));
@@ -357,19 +390,22 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     }
   };
 
-  const openFile = async (node: { path: string; is_dir?: boolean }) => {
+  /** 打开文件；line 存在时（全文搜索/树过滤/问题卡片）打开后定位到该行 */
+  const openFile = async (node: { path: string; name?: string; is_dir?: boolean }, line?: number) => {
     if (!activeWs) return;
     if (activeLocked) {
       setError(t('wb.lockedUnlockFirst'));
       return;
     }
     setError('');
+    setHighlightLines([]);
     // 已在标签页中打开 → 直接激活（保留编辑内容与扫描结果）
     const existing = tabs.find((t) => t.path.toLowerCase() === node.path.toLowerCase());
     if (existing) {
       setCurrentFile({ path: existing.path, content: existing.content });
       setDiskContent(existing.disk);
       setResult(existing.result);
+      if (line) setTimeout(() => editorApiRef.current?.revealLine(line), 80);
       return;
     }
     try {
@@ -387,6 +423,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
           time: nowTime()
         }
       ]);
+      if (line) setTimeout(() => editorApiRef.current?.revealLine(line), 80);
     } catch {
       setError(t('wb.readFail'));
     }
@@ -396,6 +433,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
   const switchTab = (path: string) => {
     const t = tabs.find((x) => x.path === path);
     if (!t) return;
+    setHighlightLines([]);
     setCurrentFile({ path: t.path, content: t.content });
     setDiskContent(t.disk);
     setResult(t.result);
@@ -419,6 +457,88 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
       }
     }
   };
+
+  // ---------- 全局快捷键：Ctrl+P 快速打开 / Ctrl+/ 速查表 ----------
+  // 捕获阶段监听：优先于任何组件的 keydown/stopPropagation，保证全局快捷键始终可达
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.ctrlKey && !e.altKey && !e.shiftKey && (e.key === 'p' || e.key === 'P')) {
+        e.preventDefault();
+        setQuickOpen(true);
+      } else if (e.ctrlKey && e.key === '/') {
+        e.preventDefault();
+        setCheat((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', h, true);
+    return () => window.removeEventListener('keydown', h, true);
+  }, []);
+
+  // ---------- 拖拽打开文件 / 文件夹（Tauri 桌面端）----------
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+        const fn = await getCurrentWebview().onDragDropEvent((ev) => {
+          if (ev.payload.type !== 'drop') return;
+          for (const p of ev.payload.paths || []) void dropRef.current?.handleDrop(p);
+        });
+        if (cancelled) fn();
+        else unlisten = fn;
+      } catch {
+        /* 非 Tauri 环境 / API 不可用 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
+  /** 拖拽落点处理：目录→添加工作区；文件→所属工作区内打开（无归属时父目录入列再打开）。
+      每次渲染后刷新引用，保证拖拽回调读到最新的工作区/激活会话状态 */
+  useEffect(() => {
+    const openDroppedFile = async (p: string) => {
+      await openFile({ path: p, name: fileName(p), is_dir: false });
+    };
+    const handleDrop = async (p: string) => {
+      let isDir = false;
+      try {
+        await listDir(p);
+        isDir = true;
+      } catch {
+        /* 非目录 → 按文件处理 */
+      }
+      if (isDir) {
+        const err = await addWorkspace(p);
+        if (err) setError(err);
+        return;
+      }
+      const norm = p.replace(/\\/g, '/').toLowerCase();
+      const hit = workspaces.find((w) => {
+        const wp = w.path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+        return norm.startsWith(wp + '/');
+      });
+      if (hit) {
+        if (hit.path !== activeWs) await switchTo(hit.path);
+        await openDroppedFile(p);
+        return;
+      }
+      const parent = p.replace(/[\\/][^\\/]+$/, '');
+      const err = await addWorkspace(parent);
+      if (err) {
+        setError(err);
+        return;
+      }
+      // 等新工作区的状态提交渲染后，用最新闭包打开文件
+      await sleep(0);
+      await dropRef.current?.openFile(p);
+    };
+    dropRef.current = { handleDrop, openFile: openDroppedFile };
+  });
 
   /** 执行分析：分析模式下以对话流 + 流水线时间线呈现（步骤状态：pending/active/done + 耗时）；支持中途停止 */
   const runScan = async (userText?: string) => {
@@ -772,6 +892,36 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
     }
   };
 
+  /** 导出当前会话对话为 Markdown（Tauri 弹保存框落盘；浏览器调试走 Blob 下载） */
+  const exportChat = async () => {
+    if (!messages.length) {
+      setError(t('wb.exportChatEmpty'));
+      return;
+    }
+    const ws = workspaces.find((w) => w.path === activeWs);
+    const title = ws?.alias || (activeWs ? fileName(activeWs) : t('an.title'));
+    const md = chatToMarkdown(title, messages);
+    const fname = `mrsliy-chat-${new Date().toISOString().slice(0, 10)}.md`;
+    try {
+      if ('__TAURI_INTERNALS__' in window) {
+        const { save } = await import('@tauri-apps/plugin-dialog');
+        const target = await save({ defaultPath: fname, filters: [{ name: 'Markdown', extensions: ['md'] }] });
+        if (!target) return;
+        await saveFile(target, md);
+        setMessages((m) => [...m, { id: newId(), role: 'assistant', text: t('wb.exportChatDone', { path: target }), time: nowTime() }]);
+      } else {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([md], { type: 'text/markdown;charset=utf-8' }));
+        a.download = fname;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        setMessages((m) => [...m, { id: newId(), role: 'assistant', text: t('wb.exportChatDone', { path: fname }), time: nowTime() }]);
+      }
+    } catch (e) {
+      setError(t('wb.exportChatFail', { msg: (e as Error).message || t('wb.unknownErr') }));
+    }
+  };
+
   const fix = async (issue: Issue) => {
     if (!currentFile) return;
     if (activeLocked) {
@@ -847,6 +997,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
         onAdd={addWorkspace}
         onRemove={removeWorkspace}
         onToggleLock={toggleLock}
+        onRename={renameWorkspace}
         onArchive={(p) => {
           setWorkspaces((ws) => ws.map((w) => (w.path === p ? { ...w, archived: !w.archived } : w)));
           scheduleSave();
@@ -892,6 +1043,7 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
           onSend={(t) => void sendChat(t)}
           onModAction={onModAction}
           onExportReport={exportReport}
+          onExportChat={exportChat}
           onStop={stopAll}
           busy={busy}
           onScan={() => runScan()}
@@ -1070,9 +1222,11 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
           {currentFile ? (
             <div style={{ flex: 1, minHeight: 0 }}>
               <CodeEditor
+                ref={editorApiRef}
                 path={currentFile.path}
                 value={currentFile.content}
                 readOnly={activeLocked}
+                highlightLines={highlightLines}
                 onChange={updateContent}
                 onSave={saveToDisk}
                 onContextMenu={(e, sel) => {
@@ -1191,6 +1345,16 @@ export default function Workbench({ mode, onModeChange, onOpenDiff, analysisMode
 
       {/* 编辑模式专属：AI 悬浮小框 */}
       <AIDock currentFile={currentFile} result={result} scanning={scanning} analysisMode={analysisMode} locked={activeLocked} onApplyCode={applyCodeChange} memoryScope={memoryScopeFor(isMemoryCrossChat(), activeWs)} />
+
+      {/* Ctrl+P 快速打开 / Ctrl+/ 快捷键速查表 */}
+      <QuickOpen
+        open={quickOpen}
+        collectFiles={collectFilesCb}
+        workspacePath={activeWs}
+        onClose={() => setQuickOpen(false)}
+        onPick={(it: QuickOpenItem) => void openFile(it)}
+      />
+      <ShortcutSheet open={cheat} onClose={() => setCheat(false)} />
     </div>
   );
 }

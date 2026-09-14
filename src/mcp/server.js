@@ -7,7 +7,8 @@
 const { logger } = require('../utils/logger');
 const { buildToolRegistry, TOOL_SUMMARIES } = require('./tools');
 
-const SERVER_INFO = { name: 'mr-sliy', version: '3.15.0' };
+// 版本号跟随根 package.json，避免多处手工同步
+const SERVER_INFO = { name: 'mr-sliy', version: require('../../package.json').version };
 const SUPPORTED_PROTOCOLS = ['2024-11-05', '2025-03-26', '2025-06-18'];
 const LATEST_PROTOCOL = SUPPORTED_PROTOCOLS[SUPPORTED_PROTOCOLS.length - 1];
 
@@ -24,14 +25,40 @@ function rpcError(id, code, message) {
   return { jsonrpc: '2.0', id, error: { code, message } };
 }
 
+// ---------- 工具调用日志（模块级共享：HTTP 与 stdio 两个传输实例都写入同一份） ----------
+const CALL_LOGS = [];
+const CALL_LOGS_CAP = 200;
+
+function logToolCall(entry) {
+  CALL_LOGS.push(entry);
+  if (CALL_LOGS.length > CALL_LOGS_CAP) CALL_LOGS.splice(0, CALL_LOGS.length - CALL_LOGS_CAP);
+}
+
+/** 最近的工具调用记录（新的在前），供设置页查看外部客户端都调用了什么 */
+function recentToolCalls(limit = 50) {
+  const n = Math.max(1, Math.min(200, Number(limit) || 50));
+  return CALL_LOGS.slice(-n).reverse();
+}
+
+/** 参数摘要：截断到 300 字符，避免日志被大参数撑爆 */
+function summarizeArgs(args) {
+  try {
+    const s = JSON.stringify(args) || '';
+    return s.length > 300 ? s.slice(0, 300) + `…(${s.length} chars)` : s;
+  } catch {
+    return '[unserializable]';
+  }
+}
+
 function createMcpServer() {
   const registry = buildToolRegistry();
 
   /**
    * 处理一条 JSON-RPC 消息（对象或 JSON 字符串）。
+   * meta.transport 用于调用日志标注来源（http / stdio）。
    * 返回响应对象；通知类消息（无 id）返回 null，不需要回发。
    */
-  async function handleMessage(raw) {
+  async function handleMessage(raw, meta) {
     let msg;
     try {
       msg = typeof raw === 'string' ? JSON.parse(raw) : raw;
@@ -46,6 +73,39 @@ function createMcpServer() {
     }
 
     const isNotification = !hasId;
+    const transport = meta && meta.transport ? meta.transport : 'unknown';
+    // tools/call 全程计时并写日志（含失败/未知工具），其余方法不记录
+    if (msg.method === 'tools/call') {
+      const started = Date.now();
+      const args = (msg.params && msg.params.arguments) || {};
+      const name = (msg.params && msg.params.name) || '';
+      try {
+        const result = await dispatch(msg);
+        const isError = !!(result && result.isError);
+        logToolCall({
+          ts: new Date().toISOString(),
+          tool: String(name),
+          args: summarizeArgs(args),
+          ok: !isError,
+          error: isError && Array.isArray(result?.content) ? String(result.content[0]?.text || '').slice(0, 200) : '',
+          elapsedMs: Date.now() - started,
+          transport
+        });
+        if (isNotification || result === undefined) return null;
+        return { jsonrpc: '2.0', id: msg.id, result };
+      } catch (err) {
+        logToolCall({
+          ts: new Date().toISOString(),
+          tool: String(name),
+          args: summarizeArgs(args),
+          ok: false,
+          error: (err && err.message) || 'Internal error',
+          elapsedMs: Date.now() - started,
+          transport
+        });
+        throw err;
+      }
+    }
     try {
       const result = await dispatch(msg);
       if (isNotification || result === undefined) return null;
@@ -124,4 +184,4 @@ function createMcpServer() {
   return { handleMessage, tools: registry.list() };
 }
 
-module.exports = { createMcpServer, SERVER_INFO, SUPPORTED_PROTOCOLS, TOOL_SUMMARIES };
+module.exports = { createMcpServer, SERVER_INFO, SUPPORTED_PROTOCOLS, TOOL_SUMMARIES, recentToolCalls };

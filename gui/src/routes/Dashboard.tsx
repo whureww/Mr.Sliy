@@ -1,5 +1,15 @@
 import { useEffect, useState } from 'react';
-import { issueStats, listProjects, type ProjectRow } from '../ipc/client';
+import {
+  issueStats,
+  listProjects,
+  getIssueTrend,
+  listScanTasks,
+  listIssuesByTask,
+  Issue,
+  ScanTaskRow,
+  TrendRow,
+  type ProjectRow
+} from '../ipc/client';
 import { t } from '../lib/i18n';
 
 interface StatRow {
@@ -54,6 +64,14 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
   const [projectId, setProjectId] = useState<number | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [err, setErr] = useState('');
+  // 质量趋势 / 两次扫描对比
+  const [trend, setTrend] = useState<TrendRow[]>([]);
+  const [tasks, setTasks] = useState<ScanTaskRow[]>([]);
+  const [cmpA, setCmpA] = useState<number | null>(null);
+  const [cmpB, setCmpB] = useState<number | null>(null);
+  const [cmpBusy, setCmpBusy] = useState(false);
+  const [cmpErr, setCmpErr] = useState('');
+  const [cmpRes, setCmpRes] = useState<{ newIssues: Issue[]; resolved: Issue[]; aCount: number; bCount: number } | null>(null);
 
   // 加载项目列表，默认选中最近扫描(无扫描时间则按创建时间)的项目
   useEffect(() => {
@@ -95,9 +113,50 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
         setErr('dash.loadFail');
         onReady?.();
       });
+    // 趋势与扫描任务列表（失败静默：卡片显示空态）
+    setTrend([]);
+    setTasks([]);
+    setCmpRes(null);
+    getIssueTrend(projectId)
+      .then((rows) => !cancelled && setTrend(rows))
+      .catch(() => {});
+    listScanTasks(projectId)
+      .then((rows) => {
+        if (cancelled) return;
+        setTasks(rows);
+        // 默认对比组合：最新一次 vs 上一次
+        if (rows.length >= 2) {
+          setCmpA(rows[1].id);
+          setCmpB(rows[0].id);
+        }
+      })
+      .catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  /** 两次扫描对比：按 (类型|行|说明) 识别新增 / 已解决问题 */
+  const runCompare = async () => {
+    if (cmpA == null || cmpB == null || cmpA === cmpB || cmpBusy) return;
+    setCmpBusy(true);
+    setCmpErr('');
+    try {
+      const [ia, ib] = await Promise.all([listIssuesByTask(cmpA), listIssuesByTask(cmpB)]);
+      const key = (i: Issue) => `${i.issueType}|${i.line ?? '-'}|${i.message}`;
+      const setA = new Set(ia.map(key));
+      const setB = new Set(ib.map(key));
+      setCmpRes({
+        newIssues: ib.filter((i) => !setA.has(key(i))),
+        resolved: ia.filter((i) => !setB.has(key(i))),
+        aCount: ia.length,
+        bCount: ib.length
+      });
+    } catch {
+      setCmpErr(t('dash.cmp.loadFail'));
+    } finally {
+      setCmpBusy(false);
+    }
+  };
 
   const projectName = (id: number | null) => {
     const p = projects.find((x) => x.id === id);
@@ -219,6 +278,74 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
           ))}
         </div>
       </div>
+
+      {/* 质量趋势 / 两次扫描对比 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gridAutoRows: 'minmax(260px, auto)', gap: 16 }}>
+        <div className="card" style={bento(2)}>
+          <CardTitle>{t('dash.trend')}</CardTitle>
+          {trend.length === 0 ? <Empty>{t('dash.trendEmpty')}</Empty> : (
+            <>
+              <div className="muted" style={{ fontSize: 11.5 }}>{t('dash.trendDesc', { n: trend.length })}</div>
+              <TrendChart rows={trend} />
+            </>
+          )}
+        </div>
+
+        <div className="card" style={bento(1)}>
+          <CardTitle>{t('dash.compare')}</CardTitle>
+          {tasks.length < 2 ? <Empty>{t('dash.compareEmpty')}</Empty> : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0, flex: 1 }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span className="muted" style={{ flexShrink: 0 }}>{t('dash.compareA')}</span>
+                <select
+                  value={cmpA ?? ''}
+                  onChange={(e) => setCmpA(Number(e.target.value))}
+                  style={{ flex: 1, minWidth: 0, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-recessed)', color: 'var(--text-primary)', fontSize: 12 }}
+                >
+                  {tasks.map((tk) => <option key={tk.id} value={tk.id}>{taskLabel(tk)}</option>)}
+                </select>
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span className="muted" style={{ flexShrink: 0 }}>{t('dash.compareB')}</span>
+                <select
+                  value={cmpB ?? ''}
+                  onChange={(e) => setCmpB(Number(e.target.value))}
+                  style={{ flex: 1, minWidth: 0, padding: '4px 8px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg-recessed)', color: 'var(--text-primary)', fontSize: 12 }}
+                >
+                  {tasks.map((tk) => <option key={tk.id} value={tk.id}>{taskLabel(tk)}</option>)}
+                </select>
+              </label>
+              <button className="btn-primary" style={{ fontSize: 12.5, alignSelf: 'flex-start' }} onClick={() => void runCompare()} disabled={cmpBusy || cmpA === cmpB}>
+                {cmpBusy ? '…' : t('dash.compareGo')}
+              </button>
+              {cmpErr && <div style={{ color: 'var(--danger)', fontSize: 12 }}>{cmpErr}</div>}
+              {cmpRes && (
+                <div style={{ overflow: 'auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
+                  <div className="mono" style={{ fontWeight: 650 }}>{t('dash.cmp.countChange', { a: cmpRes.aCount, b: cmpRes.bCount })}</div>
+                  <div>
+                    <div style={{ color: 'var(--danger)', fontWeight: 650, marginBottom: 4 }}>{t('dash.cmp.newIssues', { n: cmpRes.newIssues.length })}</div>
+                    {cmpRes.newIssues.slice(0, 20).map((i, k) => (
+                      <div key={`n${k}`} className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${i.issueType} L${i.line ?? '-'}: ${i.message}`}>
+                        · {i.issueType} L{i.line ?? '-'}: {i.message}
+                      </div>
+                    ))}
+                    {cmpRes.newIssues.length > 20 && <div className="muted" style={{ marginTop: 2 }}>…</div>}
+                  </div>
+                  <div>
+                    <div style={{ color: 'var(--success)', fontWeight: 650, marginBottom: 4 }}>{t('dash.cmp.resolved', { n: cmpRes.resolved.length })}</div>
+                    {cmpRes.resolved.slice(0, 20).map((i, k) => (
+                      <div key={`r${k}`} className="muted" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={`${i.issueType} L${i.line ?? '-'}: ${i.message}`}>
+                        · {i.issueType} L{i.line ?? '-'}: {i.message}
+                      </div>
+                    ))}
+                    {cmpRes.resolved.length > 20 && <div className="muted" style={{ marginTop: 2 }}>…</div>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -241,5 +368,63 @@ function StatRow({ label, value, color }: { label: string, value: string, color?
       <span className="muted" style={{ fontSize: 12.5 }}>{label}</span>
       <span style={{ fontSize: 22, fontWeight: 700, color: color || 'var(--text-primary)' }}>{value}</span>
     </div>
+  );
+}
+
+/** 扫描任务下拉显示名：时间 + 问题数 + 模式 */
+function taskLabel(tk: ScanTaskRow): string {
+  const when = String(tk.completed_at || '').replace('T', ' ').slice(5, 16);
+  return `#${tk.id} ${when} · ${tk.issue_count ?? 0}${tk.scan_mode ? ` · ${tk.scan_mode}` : ''}`;
+}
+
+/** 单次扫描任务的质量评分（行数缺失时按加权计数扣减，与概览评分口径一致） */
+function taskScore(tk: TrendRow): number {
+  const high = (Number(tk.issue_critical) || 0) + (Number(tk.issue_high) || 0);
+  const medium = Number(tk.issue_medium) || 0;
+  const low = Number(tk.issue_low) || 0;
+  return computeQualityScore({ high, medium, low }, 0).score;
+}
+
+/** 质量趋势折线图（纯 SVG，无第三方图表依赖） */
+function TrendChart({ rows }: { rows: TrendRow[] }) {
+  const W = 560;
+  const H = 170;
+  const PL = 34;
+  const PR = 12;
+  const PT = 14;
+  const PB = 24;
+  const scores = rows.map(taskScore);
+  const xs = (i: number) =>
+    PL + (rows.length === 1 ? (W - PL - PR) / 2 : (i * (W - PL - PR)) / (rows.length - 1));
+  const ys = (s: number) => PT + (1 - s / 100) * (H - PT - PB);
+  const points = scores.map((s, i) => `${xs(i).toFixed(1)},${ys(s).toFixed(1)}`).join(' ');
+  const gridY = [0, 50, 100];
+  const color = (s: number) => (s >= 80 ? 'var(--success)' : s >= 60 ? 'var(--warning)' : 'var(--danger)');
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', flex: 1, minHeight: 0 }}>
+      {gridY.map((g) => (
+        <g key={g}>
+          <line x1={PL} x2={W - PR} y1={ys(g)} y2={ys(g)} stroke="var(--border-hairline)" strokeWidth="1" />
+          <text x={PL - 6} y={ys(g) + 3.5} textAnchor="end" fontSize="10" fill="var(--text-muted)">{g}</text>
+        </g>
+      ))}
+      <polyline points={points} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
+      {scores.map((s, i) => (
+        <g key={i}>
+          <circle cx={xs(i)} cy={ys(s)} r="3.5" fill={color(s)} />
+          <title>{`${String(rows[i].completed_at || '').replace('T', ' ').slice(0, 16)} · ${s}`}</title>
+        </g>
+      ))}
+      {rows.map((r, i) => {
+        // x 轴日期标签：点较多时隔行显示，避免重叠
+        if (rows.length > 8 && i % 2 === 1) return null;
+        const d = String(r.completed_at || '').slice(5, 10);
+        return (
+          <text key={i} x={xs(i)} y={H - 8} textAnchor="middle" fontSize="9.5" fill="var(--text-muted)">
+            {d}
+          </text>
+        );
+      })}
+    </svg>
   );
 }

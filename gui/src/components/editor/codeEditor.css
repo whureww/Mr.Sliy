@@ -141,6 +141,18 @@
   transition: top 0.12s ease;
 }
 
+/* 行内 Diff 标记：AI 修改涉及的行（绿条 + 淡绿底），位于内容层之下 */
+.ce-line-mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: var(--ce-lh);
+  background: color-mix(in srgb, #3FB950 13%, transparent);
+  border-left: 2.5px solid #3FB950;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
 /* 高亮层：padding 定义在自身（与输入层完全一致），内容框原点对齐。
    代码编辑器是核心选中场景，显式放开文本选择（全局默认禁选） */
 .ce-highlight {

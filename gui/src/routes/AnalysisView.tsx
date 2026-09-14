@@ -19,6 +19,7 @@ interface Props {
   onFix: (issue: Issue) => void;
   onModAction: (action: 'apply' | 'reject' | 'more' | 'undo' | 'verify', msgId: number, mod: ModProposal) => void;
   onExportReport: (r: ProjectScanResult) => void;
+  onExportChat: () => void;
   onStop: () => void;
 }
 
@@ -36,6 +37,7 @@ export default function AnalysisView({
   onFix,
   onModAction,
   onExportReport,
+  onExportChat,
   onStop
 }: Props) {
   useLang();
@@ -83,6 +85,15 @@ export default function AnalysisView({
           </span>
         )}
         <div style={{ flex: 1 }} />
+        <button
+          className="btn-ghost"
+          onClick={onExportChat}
+          disabled={messages.length === 0}
+          title={messages.length === 0 ? t('wb.exportChatEmpty') : t('wb.exportChat')}
+          style={{ fontSize: 12.5 }}
+        >
+          {t('wb.exportChat')}
+        </button>
         <button className="btn-primary" onClick={onScan} disabled={!currentFile || scanning || locked} title={locked ? t('wb.locked') : undefined}>
           {scanning ? t('an.analyzing') : t('an.start')}
         </button>

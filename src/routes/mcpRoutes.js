@@ -7,7 +7,7 @@ const express = require('express');
 const router = express.Router();
 const path = require('path');
 const { success } = require('../utils/response');
-const { SERVER_INFO, SUPPORTED_PROTOCOLS, TOOL_SUMMARIES } = require('../mcp/server');
+const { SERVER_INFO, SUPPORTED_PROTOCOLS, TOOL_SUMMARIES, recentToolCalls } = require('../mcp/server');
 const { config } = require('../config');
 
 router.get('/status', (req, res) => {
@@ -25,6 +25,15 @@ router.get('/status', (req, res) => {
       tools: TOOL_SUMMARIES
     })
   );
+});
+
+/**
+ * MCP 工具调用日志：外部客户端（Claude Desktop / Cursor 等）通过 HTTP 或 stdio
+ * 调用了哪些工具、参数摘要、耗时与成败。环形缓冲 200 条，新的在前。
+ */
+router.get('/logs', (req, res) => {
+  const limit = parseInt(req.query.limit, 10) || 50;
+  return res.json(success({ logs: recentToolCalls(limit) }));
 });
 
 /**

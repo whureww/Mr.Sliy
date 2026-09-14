@@ -317,6 +317,30 @@ async function createTaskRecord(taskId, projectId, data) {
   );
 }
 
+/**
+ * 工作区全文搜索（GUI 跨文件搜索）：
+ * 遍历 projectPath 下的文本文件，逐行匹配关键字，返回匹配行（文件、行号、内容）。
+ * 跳过依赖/构建产物目录与二进制文件；结果与扫描文件数有上限，truncated 标记截断。
+ */
+router.post('/search', async (req, res) => {
+  try {
+    const { projectPath, keyword } = req.body || {};
+    if (!projectPath || !fs.existsSync(projectPath)) {
+      return res.status(400).json(error('工作区路径无效', 400));
+    }
+    if (!keyword || String(keyword).trim().length < 2) {
+      return res.status(400).json(error('关键字至少 2 个字符', 400));
+    }
+    const started = Date.now();
+    const { searchWorkspace } = require('../utils/workspaceSearch');
+    const r = searchWorkspace({ root: projectPath, keyword: String(keyword).trim() });
+    return res.json(success({ ...r, durationMs: Date.now() - started }));
+  } catch (err) {
+    logger.error('工作区搜索失败:', err);
+    return res.status(500).json(error(err.message));
+  }
+});
+
 module.exports = router;
 
 // 供 MCP 工具层复用（项目扫描的文件收集与落库逻辑单一来源）

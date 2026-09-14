@@ -21,7 +21,7 @@ function runStdio() {
   async function onLine(line) {
     let resp = null;
     try {
-      resp = await server.handleMessage(line);
+      resp = await server.handleMessage(line, { transport: 'stdio' });
     } catch (err) {
       // handleMessage 内部已兜底，此处仅防御极端异常
       resp = { jsonrpc: '2.0', id: null, error: { code: -32603, message: err.message } };

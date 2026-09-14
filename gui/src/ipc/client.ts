@@ -3,6 +3,8 @@ import { t } from '../lib/i18n';
 
 const IS_TAURI = '__TAURI_INTERNALS__' in window;
 const DEV_PORT = 3000; // 浏览器调试时直连本地 server
+// dev 主机名跟随页面（服务器可能绑定 localhost/IPv6 ::1，硬编码 127.0.0.1 会连接被拒）
+const DEV_HOST = window.location.hostname || '127.0.0.1';
 
 export interface FileNode {
   name: string;
@@ -50,12 +52,12 @@ export interface OptimizeResult {
 }
 
 async function httpGet<T>(path: string): Promise<T> {
-  const res = await fetch(`http://127.0.0.1:${DEV_PORT}${path}`);
+  const res = await fetch(`http://${DEV_HOST}:${DEV_PORT}${path}`);
   return res.json() as Promise<T>;
 }
 
 async function httpPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(`http://127.0.0.1:${DEV_PORT}${path}`, {
+  const res = await fetch(`http://${DEV_HOST}:${DEV_PORT}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -76,7 +78,8 @@ async function sidecarPort(): Promise<number> {
 /** Tauri 模式下直连 sidecar HTTP（绕过 Rust 命令转发，便于扩展业务接口） */
 export async function sidecarRequest<T>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   const port = IS_TAURI ? await sidecarPort() : DEV_PORT;
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+  const host = IS_TAURI ? '127.0.0.1' : DEV_HOST; // sidecar 固定监听 127.0.0.1；dev 跟随页面主机名
+  const res = await fetch(`http://${host}:${port}${path}`, {
     method,
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
@@ -199,7 +202,8 @@ export async function chatWithAIStream(
   opts: { onDelta: (delta: string) => void; signal?: AbortSignal; memoryScope?: string }
 ): Promise<{ reply: string; usage?: unknown }> {
   const port = IS_TAURI ? await sidecarPort() : DEV_PORT;
-  const res = await fetch(`http://127.0.0.1:${port}/api/ai/chat/stream`, {
+  const host = IS_TAURI ? '127.0.0.1' : DEV_HOST;
+  const res = await fetch(`http://${host}:${port}/api/ai/chat/stream`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ messages, context, memoryScope: opts.memoryScope }),
@@ -521,6 +525,101 @@ export interface McpSelftest {
  */
 export async function runMcpSelftest(): Promise<McpSelftest> {
   return unwrapData<McpSelftest>(await sidecarRequest('GET', '/api/mcp/selftest'));
+}
+
+// ---------- 工作区全文搜索（跨文件查找） ----------
+
+export interface SearchHit {
+  file: string;
+  line: number;
+  column: number;
+  text: string;
+}
+
+export interface SearchWorkspaceResult {
+  matches: SearchHit[];
+  truncated: boolean;
+  searchedFiles: number;
+  durationMs?: number;
+}
+
+/** 跨文件全文搜索：遍历工作区文本文件逐行匹配关键字（服务端跳过依赖/二进制目录） */
+export async function searchWorkspace(projectPath: string, keyword: string): Promise<SearchWorkspaceResult> {
+  const raw = await sidecarRequest<unknown>('POST', '/api/scan/search', { projectPath, keyword });
+  return unwrapData<SearchWorkspaceResult>(raw);
+}
+
+// ---------- 扫描任务（质量概览：趋势 / 两次扫描对比） ----------
+
+export interface ScanTaskRow {
+  id: number;
+  task_name?: string;
+  scan_mode?: string;
+  scanned_files?: number;
+  file_count?: number;
+  issue_count?: number;
+  issue_critical?: number;
+  issue_high?: number;
+  issue_medium?: number;
+  issue_low?: number;
+  completed_at?: string | null;
+  duration_ms?: number;
+  [k: string]: unknown;
+}
+
+/** 项目的扫描任务列表（新在前），供"两次扫描对比"选择任务 */
+export async function listScanTasks(projectId: number, limit = 30): Promise<ScanTaskRow[]> {
+  const r = unwrapData<{ tasks: ScanTaskRow[] }>(
+    await sidecarRequest('GET', `/api/issues/tasks?projectId=${projectId}&limit=${limit}`)
+  );
+  return r.tasks || [];
+}
+
+export interface TrendRow {
+  id: number;
+  completed_at?: string | null;
+  scanned_files?: number;
+  issue_count?: number;
+  issue_critical?: number;
+  issue_high?: number;
+  issue_medium?: number;
+  issue_low?: number;
+  [k: string]: unknown;
+}
+
+/** 项目的质量评分趋势序列（时间正序） */
+export async function getIssueTrend(projectId: number, limit = 20): Promise<TrendRow[]> {
+  const r = unwrapData<{ trend: TrendRow[] }>(
+    await sidecarRequest('GET', `/api/issues/trend?projectId=${projectId}&limit=${limit}`)
+  );
+  return r.trend || [];
+}
+
+/** 按 taskId 拉取该次扫描的问题（两次扫描对比用，取全量上限内） */
+export async function listIssuesByTask(taskId: number, pageSize = 2000): Promise<Issue[]> {
+  const raw = await sidecarRequest<{ data?: { list?: Issue[] } }>(
+    'GET',
+    `/api/issues?taskId=${taskId}&pageSize=${pageSize}`
+  );
+  return raw?.data?.list || [];
+}
+
+// ---------- MCP 调用日志 ----------
+
+export interface McpCallLog {
+  ts: string;
+  tool: string;
+  args: string;
+  ok: boolean;
+  error: string;
+  elapsedMs: number;
+  transport: string;
+}
+
+/** 最近的 MCP 工具调用记录（新的在前） */
+export async function getMcpLogs(limit = 50): Promise<McpCallLog[]> {
+  const r = unwrapData<{ logs: McpCallLog[] }>(await sidecarRequest('GET', `/api/mcp/logs?limit=${limit}`));
+  return r.logs || [];
 }
 
 // ---------- LLM 提供商管理（设置页） ----------

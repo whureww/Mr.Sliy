@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Prism from 'prismjs';
 import 'prismjs/components/prism-typescript';
 import 'prismjs/components/prism-python';
@@ -15,6 +15,7 @@ import 'prismjs/components/prism-bash';
 import 'prismjs/components/prism-markdown';
 import './codeEditor.css';
 import { t, useLang } from '../../lib/i18n';
+import { useEditorFontSize } from '../../lib/editorPrefs';
 
 /** 扩展名 → Prism 语言（markup/css/clike/javascript 由核心自带） */
 const EXT_LANG: Record<string, string> = {
@@ -29,13 +30,26 @@ const EXT_LANG: Record<string, string> = {
   sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash', md: 'markdown'
 };
 
-const FONT_SIZE = 13;
-const LINE_H = 21;
+/** 默认 13px 字号对应 21px 行高；字号缩放时行高等比取整，保证行号/高亮层对齐 */
+const BASE_FONT = 13;
+const BASE_LINE_H = 21;
 const PAD_T = 10;
 
 function langOf(path: string): string {
   const ext = path.includes('.') ? path.split('.').pop()!.toLowerCase() : '';
   return EXT_LANG[ext] || 'clike';
+}
+
+/** 括号/引号自动配对表（quote 类在词中输入不自动补全） */
+const PAIRS: Record<string, string> = { '(': ')', '[': ']', '{': '}', '"': '"', "'": "'", '`': '`' };
+const CLOSERS = new Set([')', ']', '}', '"', "'", '`']);
+const QUOTES = new Set(['"', "'", '`']);
+const INDENT_UNIT = '  ';
+
+/** 对外暴露的编辑器命令（问题卡片跳转行等） */
+export interface CodeEditorApi {
+  /** 跳转到指定行（1-based，超界取最后一行），选中整行并滚动到可视区 */
+  revealLine(line: number): void;
 }
 
 interface Props {
@@ -46,6 +60,8 @@ interface Props {
   /** Ctrl+S 触发 */
   onSave?: () => void;
   readOnly?: boolean;
+  /** 行内 Diff：需要高亮标记的行号（1-based，绝对行号） */
+  highlightLines?: number[];
   /** 右键菜单回调：附带输入层当前选中文本 */
   onContextMenu?: (e: React.MouseEvent, selection: string) => void;
 }
@@ -54,10 +70,16 @@ interface Props {
  * 代码编辑器：彩色语法高亮 + 行号 + 当前行高亮 + 任意行/句编辑。
  * 实现方式：唯一滚动容器内叠加「高亮层 pre」与「透明 textarea」，
  * 两者字体度量完全一致，光标与高亮彩色文字逐字符对齐。
- * 附：Ctrl+F 查找/替换（Enter/Shift+Enter 上下切换）、Ctrl+G 跳转行。
+ * 附：Ctrl+F 查找/替换（Enter/Shift+Enter 上下切换）、Ctrl+G 跳转行、
+ * 括号/引号自动配对与跳过、Enter 自动缩进、成对退格删除、字号跟随设置。
  */
-export default function CodeEditor({ path, value, onChange, onSave, readOnly, onContextMenu }: Props) {
+const CodeEditor = forwardRef<CodeEditorApi, Props>(function CodeEditor(
+  { path, value, onChange, onSave, readOnly, highlightLines, onContextMenu },
+  ref
+) {
   useLang();
+  const fontSize = useEditorFontSize();
+  const lineH = Math.round((fontSize * BASE_LINE_H) / BASE_FONT);
   const viewportRef = useRef<HTMLDivElement>(null);
   const gutterRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -147,11 +169,22 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
     setCaretLine(line);
     const vp = viewportRef.current;
     if (vp) {
-      const y = PAD_T + line * LINE_H;
-      if (y < vp.scrollTop) vp.scrollTop = Math.max(0, y - LINE_H);
-      else if (y + LINE_H * 2 > vp.scrollTop + vp.clientHeight) vp.scrollTop = y + LINE_H * 2 - vp.clientHeight;
+      const y = PAD_T + line * lineH;
+      if (y < vp.scrollTop) vp.scrollTop = Math.max(0, y - lineH);
+      else if (y + lineH * 2 > vp.scrollTop + vp.clientHeight) vp.scrollTop = y + lineH * 2 - vp.clientHeight;
     }
   };
+
+  /** 跳转到指定行（1-based，超界取最后一行），选中整行并滚动到可视区 */
+  const revealLine = (lineNo: number) => {
+    const n = Math.max(1, Math.min(lineNo, lines.length));
+    let offset = 0;
+    for (let i = 0; i < n - 1; i++) offset += lines[i].length + 1;
+    revealOffset(offset, offset + (lines[n - 1]?.length || 0));
+  };
+
+  /** 对外暴露命令 */
+  useImperativeHandle(ref, () => ({ revealLine }));
 
   /** 由光标位置计算所在行号，并保证光标行在可视区域内 */
   const trackCaret = () => {
@@ -162,9 +195,9 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
 
     const vp = viewportRef.current;
     if (vp) {
-      const y = PAD_T + line * LINE_H;
-      if (y < vp.scrollTop) vp.scrollTop = Math.max(0, y - LINE_H);
-      else if (y + LINE_H * 2 > vp.scrollTop + vp.clientHeight) vp.scrollTop = y + LINE_H * 2 - vp.clientHeight;
+      const y = PAD_T + line * lineH;
+      if (y < vp.scrollTop) vp.scrollTop = Math.max(0, y - lineH);
+      else if (y + lineH * 2 > vp.scrollTop + vp.clientHeight) vp.scrollTop = y + lineH * 2 - vp.clientHeight;
     }
   };
 
@@ -203,19 +236,99 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
   const gotoLine = () => {
     const n = parseInt(gotoText, 10);
     if (!isNaN(n) && n >= 1) {
-      const line = Math.min(n, lines.length) - 1;
-      let offset = 0;
-      for (let i = 0; i < line; i++) offset += lines[i].length + 1;
-      revealOffset(offset, offset + (lines[line]?.length || 0));
+      revealLine(n);
     }
     setGotoOpen(false);
   };
 
+  /** 当前行前导空白（自动缩进用） */
+  const lineIndent = (content: string, caret: number): string => {
+    const ls = content.lastIndexOf('\n', caret - 1) + 1;
+    const m = content.slice(ls, caret).match(/^[ \t]*/);
+    return m ? m[0] : '';
+  };
+
+  /** 括号/引号自动配对、跳过与成对删除，Enter 自动缩进（execCommand 保留原生撤销栈） */
+  const handleAutoPairs = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    const ta = taRef.current;
+    if (!ta || readOnly || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const content = ta.value;
+    const start = ta.selectionStart;
+    const end = ta.selectionEnd;
+    const nextChar = content[start] || '';
+
+    // Enter 自动缩进：继承当前行前导空白；{[ ( 后多缩一级；夹在成对括号间时补出中间行
+    if (e.key === 'Enter') {
+      if ((e.nativeEvent as KeyboardEvent).isComposing) return false;
+      e.preventDefault();
+      const indent = lineIndent(content, start);
+      const prevChar = content[start - 1] || '';
+      const inPair = PAIRS[prevChar] && PAIRS[prevChar] === nextChar;
+      if (inPair) {
+        document.execCommand('insertText', false, `\n${indent}${INDENT_UNIT}\n${indent}`);
+        const mid = start + 1 + indent.length + INDENT_UNIT.length;
+        ta.setSelectionRange(mid, mid);
+      } else {
+        const extra = PAIRS[prevChar] ? INDENT_UNIT : '';
+        document.execCommand('insertText', false, `\n${indent}${extra}`);
+      }
+      trackCaret();
+      return true;
+    }
+
+    // 成对退格：空选区且光标夹在配对字符之间 → 一次删两个
+    if (e.key === 'Backspace') {
+      if (start !== end || start === 0) return false;
+      const prevChar = content[start - 1];
+      if (PAIRS[prevChar] && PAIRS[prevChar] === nextChar) {
+        e.preventDefault();
+        ta.setSelectionRange(start - 1, start + 1);
+        document.execCommand('delete');
+        trackCaret();
+        return true;
+      }
+      return false;
+    }
+
+    // 输入长度为 1 的可打印字符才参与配对
+    if (e.key.length !== 1) return false;
+    const ch = e.key;
+
+    // 跳过同名闭合符：nextChar 已是闭合符 → 只移动光标
+    if (CLOSERS.has(ch) && nextChar === ch && start === end) {
+      e.preventDefault();
+      ta.setSelectionRange(start + 1, start + 1);
+      trackCaret();
+      return true;
+    }
+
+    const closer = PAIRS[ch];
+    if (!closer) return false;
+
+    // 引号在紧邻词字符时不自动补全（避免把 "in" 打成 ""in）
+    if (QUOTES.has(ch) && start === end && /\w/.test(nextChar)) return false;
+
+    e.preventDefault();
+    if (start !== end) {
+      // 有选区：用配对符包裹选区
+      const sel = content.slice(start, end);
+      document.execCommand('insertText', false, ch + sel + closer);
+      ta.setSelectionRange(start + 1, start + 1 + sel.length);
+    } else {
+      document.execCommand('insertText', false, ch + closer);
+      ta.setSelectionRange(start + 1, start + 1);
+    }
+    trackCaret();
+    return true;
+  };
+
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 括号补全/自动缩进/成对删除
+    if (handleAutoPairs(e)) return;
     // Tab → 插入两个空格（execCommand 保留原生撤销栈）
     if (e.key === 'Tab' && !readOnly) {
       e.preventDefault();
-      document.execCommand('insertText', false, '  ');
+      document.execCommand('insertText', false, INDENT_UNIT);
       return;
     }
     // Ctrl+S 保存
@@ -232,7 +345,10 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
   };
 
   return (
-    <div className="code-editor">
+    <div
+      className="code-editor"
+      style={{ '--ce-size': `${fontSize}px`, '--ce-lh': `${lineH}px` } as React.CSSProperties}
+    >
       {/* 行号槽 */}
       <div className="ce-gutter-wrap">
         <div ref={gutterRef} className="ce-gutter">
@@ -247,8 +363,12 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
       {/* 滚动视口：唯一滚动容器，高亮层与输入层随内容同步滚动 */}
       <div ref={viewportRef} className="ce-viewport" onScroll={syncScroll}>
         <div className="ce-inner">
+          {/* 行内 Diff 标记：AI 修改涉及的行（绿条 + 淡绿底） */}
+          {(highlightLines || []).map((ln) => (
+            <div key={`m${ln}`} className="ce-line-mark" style={{ top: PAD_T + (ln - 1) * lineH }} />
+          ))}
           {!readOnly && (
-            <div className="ce-line-hl" style={{ top: PAD_T + caretLine * LINE_H }} />
+            <div className="ce-line-hl" style={{ top: PAD_T + caretLine * lineH }} />
           )}
           <pre className="ce-highlight" dangerouslySetInnerHTML={{ __html: html + '\n' }} />
           <textarea
@@ -356,4 +476,6 @@ export default function CodeEditor({ path, value, onChange, onSave, readOnly, on
       )}
     </div>
   );
-}
+});
+
+export default CodeEditor;

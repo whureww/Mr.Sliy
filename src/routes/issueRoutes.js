@@ -188,6 +188,69 @@ router.get('/stats', (req, res) => {
 });
 
 /**
+ * 项目的扫描任务列表（质量概览"两次扫描对比"的任务选择器）
+ * 返回 scan_task 摘要：任务名、模式、完成时间、问题数（含分级）
+ */
+router.get('/tasks', (req, res) => {
+  try {
+    const db = getDatabase();
+    const projectId = req.query.projectId;
+    const limit = Math.min(parseInt(req.query.limit, 10) || 30, 100);
+    let rows;
+    if (projectId) {
+      rows = db
+        .prepare(
+          `SELECT id, task_name, scan_mode, scan_type, scanned_files, file_count, issue_count,
+                  issue_critical, issue_high, issue_medium, issue_low, status, completed_at, duration_ms
+           FROM scan_task WHERE project_id = ? AND status = 'completed'
+           ORDER BY completed_at DESC, id DESC LIMIT ?`
+        )
+        .all(projectId, limit);
+    } else {
+      rows = db
+        .prepare(
+          `SELECT id, task_name, scan_mode, scan_type, scanned_files, file_count, issue_count,
+                  issue_critical, issue_high, issue_medium, issue_low, status, completed_at, duration_ms
+           FROM scan_task WHERE status = 'completed'
+           ORDER BY completed_at DESC, id DESC LIMIT ?`
+        )
+        .all(limit);
+    }
+    return res.json(success({ tasks: rows }));
+  } catch (err) {
+    logger.error('获取扫描任务列表失败:', err);
+    return res.status(500).json(error(err.message));
+  }
+});
+
+/**
+ * 项目的质量评分趋势：按 scan_task 时间序列返回每次扫描的问题分级计数，
+ * 前端用统一的质量评分算法折算成分数画走势图。
+ */
+router.get('/trend', (req, res) => {
+  try {
+    const db = getDatabase();
+    const projectId = req.query.projectId;
+    if (!projectId) {
+      return res.status(400).json(error('缺少 projectId 参数', 400));
+    }
+    const limit = Math.min(parseInt(req.query.limit, 10) || 20, 50);
+    const rows = db
+      .prepare(
+        `SELECT id, completed_at, scanned_files, issue_count,
+                issue_critical, issue_high, issue_medium, issue_low
+         FROM scan_task WHERE project_id = ? AND status = 'completed'
+         ORDER BY completed_at ASC, id ASC LIMIT ?`
+      )
+      .all(projectId, limit);
+    return res.json(success({ trend: rows }));
+  } catch (err) {
+    logger.error('获取评分趋势失败:', err);
+    return res.status(500).json(error(err.message));
+  }
+});
+
+/**
  * 获取缺陷详情
  */
 router.get('/:id', (req, res) => {

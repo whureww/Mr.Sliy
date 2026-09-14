@@ -651,7 +651,119 @@ const DICT: Record<string, Entry> = {
   'ed.replaceOne': { zh: '替换当前匹配', en: 'Replace current match' },
   'ed.replaceAllTip': { zh: '替换全部匹配', en: 'Replace all matches' },
   'ed.gotoPh': { zh: '跳转到行（1-{n}）', en: 'Go to line (1-{n})' },
-  'ed.goto': { zh: '跳转', en: 'Go' }
+  'ed.goto': { zh: '跳转', en: 'Go' },
+
+  // ---------- 快捷键速查表（Ctrl+/） ----------
+  'keys.title': { zh: '快捷键速查', en: 'Keyboard Shortcuts' },
+  'keys.global': { zh: '全局', en: 'Global' },
+  'keys.quickOpen': { zh: '快速打开文件', en: 'Quick open file' },
+  'keys.cheat': { zh: '快捷键速查表', en: 'Shortcut cheat sheet' },
+  'keys.save': { zh: '保存文件', en: 'Save file' },
+  'keys.esc': { zh: '关闭弹层', en: 'Close dialog' },
+  'keys.editor': { zh: '编辑器', en: 'Editor' },
+  'keys.find': { zh: '查找 / 替换', en: 'Find / Replace' },
+  'keys.gotoLine': { zh: '跳转到行', en: 'Go to line' },
+  'keys.tab': { zh: '缩进', en: 'Indent' },
+  'keys.autoPair': { zh: '自动补全括号 / 引号', en: 'Auto-pair brackets & quotes' },
+  'keys.autoIndent': { zh: '自动缩进', en: 'Auto indent' },
+  'keys.pairDel': { zh: '删除成对符号', en: 'Delete pair' },
+
+  // ---------- Ctrl+P 快速打开 ----------
+  'qo.ph': { zh: '输入文件名模糊搜索…', en: 'Type to fuzzy-search files…' },
+  'qo.noWs': { zh: '先添加工作区', en: 'Add a workspace first' },
+  'qo.noHit': { zh: '无匹配文件', en: 'No matching files' },
+  'qo.nav': { zh: '选择', en: 'Navigate' },
+  'qo.open': { zh: '打开', en: 'Open' },
+  'qo.close': { zh: '关闭', en: 'Close' },
+
+  // ---------- 工作区导航补充（重命名 / 过滤 / 全文搜索） ----------
+  'nav.searchFail': { zh: '搜索失败', en: 'Search failed' },
+  'nav.rename': { zh: '重命名会话', en: 'Rename session' },
+  'nav.resetName': { zh: '恢复默认名', en: 'Reset name' },
+  'nav.filterPh': { zh: '输入以过滤文件树…', en: 'Type to filter the file tree…' },
+  'nav.filterTip': { zh: '文件树过滤（只显示匹配文件）', en: 'Filter the file tree (show matches only)' },
+  'nav.searchTip': { zh: '跨文件全文搜索', en: 'Cross-file full-text search' },
+  'nav.searchPh2': { zh: '搜索文件内容（至少 2 个字符）…', en: 'Search file contents (min 2 chars)…' },
+  'nav.searching': { zh: '搜索中…', en: 'Searching…' },
+  'nav.searchGo': { zh: '搜索', en: 'Search' },
+  'nav.searchNoHit': { zh: '无匹配结果', en: 'No matches' },
+  'nav.searchTrunc': { zh: '匹配过多，仅显示前 200 条', en: 'Too many matches; showing the first 200' },
+  'nav.filtering': { zh: '过滤中…', en: 'Filtering…' },
+  'nav.filterNoHit': { zh: '无匹配文件', en: 'No matching files' },
+  'nav.renameTitle': { zh: '重命名会话', en: 'Rename Session' },
+  'nav.renameHint': { zh: '仅修改显示名，不影响磁盘目录', en: 'Only changes the display name, not the folder' },
+  'common.save': { zh: '保存', en: 'Save' },
+
+  // ---------- AI 悬浮助手（AIDock）补充 ----------
+  'ai.noFile': { zh: '未打开文件', en: 'No file open' },
+  'ai.scanning': { zh: '正在扫描 {name}…', en: 'Scanning {name}…' },
+  'ai.needScan': { zh: '{name} 还没有扫描结果，先点「扫描」再问我', en: 'No scan result for {name} yet — run a scan first' },
+  'ai.summary': { zh: '{name} 共 {total} 个问题（高危 {high} 个）。可让我修复某个问题，或直接提问。', en: '{name} has {total} issues ({high} high). Ask me to fix one, or just ask.' },
+  'ai.parseFail': { zh: '（修改方案解析失败）', en: '(Failed to parse the modification proposal)' },
+  'ai.applyUnsupported': { zh: '当前上下文无法应用此修改', en: 'Cannot apply this change in the current context' },
+  'ai.unknownErr': { zh: '未知错误', en: 'Unknown error' },
+  'ai.askMoreIdeas': { zh: '再给我一些优化思路', en: 'Give me more optimization ideas' },
+  'ai.assistant': { zh: 'AI 助手', en: 'AI Assistant' },
+  'ai.tagCloud': { zh: '大模型', en: 'LLM' },
+  'ai.tagLocal': { zh: '本地', en: 'Local' },
+  'ai.collapse': { zh: '收起', en: 'Collapse' },
+  'ai.copyContent': { zh: '复制内容', en: 'Copy content' },
+  'ai.viewOriginal': { zh: '查看原始代码', en: 'View original code' },
+  'ai.viewModified': { zh: '查看修改后代码', en: 'View modified code' },
+  'ai.applying': { zh: '应用中…', en: 'Applying…' },
+  'ai.confirmApply': { zh: '应用此修改', en: 'Apply this change' },
+  'ai.moreIdeas': { zh: '换个思路', en: 'More ideas' },
+  'ai.applied': { zh: '修改已应用 ✓', en: 'Change applied ✓' },
+  'ai.rejected': { zh: '已放弃此修改', en: 'Change discarded' },
+  'ai.superseded': { zh: '已被新方案取代', en: 'Superseded by a newer proposal' },
+  'ai.applyFailed': { zh: '应用失败：{err}', en: 'Apply failed: {err}' },
+  'ai.llmCalls': { zh: '本次回复 {n} 次大模型调用', en: '{n} LLM calls for this reply' },
+  'ai.thinking': { zh: '思考中…', en: 'Thinking…' },
+  'ai.stop': { zh: '停止生成', en: 'Stop generating' },
+  'ai.streaming': { zh: '正在生成…', en: 'Generating…' },
+
+  // ---------- 对话导出 Markdown ----------
+  'wb.exportChat': { zh: '导出对话', en: 'Export chat' },
+  'wb.exportChatDone': { zh: '对话已导出：{path}', en: 'Chat exported: {path}' },
+  'wb.exportChatFail': { zh: '导出失败：{msg}', en: 'Export failed: {msg}' },
+  'wb.exportChatEmpty': { zh: '当前会话暂无可导出的对话', en: 'Nothing to export in this session yet' },
+
+  // ---------- Dashboard：质量趋势 / 两次扫描对比 ----------
+  'dash.trend': { zh: '质量趋势', en: 'Quality Trend' },
+  'dash.trendDesc': { zh: '按扫描任务的质量评分走势（近 {n} 次）', en: 'Quality score across recent scan tasks (last {n})' },
+  'dash.trendEmpty': { zh: '暂无扫描任务（执行项目扫描后生成）', en: 'No scan tasks yet (created by project scans)' },
+  'dash.compare': { zh: '两次扫描对比', en: 'Scan Comparison' },
+  'dash.compareA': { zh: '基线', en: 'Baseline' },
+  'dash.compareB': { zh: '对比', en: 'Compare' },
+  'dash.compareGo': { zh: '开始对比', en: 'Compare' },
+  'dash.compareEmpty': { zh: '至少需要两次已完成的扫描任务', en: 'At least two completed scan tasks required' },
+  'dash.cmp.newIssues': { zh: '新增问题（{n}）', en: 'New issues ({n})' },
+  'dash.cmp.resolved': { zh: '已解决问题（{n}）', en: 'Resolved issues ({n})' },
+  'dash.cmp.countChange': { zh: '问题总数 {a} → {b}', en: 'Total issues {a} → {b}' },
+  'dash.cmp.loadFail': { zh: '扫描问题读取失败', en: 'Failed to load scan issues' },
+
+  // ---------- MCP 调用日志 ----------
+  'mcp.logs.title': { zh: '调用日志（最近 {n} 条）', en: 'Call logs (last {n})' },
+  'mcp.logs.refresh': { zh: '刷新', en: 'Refresh' },
+  'mcp.logs.empty': { zh: '暂无调用记录', en: 'No calls yet' },
+  'mcp.logs.col.time': { zh: '时间', en: 'Time' },
+  'mcp.logs.col.tool': { zh: '工具', en: 'Tool' },
+  'mcp.logs.col.transport': { zh: '通道', en: 'Channel' },
+  'mcp.logs.col.elapsed': { zh: '耗时', en: 'Elapsed' },
+  'mcp.logs.col.status': { zh: '状态', en: 'Status' },
+
+  // ---------- 设置导入 / 导出 ----------
+  'settings.io.title': { zh: '设置导入 / 导出', en: 'Settings Import / Export' },
+  'settings.io.desc': {
+    zh: '将外观、分析模式、编辑器字号等偏好导出为 JSON 文件备份，或从备份文件导入恢复',
+    en: 'Export preferences (appearance, analysis mode, editor font size) as a JSON backup, or restore from one'
+  },
+  'settings.io.export': { zh: '导出设置', en: 'Export settings' },
+  'settings.io.import': { zh: '导入设置', en: 'Import settings' },
+  'settings.io.done': { zh: '设置已导入并应用 ✓', en: 'Settings imported and applied ✓' },
+  'settings.io.exported': { zh: '设置已导出 ✓', en: 'Settings exported ✓' },
+  'settings.io.fail': { zh: '操作失败：{msg}', en: 'Operation failed: {msg}' },
+  'settings.io.badFile': { zh: '文件格式不正确', en: 'Invalid file format' }
 };
 
 const LANG_KEY = 'mrsliy.lang';

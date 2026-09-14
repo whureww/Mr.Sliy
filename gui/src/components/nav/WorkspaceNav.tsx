@@ -1,15 +1,23 @@
-import { useEffect, useState } from 'react';
-import { FileNode } from '../../ipc/client';
+import { useEffect, useRef, useState } from 'react';
+import { FileNode, searchWorkspace, SearchHit } from '../../ipc/client';
 import { openContextMenu, copyText } from '../../lib/contextMenu';
 import { t, useLang } from '../../lib/i18n';
 
 export interface Workspace {
   path: string;
   name: string;
+  /** 会话别名（重命名后的显示名；未设置时用目录名） */
+  alias?: string;
   locked?: boolean; // 锁定后：不可删除、会话只读
   archived?: boolean; // 归档：默认隐藏，可展开查看（不可扫描）
   scheduleMinutes?: number; // 定时自动扫描间隔（0/undefined = 关闭）
 }
+
+/** 文件树过滤/全文搜索时跳过的重目录（与后端搜索口径一致） */
+const NAV_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', 'out', 'target', 'vendor',
+  '__pycache__', '.venv', 'venv', '.next', 'coverage', '.idea', '.vscode', 'obj', 'bin'
+]);
 
 interface Props {
   workspaces: Workspace[];
@@ -19,18 +27,20 @@ interface Props {
   loadDir: (path: string) => Promise<FileNode[]>;
   onAdd: (path: string) => Promise<string | null>; // 返回错误信息或 null
   onRemove: (path: string) => void;
+  onRename: (path: string, alias: string) => void; // 别名为空串表示恢复默认名
   onToggleLock: (path: string) => void;
   onArchive: (path: string) => void;
   onSchedule: (path: string, minutes: number) => void;
   onProjectScan: () => void;
   onSelect: (path: string) => void;
-  onOpenFile: (node: FileNode) => void;
+  /** 打开文件；line 存在时定位到该行（全文搜索/树过滤点击） */
+  onOpenFile: (node: { path: string; name?: string; is_dir?: boolean }, line?: number) => void;
   /** 折叠为窄条（宽度由 Workbench 布局状态控制） */
   collapsed?: boolean;
   onToggleCollapse?: () => void;
 }
 
-/** 左侧导航：会话列表（每个目录 = 一个独立对话）+ 新建 + 折叠式文件树 */
+/** 左侧导航：会话列表（每个目录 = 一个独立对话）+ 新建 + 折叠式文件树 + 全文搜索 */
 export default function WorkspaceNav({
   workspaces,
   activeWs,
@@ -38,6 +48,7 @@ export default function WorkspaceNav({
   loadDir,
   onAdd,
   onRemove,
+  onRename,
   onToggleLock,
   onArchive,
   onSchedule,
@@ -55,6 +66,9 @@ export default function WorkspaceNav({
   /** 会话搜索与归档展开 */
   const [query, setQuery] = useState('');
   const [showArchived, setShowArchived] = useState(false);
+  /** 会话重命名弹层 */
+  const [renaming, setRenaming] = useState<Workspace | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
 
   // 文件树状态：子目录缓存 / 展开集合 / 加载中集合
   const [children, setChildren] = useState<Record<string, FileNode[]>>({});
@@ -62,12 +76,30 @@ export default function WorkspaceNav({
   const [loading, setLoading] = useState<Set<string>>(new Set());
   const [loadErr, setLoadErr] = useState<Record<string, string>>({});
 
+  /** 文件树过滤（B2）：输入即递归过滤出匹配文件/目录 */
+  const [filter, setFilter] = useState('');
+  const [filterHits, setFilterHits] = useState<{ node: FileNode; rel: string }[]>([]);
+  const [filtering, setFiltering] = useState(false);
+  const filterSeq = useRef(0);
+
+  /** 全文搜索面板（B1） */
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [kw, setKw] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [hitTrunc, setHitTrunc] = useState(false);
+  const [searchErr, setSearchErr] = useState('');
+
   /** 切换工作区时重置树并加载根目录 */
   useEffect(() => {
     setChildren({});
     setExpanded(new Set());
     setLoading(new Set());
     setLoadErr({});
+    setFilter('');
+    setFilterHits([]);
+    setSearchOpen(false);
+    setHits(null);
     if (activeWs) fetchDir(activeWs);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWs]);
@@ -107,6 +139,70 @@ export default function WorkspaceNav({
     }
   };
 
+  // ---------- 文件树过滤（B2） ----------
+  useEffect(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q || !activeWs) {
+      setFilterHits([]);
+      setFiltering(false);
+      return;
+    }
+    const seq = ++filterSeq.current;
+    setFiltering(true);
+    const timer = setTimeout(async () => {
+      const out: { node: FileNode; rel: string }[] = [];
+      let visits = 0;
+      const walk = async (dir: string, rel: string) => {
+        if (out.length >= 200 || visits >= 80) return;
+        visits++;
+        let nodes: FileNode[];
+        try {
+          nodes = await loadDir(dir);
+        } catch {
+          return;
+        }
+        for (const n of nodes) {
+          if (out.length >= 200) return;
+          const nrel = rel ? `${rel}/${n.name}` : n.name;
+          if (n.name.toLowerCase().includes(q)) out.push({ node: n, rel: nrel });
+          if (n.is_dir && !NAV_SKIP_DIRS.has(n.name.toLowerCase())) await walk(n.path, nrel);
+        }
+      };
+      await walk(activeWs, '');
+      if (filterSeq.current === seq) {
+        setFilterHits(out);
+        setFiltering(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, activeWs]);
+
+  // ---------- 全文搜索（B1） ----------
+  const runSearch = async () => {
+    const k = kw.trim();
+    if (!activeWs || k.length < 2 || searching) return;
+    setSearching(true);
+    setSearchErr('');
+    try {
+      const r = await searchWorkspace(activeWs, k);
+      setHits(r.matches);
+      setHitTrunc(r.truncated);
+    } catch (e) {
+      setSearchErr((e as Error).message || t('nav.searchFail'));
+      setHits(null);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  /** 搜索命中的相对路径 → 绝对路径（Windows 工作区用反斜杠拼接） */
+  const absHitPath = (relFile: string): string => {
+    if (!activeWs) return relFile;
+    const sep = activeWs.includes('\\') ? '\\' : '/';
+    return activeWs.replace(/[\\/]+$/, '') + sep + relFile.replace(/\//g, sep);
+  };
+
   const browseFolder = async () => {
     setBrowsing(true);
     setDialogErr('');
@@ -136,6 +232,12 @@ export default function WorkspaceNav({
     else closeDialog();
   };
 
+  const confirmRename = () => {
+    if (!renaming) return;
+    onRename(renaming.path, renameDraft.trim());
+    setRenaming(null);
+  };
+
   // 折叠态：48px 窄条（展开按钮 + 竖排标题）
   if (collapsed) {
     return (
@@ -154,6 +256,18 @@ export default function WorkspaceNav({
       </aside>
     );
   }
+
+  const navInputStyle: React.CSSProperties = {
+    width: '100%',
+    boxSizing: 'border-box',
+    border: '1px solid var(--border-hairline)',
+    borderRadius: 8,
+    padding: '8px 12px',
+    fontSize: 13,
+    outline: 'none',
+    background: 'var(--bg-card)',
+    color: 'var(--text-primary)'
+  };
 
   return (
     <aside className="card" style={{ padding: 14, display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1, position: 'relative' }}>
@@ -191,17 +305,7 @@ export default function WorkspaceNav({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={t('nav.searchPh')}
-          style={{
-            width: '100%',
-            boxSizing: 'border-box',
-            border: '1px solid var(--border-hairline)',
-            borderRadius: 8,
-            padding: '8px 12px',
-            fontSize: 13,
-            outline: 'none',
-            background: 'var(--bg-card)',
-            color: 'var(--text-primary)'
-          }}
+          style={navInputStyle}
         />
       </div>
 
@@ -226,7 +330,7 @@ export default function WorkspaceNav({
         {workspaces
           .filter((ws) => {
             const q = query.trim().toLowerCase();
-            const hit = !q || ws.name.toLowerCase().includes(q) || ws.path.toLowerCase().includes(q);
+            const hit = !q || (ws.alias || ws.name).toLowerCase().includes(q) || ws.path.toLowerCase().includes(q);
             if (!hit) return false;
             return showArchived || !ws.archived || ws.path === activeWs;
           })
@@ -240,6 +344,15 @@ export default function WorkspaceNav({
                 openContextMenu(e, [
                   { label: t('nav.switchTo'), disabled: active, onClick: () => onSelect(ws.path) },
                   { label: t('nav.copyPath'), onClick: () => copyText(ws.path) },
+                  { separator: true },
+                  {
+                    label: t('nav.rename'),
+                    onClick: () => {
+                      setRenaming(ws);
+                      setRenameDraft(ws.alias || ws.name);
+                    }
+                  },
+                  { label: t('nav.resetName'), disabled: !ws.alias, onClick: () => onRename(ws.path, '') },
                   { separator: true },
                   { label: ws.locked ? t('nav.unlock') : t('nav.lock'), onClick: () => onToggleLock(ws.path) },
                   { label: ws.archived ? t('nav.unarchive') : t('nav.archive'), onClick: () => onArchive(ws.path) },
@@ -285,7 +398,7 @@ export default function WorkspaceNav({
             >
               <span style={{ width: 7, height: 7, borderRadius: 2, flexShrink: 0, background: active ? 'var(--accent)' : '#CFCDC7' }} />
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, fontWeight: active ? 650 : 400, opacity: ws.archived && !active ? 0.55 : 1 }}>
-                {ws.name}
+                {ws.alias || ws.name}
               </span>
               {ws.scheduleMinutes ? (
                 <span title={t('nav.schedEvery', { n: ws.scheduleMinutes })} style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--accent)' }}>
@@ -345,14 +458,126 @@ export default function WorkspaceNav({
         )}
       </div>
 
-      {/* 折叠式文件树 */}
+      {/* 折叠式文件树 / 全文搜索面板 */}
       <div style={{ borderTop: '1px solid var(--border-hairline)', paddingTop: 10, flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         <div className="mono muted" style={{ fontSize: 11.5, marginBottom: 8, wordBreak: 'break-all' }}>
           {activeWs || '—'}
         </div>
-        <div style={{ overflow: 'auto', flex: 1 }}>
+
+        {/* 工具行：文件过滤 + 全文搜索开关 */}
+        {activeWs && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder={t('nav.filterPh')}
+              title={t('nav.filterTip')}
+              style={{ ...navInputStyle, padding: '5px 10px', fontSize: 12.5, flex: 1 }}
+            />
+            <button
+              className="btn-ghost"
+              onClick={() => {
+                setSearchOpen((v) => !v);
+                setHits(null);
+                setSearchErr('');
+              }}
+              title={t('nav.searchTip')}
+              style={{
+                padding: '4px 9px',
+                fontSize: 12.5,
+                flexShrink: 0,
+                ...(searchOpen ? { color: 'var(--accent)', borderColor: 'var(--accent)' } : {})
+              }}
+            >
+              🔍
+            </button>
+          </div>
+        )}
+
+        {/* 全文搜索面板：命中行列表，点击打开文件并跳到该行 */}
+        {activeWs && searchOpen && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', marginBottom: 8 }}>
+            <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+              <input
+                autoFocus
+                value={kw}
+                onChange={(e) => setKw(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && runSearch()}
+                placeholder={t('nav.searchPh2')}
+                style={{ ...navInputStyle, padding: '5px 10px', fontSize: 12.5, flex: 1 }}
+              />
+              <button className="btn-primary" style={{ fontSize: 12.5, padding: '4px 12px', flexShrink: 0 }} disabled={searching || kw.trim().length < 2} onClick={runSearch}>
+                {searching ? t('nav.searching') : t('nav.searchGo')}
+              </button>
+            </div>
+            <div style={{ overflow: 'auto', flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {searchErr && <div style={{ color: 'var(--danger)', fontSize: 12, padding: '4px 6px' }}>{searchErr}</div>}
+              {hits && hits.length === 0 && !searchErr && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>{t('nav.searchNoHit')}</div>}
+              {(hits || []).map((h, i) => (
+                <div
+                  key={i}
+                  className="selectable"
+                  onClick={() => onOpenFile({ path: absHitPath(h.file), name: h.file.split('/').pop(), is_dir: false }, h.line)}
+                  title={`${h.file}:${h.line}`}
+                  style={{
+                    padding: '5px 8px',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    cursor: 'pointer',
+                    background: 'transparent',
+                    lineHeight: 1.5
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-recessed)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                    <span className="mono" style={{ color: 'var(--accent)', fontSize: 11, flexShrink: 0 }}>{h.file.split('/').pop()}:{h.line}</span>
+                    <span className="muted" style={{ fontSize: 10.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{h.file}</span>
+                  </div>
+                  <div className="mono" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text-primary)', fontSize: 11.5 }}>{h.text.trim()}</div>
+                </div>
+              ))}
+              {hitTrunc && <div className="muted" style={{ fontSize: 11.5, padding: '4px 6px' }}>{t('nav.searchTrunc')}</div>}
+            </div>
+          </div>
+        )}
+
+        {/* 文件树（全文搜索面板打开时隐藏） */}
+        <div style={{ overflow: 'auto', flex: 1, display: searchOpen ? 'none' : undefined }}>
           {!activeWs && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>{t('nav.browseAfterPick')}</div>}
-          {activeWs &&
+          {activeWs && filter.trim() && (
+            <>
+              {filtering && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>{t('nav.filtering')}</div>}
+              {!filtering && filterHits.length === 0 && <div className="muted" style={{ fontSize: 12, padding: '4px 6px' }}>{t('nav.filterNoHit')}</div>}
+              {filterHits.map(({ node, rel }) => (
+                <div
+                  key={node.path}
+                  onClick={() => !node.is_dir && onOpenFile(node)}
+                  title={rel}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 8px',
+                    borderRadius: 6,
+                    cursor: node.is_dir ? 'default' : 'pointer',
+                    fontSize: 12.5
+                  }}
+                  onMouseEnter={(e) => !node.is_dir && (e.currentTarget.style.background = 'var(--bg-recessed)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span style={{ width: 12, textAlign: 'center', color: node.is_dir ? 'var(--text-muted)' : 'var(--accent)', fontSize: 11, flexShrink: 0 }}>
+                    {node.is_dir ? '▸' : '·'}
+                  </span>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
+                  <span className="muted" style={{ fontSize: 10.5, marginLeft: 'auto', flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {rel}
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+          {activeWs && !filter.trim() &&
             (children[activeWs] || []).map((n) => (
               <TreeNode
                 key={n.path}
@@ -367,10 +592,10 @@ export default function WorkspaceNav({
                 onOpenFile={onOpenFile}
               />
             ))}
-          {activeWs && loading.has(activeWs) && !children[activeWs] && (
+          {activeWs && !filter.trim() && loading.has(activeWs) && !children[activeWs] && (
             <div className="muted" style={{ fontSize: 12, padding: '4px 8px' }}>{t('nav.loading')}</div>
           )}
-          {activeWs && loadErr[activeWs] && (
+          {activeWs && !filter.trim() && loadErr[activeWs] && (
             <div style={{ color: 'var(--danger)', fontSize: 12, padding: '4px 8px' }}>{loadErr[activeWs]}</div>
           )}
         </div>
@@ -406,16 +631,7 @@ export default function WorkspaceNav({
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && confirmAdd()}
                 placeholder="D:\projects\my-app"
-                style={{
-                  flex: 1,
-                  border: '1px solid var(--border-hairline)',
-                  borderRadius: 8,
-                  padding: '8px 12px',
-                  fontSize: 13,
-                  outline: 'none',
-                  background: 'var(--bg-card)',
-                  color: 'var(--text-primary)'
-                }}
+                style={navInputStyle}
               />
               <button className="btn-ghost" onClick={browseFolder} disabled={browsing}>
                 {browsing ? t('nav.opening') : t('nav.browse')}
@@ -427,6 +643,40 @@ export default function WorkspaceNav({
               <button className="btn-primary" onClick={confirmAdd} disabled={!draft.trim()}>
                 {t('common.add')}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 会话重命名弹层 */}
+      {renaming && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(38,37,35,0.35)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100
+          }}
+          onClick={() => setRenaming(null)}
+        >
+          <div className="card" style={{ width: 400, padding: 20 }} onClick={(e) => e.stopPropagation()}>
+            <strong style={{ fontSize: 15 }}>{t('nav.renameTitle')}</strong>
+            <div className="muted" style={{ fontSize: 12.5, margin: '6px 0 12px', wordBreak: 'break-all' }}>{renaming.path}</div>
+            <input
+              autoFocus
+              value={renameDraft}
+              onChange={(e) => setRenameDraft(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && confirmRename()}
+              placeholder={renaming.name}
+              style={navInputStyle}
+            />
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 6 }}>{t('nav.renameHint')}</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
+              <button className="btn-ghost" onClick={() => setRenaming(null)}>{t('common.cancel')}</button>
+              <button className="btn-primary" onClick={confirmRename}>{t('common.save')}</button>
             </div>
           </div>
         </div>
@@ -455,7 +705,7 @@ function TreeNode({
   loadErr: Record<string, string>;
   currentFile: { path: string } | null;
   onToggle: (node: FileNode) => void;
-  onOpenFile: (node: FileNode) => void;
+  onOpenFile: (node: { path: string; name?: string; is_dir?: boolean }, line?: number) => void;
 }) {
   useLang();
   const active = currentFile?.path === node.path;

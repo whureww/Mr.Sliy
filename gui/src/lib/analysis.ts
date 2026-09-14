@@ -90,3 +90,44 @@ export const severityColor = (sev?: string): string => {
   if (s.includes('medium') || s.includes('warn')) return 'var(--warning)';
   return 'var(--text-muted)';
 };
+
+/** 对话导出 Markdown：把会话消息序列化为可分享的 .md 文本 */
+export const chatToMarkdown = (title: string, msgs: ChatMessage[]): string => {
+  const lines: string[] = [`# MR·SLIY 对话记录 — ${title}`, '', `- 导出时间：${new Date().toLocaleString()}`, `- 消息数：${msgs.length}`, '', '---', ''];
+  for (const m of msgs) {
+    const who = m.role === 'user' ? '🙋 用户' : '🤖 助手';
+    lines.push(`## ${who} · ${m.time || ''}`, '');
+    if (m.steps?.length) {
+      const ms = m.elapsed != null ? ` · ${(m.elapsed / 1000).toFixed(1)}s` : '';
+      const total = m.total != null ? ` · 共 ${m.total} 个问题` : '';
+      lines.push(`> 分析完成${ms}${total}${m.lang ? ` · ${m.lang}` : ''}`, '');
+      if (m.issues?.length) {
+        lines.push('| 严重度 | 类型 | 行 | 说明 |', '| --- | --- | --- | --- |');
+        for (const i of m.issues) {
+          const msg = String(i.message || '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
+          lines.push(`| ${i.severity || '-'} | ${i.issueType || '-'} | ${i.line ?? '-'} | ${msg} |`);
+        }
+        lines.push('');
+      }
+    }
+    if (m.projScan) {
+      const p = m.projScan;
+      lines.push(
+        `> 项目扫描：${p.scannedFiles}/${p.totalFiles} 文件 · 共 ${p.totalIssues} 个问题 · ${(p.durationMs / 1000).toFixed(1)}s`,
+        ''
+      );
+    }
+    if (m.text) lines.push(m.text, '');
+    if (m.error) lines.push(`> ⚠️ ${m.error}`, '');
+    if (m.mod) {
+      const st = m.modStatus || 'pending';
+      const risk = m.mod.riskLevel ? ` · 风险 ${m.mod.riskLevel}` : '';
+      lines.push(`> 🔧 代码修改方案${risk}（状态：${st}）`, '');
+    }
+    if (m.llm) {
+      lines.push(`> 用量：${m.llm.tokens} tokens · ${m.llm.requests} 次请求${m.llm.cacheHitRate != null ? ` · 缓存命中 ${m.llm.cacheHitRate}%` : ''}`, '');
+    }
+    lines.push('', '---', '');
+  }
+  return lines.join('\n');
+};
