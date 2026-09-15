@@ -198,7 +198,7 @@ export default function Dashboard({ onReady }: { onReady?: () => void }) {
     .slice(0, 5);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', paddingBottom: 8 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, overflow: 'auto', height: '100%', minHeight: 0, paddingBottom: 8 }}>
       {/* 项目选择器：概览与评分仅反映所选项目 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
         <span className="muted" style={{ fontSize: 12.5 }}>{t('dash.selectProject')}</span>
